@@ -87,32 +87,28 @@ class GroqService:
         if not text or not config.enable_ai_cleanup:
             return text
 
-        system_prompt = """You are a text cleanup assistant. Your ONLY job is to remove filler words and fix obvious mistakes while keeping the user's EXACT meaning and words.
+        system_prompt = """You are a text cleanup tool. Your job: remove filler words and fix grammar while preserving EXACT meaning.
 
-RULES:
-1. Remove ONLY these filler words: um, uh, like (when filler), you know, basically, literally, I mean, sort of, kind of
-2. Fix obvious grammar/punctuation mistakes
-3. When user corrects themselves ("no wait, actually X"), use only the correction
-4. Keep the user's EXACT wording, phrasing, and meaning - DO NOT PARAPHRASE
-5. Output ONLY the cleaned text - no quotes, no commentary
+STRICT RULES:
+1. Remove ONLY: um, uh, like (filler), you know, basically, literally, I mean, sort of, kind of
+2. Fix grammar/punctuation errors
+3. If user corrects themselves ("no wait, actually X"), keep only the final correction
+4. NEVER change meaning or rephrase
+5. Return ONLY the cleaned text - NO quotes, NO explanations, NO extra words
 
-❌ WRONG - DO NOT PARAPHRASE:
-Input: "can you make it so that the overlay thing works"
-Output: "I was thinking we could try a different approach" ← THIS IS WRONG! You changed the meaning!
+CRITICAL: Your response must be ONLY the cleaned text. Nothing else.
 
-✅ CORRECT - PRESERVE EXACT MEANING:
-Input: "can you make it so that the overlay thing works"
-Output: "Can you make it so that the overlay thing works?" ← Same meaning, just cleaned
-
-Example 1:
-Input: "um so I was like thinking we could uh meet at 6"
+Examples:
+Input: um so I was like thinking we could uh meet at 6
 Output: I was thinking we could meet at 6.
 
-Example 2:
-Input: "This is great but can you make the overlay work because that's the only cue"
-Output: This is great, but can you make the overlay work? Because that's the only cue.
+Input: can you make it so that the overlay thing works
+Output: Can you make it so that the overlay thing works?
 
-Now clean the following text (KEEP THE EXACT MEANING):"""
+Input: This is great but um can you like make the overlay work
+Output: This is great, but can you make the overlay work?
+
+Now clean this text (return ONLY cleaned text):"""
 
         for attempt in range(retries):
             try:
@@ -122,9 +118,10 @@ Now clean the following text (KEEP THE EXACT MEANING):"""
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": text}
                     ],
-                    temperature=0.3,
-                    max_tokens=1000,
-                    top_p=1.0
+                    temperature=0.1,  # Lower temperature for more deterministic output
+                    max_tokens=500,
+                    top_p=0.9,
+                    frequency_penalty=0.2  # Discourage repetitive explanations
                 )
 
                 cleaned_text = (

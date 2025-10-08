@@ -5,6 +5,7 @@ import threading
 import time
 import numpy as np
 import webrtcvad
+import noisereduce as nr
 from typing import Optional, Callable
 from pathlib import Path
 
@@ -141,20 +142,106 @@ class AudioRecorder:
             # If VAD fails, assume it's speech
             return True
 
+    def _save_debug_audio(self, audio_data: np.ndarray, suffix: str):
+        """
+        Save audio data to file for debugging
+
+        Args:
+            audio_data: Audio as numpy array
+            suffix: Filename suffix (e.g., 'before', 'after')
+        """
+        try:
+            from datetime import datetime
+
+            # Create debug directory
+            debug_dir = Path.home() / ".groq_flow" / "debug_audio"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = debug_dir / f"audio_{timestamp}_{suffix}.wav"
+
+            # Convert to bytes and save
+            audio_bytes = audio_data.astype(np.int16).tobytes()
+
+            with wave.open(str(filename), 'wb') as wf:
+                wf.setnchannels(self.channels)
+                wf.setsampwidth(self.audio.get_sample_size(pyaudio.paInt16))
+                wf.setframerate(self.sample_rate)
+                wf.writeframes(audio_bytes)
+
+            print(f"💾 Debug audio saved: {filename}")
+
+        except Exception as e:
+            print(f"⚠️ Failed to save debug audio: {e}")
+
+    def _apply_noise_reduction(self, audio_data: np.ndarray) -> np.ndarray:
+        """
+        Apply noise reduction to audio data
+
+        Args:
+            audio_data: Audio as numpy array
+
+        Returns:
+            Noise-reduced audio as numpy array
+        """
+        # Save original audio in debug mode
+        if config.debug and config.enable_noise_reduction:
+            self._save_debug_audio(audio_data, "before_nr")
+
+        # Check if noise reduction is enabled
+        if not config.enable_noise_reduction:
+            return audio_data
+
+        try:
+            # Apply noise reduction
+            # stationary=True assumes constant background noise (better for most cases)
+            # prop_decrease controls reduction strength (0.0 to 1.0)
+            strength = config.noise_reduction_strength
+
+            reduced_noise = nr.reduce_noise(
+                y=audio_data,
+                sr=self.sample_rate,
+                stationary=True,
+                prop_decrease=strength
+            )
+
+            # Save processed audio in debug mode
+            if config.debug:
+                self._save_debug_audio(reduced_noise, "after_nr")
+                print(
+                    f"✨ Noise reduction applied (strength: {strength:.1%}, debug samples saved)")
+
+            return reduced_noise
+        except Exception as e:
+            if config.debug:
+                print(f"⚠️ Noise reduction failed: {e}, using original audio")
+            return audio_data
+
     def _frames_to_wav(self) -> bytes:
         """
-        Convert recorded frames to WAV format
+        Convert recorded frames to WAV format with noise reduction
 
         Returns:
             WAV audio data as bytes
         """
-        wav_buffer = io.BytesIO()
+        # Convert frames to numpy array
+        audio_bytes = b''.join(self.frames)
+        audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
 
+        # Apply noise reduction
+        audio_array = self._apply_noise_reduction(audio_array)
+
+        # Convert back to bytes
+        audio_bytes = audio_array.astype(np.int16).tobytes()
+
+        # Create WAV file
+        wav_buffer = io.BytesIO()
         with wave.open(wav_buffer, 'wb') as wf:
             wf.setnchannels(self.channels)
             wf.setsampwidth(self.audio.get_sample_size(pyaudio.paInt16))
             wf.setframerate(self.sample_rate)
-            wf.writeframes(b''.join(self.frames))
+            wf.writeframes(audio_bytes)
 
         return wav_buffer.getvalue()
 

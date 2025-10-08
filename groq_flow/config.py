@@ -75,6 +75,18 @@ class Config:
     def chunk_size(self) -> int:
         return int(self.get("CHUNK_SIZE", 480))
 
+    @property
+    def enable_noise_reduction(self) -> bool:
+        value = self.get("ENABLE_NOISE_REDUCTION", "true")
+        return value.lower() in ("true", "1", "yes") if isinstance(value, str) else bool(value)
+
+    @property
+    def noise_reduction_strength(self) -> float:
+        """Noise reduction strength (0.0 to 1.0)"""
+        value = float(self.get("NOISE_REDUCTION_STRENGTH", "0.8"))
+        # Clamp between 0.0 and 1.0
+        return max(0.0, min(1.0, value))
+
     # Hotkey Configuration
     @property
     def hotkey(self) -> str:

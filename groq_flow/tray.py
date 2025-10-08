@@ -21,7 +21,7 @@ class SystemTrayApp:
 
     def create_icon_image(self, color="green"):
         """
-        Create a simple icon image programmatically
+        Create a clean modern icon with transparent background
 
         Args:
             color: Icon color (green, red, orange)
@@ -29,9 +29,9 @@ class SystemTrayApp:
         Returns:
             PIL Image
         """
-        # Create a 64x64 image with a colored circle
         size = 64
-        image = Image.new('RGB', (size, size), color='black')
+        # Create transparent background
+        image = Image.new('RGBA', (size, size), (0, 0, 0, 0))
         dc = ImageDraw.Draw(image)
 
         # Color mapping
@@ -44,14 +44,36 @@ class SystemTrayApp:
 
         fill_color = colors.get(color, colors['green'])
 
-        # Draw a circle (microphone representation)
-        margin = 8
-        dc.ellipse([margin, margin, size-margin, size-margin], fill=fill_color)
+        # Draw modern microphone icon
+        # Microphone capsule (top rounded rectangle)
+        mic_width = 20
+        mic_height = 28
+        mic_x = (size - mic_width) // 2
+        mic_y = 12
 
-        # Draw inner circle (microphone center)
-        inner_margin = 20
-        dc.ellipse([inner_margin, inner_margin, size-inner_margin, size-inner_margin],
-                   fill='white')
+        # Draw rounded rectangle for mic capsule
+        dc.rounded_rectangle(
+            [mic_x, mic_y, mic_x + mic_width, mic_y + mic_height],
+            radius=10,
+            fill=fill_color
+        )
+
+        # Draw mic stand (vertical line)
+        stand_width = 3
+        stand_x = size // 2 - stand_width // 2
+        dc.rectangle(
+            [stand_x, mic_y + mic_height, stand_x + stand_width, size - 12],
+            fill=fill_color
+        )
+
+        # Draw mic base (horizontal line)
+        base_width = 16
+        base_height = 3
+        base_x = (size - base_width) // 2
+        dc.rectangle(
+            [base_x, size - 12, base_x + base_width, size - 12 + base_height],
+            fill=fill_color
+        )
 
         return image
 
