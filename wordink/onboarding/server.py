@@ -7,12 +7,81 @@ import time
 import urllib.parse
 import webbrowser
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from ..config import config
 
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+def probe_hotkey_availability(hotkey_str: str) -> tuple[bool, str]:
+    """
+    Dynamically test if a hotkey is available or already claimed by another app/OS.
+    Uses Win32 RegisterHotKey probe on Windows.
+    """
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            MODS = {'alt': 0x0001, 'ctrl': 0x0002, 'shift': 0x0004, 'win': 0x0008}
+            parts = [p.strip().lower() for p in hotkey_str.split("+")]
+            mod_val = 0
+            key_part = ""
+            for p in parts:
+                if p in MODS:
+                    mod_val |= MODS[p]
+                else:
+                    key_part = p.upper()
+
+            if not key_part and not mod_val:
+                return False, "Invalid hotkey format"
+
+            if len(key_part) == 1:
+                vk = ord(key_part)
+            elif key_part == "SPACE":
+                vk = 0x20
+            elif key_part.startswith("F") and key_part[1:].isdigit():
+                vk = 0x70 + int(key_part[1:]) - 1
+            elif key_part == "PAUSE":
+                vk = 0x13
+            elif key_part == "INSERT":
+                vk = 0x2D
+            elif key_part in ("RETURN", "ENTER"):
+                vk = 0x0D
+            elif key_part == "TAB":
+                vk = 0x09
+            else:
+                vk = 0x20
+
+            # Test register with temporary ID
+            test_id = 19999
+            res = user32.RegisterHotKey(None, test_id, mod_val | 0x4000, vk)
+            if res != 0:
+                user32.UnregisterHotKey(None, test_id)
+                return True, "Available"
+            err = kernel32.GetLastError()
+            if err == 1409:
+                return False, "Already in use by another application (Conflict)"
+            return False, f"System reserved (Error {err})"
+        except Exception as e:
+            return True, f"Unverified ({e})"
+    elif sys.platform.startswith("linux"):
+        # Check hyprctl binds if on Hyprland
+        try:
+            import subprocess
+            r = subprocess.run(["hyprctl", "binds", "-j"], capture_output=True, text=True, timeout=2)
+            if r.returncode == 0:
+                binds = json.loads(r.stdout)
+                for b in binds:
+                    # e.g. modmask and key
+                    if hotkey_str.lower() in str(b).lower():
+                        return False, f"Bound in Hyprland to {b.get('dispatcher', '')}"
+        except Exception:
+            pass
+        return True, "Available"
+    return True, "Available"
 
 
 class OnboardingHandler(http.server.SimpleHTTPRequestHandler):
@@ -27,6 +96,8 @@ class OnboardingHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_mics()
         elif parsed.path == "/api/mic_test":
             self._handle_mic_test()
+        elif parsed.path == "/api/scan_hotkeys":
+            self._handle_scan_hotkeys()
         elif parsed.path == "/api/stats":
             self._handle_stats()
         elif parsed.path in ("/", "/index.html"):
@@ -46,6 +117,8 @@ class OnboardingHandler(http.server.SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/validate_key":
             self._handle_validate_key(data)
+        elif parsed.path == "/api/probe_hotkey":
+            self._handle_probe_hotkey(data)
         elif parsed.path == "/api/save":
             self._handle_save(data)
         else:
@@ -119,6 +192,39 @@ class OnboardingHandler(http.server.SimpleHTTPRequestHandler):
 
         self._send_json({"audio_level": level})
 
+    def _handle_scan_hotkeys(self):
+        candidates = [
+            {"hotkey": "alt+d", "label": "Alt + D", "desc": "Ergonomic left hand ('D' for Dictate)", "recommended": True},
+            {"hotkey": "ctrl+space", "label": "Ctrl + Space", "desc": "Common coding / quick launcher trigger", "recommended": True},
+            {"hotkey": "alt+space", "label": "Alt + Space", "desc": "Popular launcher chord (often used by Gemini/PowerToys)", "recommended": False},
+            {"hotkey": "ctrl+shift+space", "label": "Ctrl + Shift + Space", "desc": "Wispr Flow default (often taken by IDEs)", "recommended": False},
+            {"hotkey": "alt+q", "label": "Alt + Q", "desc": "Ultra-fast thumb + index key", "recommended": True},
+            {"hotkey": "ctrl+alt+space", "label": "Ctrl + Alt + Space", "desc": "Safe 3-key combo with almost zero conflict", "recommended": True},
+            {"hotkey": "f13", "label": "F13", "desc": "Dedicated macro key / remapped CapsLock", "recommended": False},
+            {"hotkey": "pause", "label": "Pause / Break", "desc": "Dedicated standalone key", "recommended": False},
+            {"hotkey": "insert", "label": "Insert", "desc": "Dedicated standalone key above arrow cluster", "recommended": False},
+        ]
+
+        results = []
+        for c in candidates:
+            avail, reason = probe_hotkey_availability(c["hotkey"])
+            results.append({
+                **c,
+                "available": avail,
+                "reason": reason
+            })
+
+        self._send_json({"hotkeys": results})
+
+    def _handle_probe_hotkey(self, data: Dict[str, Any]):
+        hotkey = data.get("hotkey", "").strip()
+        if not hotkey:
+            self._send_json({"available": False, "reason": "Empty hotkey"}, status=400)
+            return
+
+        avail, reason = probe_hotkey_availability(hotkey)
+        self._send_json({"hotkey": hotkey, "available": avail, "reason": reason})
+
     def _handle_validate_key(self, data: Dict[str, Any]):
         key = data.get("api_key", "").strip()
         if not key:
@@ -185,7 +291,7 @@ def start_onboarding_server(port: int = 18981, open_browser: bool = True):
     """Start local onboarding server and open browser"""
     server = http.server.HTTPServer(("127.0.0.1", port), OnboardingHandler)
     url = f"http://localhost:{port}"
-    print(f"🚀 TurboFlow Onboarding Wizard: {url}")
+    print(f"🚀 WordInk Setup & Dashboard: {url}")
 
     if open_browser:
         threading.Thread(target=lambda: (time.sleep(0.5), webbrowser.open(url)), daemon=True).start()
