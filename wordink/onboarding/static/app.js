@@ -257,7 +257,51 @@ document.addEventListener("DOMContentLoaded", () => {
         return str.split("+").map(s => s.trim().charAt(0).toUpperCase() + s.trim().slice(1)).join(" + ");
     }
 
-    window.addEventListener("keydown", (e) => {
+    // --- HOTKEY COLLISION SCANNER & RECOMMENDATIONS ---
+    const btnRescanHotkeys = document.getElementById("btn-rescan-hotkeys");
+    const hotkeyCandidatesList = document.getElementById("hotkey-candidates-list");
+
+    async function loadHotkeyScan() {
+        if (!hotkeyCandidatesList) return;
+        hotkeyCandidatesList.innerHTML = `<div class="scanning-placeholder">Probing operating system hotkeys...</div>`;
+
+        try {
+            const res = await fetch("/api/scan_hotkeys");
+            const data = await res.json();
+            hotkeyCandidatesList.innerHTML = "";
+
+            (data.hotkeys || []).forEach(item => {
+                const chip = document.createElement("div");
+                chip.className = `hotkey-chip ${item.available ? 'available' : 'conflict'} ${state.hotkey.toLowerCase() === item.hotkey.toLowerCase() ? 'selected' : ''}`;
+                chip.innerHTML = `
+                    <div class="chip-header">
+                        <span class="chip-kbd">${item.label}</span>
+                        <span class="chip-status-badge ${item.available ? 'available' : 'conflict'}">
+                            ${item.available ? '✓ Available' : '✗ In Use'}
+                        </span>
+                    </div>
+                    <div class="chip-desc">${item.desc} — ${item.reason}</div>
+                `;
+                if (item.available) {
+                    chip.addEventListener("click", () => {
+                        document.querySelectorAll(".hotkey-chip").forEach(c => c.classList.remove("selected"));
+                        chip.classList.add("selected");
+                        state.hotkey = item.hotkey;
+                        activeHotkeyDisplay.textContent = formatHotkey(item.hotkey);
+                    });
+                }
+                hotkeyCandidatesList.appendChild(chip);
+            });
+        } catch (e) {
+            hotkeyCandidatesList.innerHTML = `<div class="error-msg">Could not probe hotkeys: ${e.message}</div>`;
+        }
+    }
+
+    if (btnRescanHotkeys) {
+        btnRescanHotkeys.addEventListener("click", loadHotkeyScan);
+    }
+
+    window.addEventListener("keydown", async (e) => {
         const prettyKey = formatKeyName(e);
 
         // Update Detected Key Visualizer
@@ -286,6 +330,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
             const mainKey = prettyKey.toLowerCase();
             const fullCombo = [...modifiers, mainKey].join("+");
+
+            // Probe server in real-time to check for conflicts
+            try {
+                const probeRes = await fetch("/api/probe_hotkey", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ hotkey: fullCombo })
+                });
+                const probeData = await probeRes.json();
+                if (!probeData.available) {
+                    if (layoutTag) layoutTag.textContent = `⚠️ ${formatHotkey(fullCombo)} is ALREADY in use by another app!`;
+                } else {
+                    if (layoutTag) layoutTag.textContent = `✓ ${formatHotkey(fullCombo)} is available and set!`;
+                }
+            } catch (err) {}
+
             state.hotkey = fullCombo;
             activeHotkeyDisplay.textContent = formatHotkey(fullCombo);
             state.isRecordingHotkey = false;
@@ -389,4 +449,6 @@ document.addEventListener("DOMContentLoaded", () => {
     // Init
     loadStatus();
     loadMics();
+    loadHotkeyScan();
 });
+

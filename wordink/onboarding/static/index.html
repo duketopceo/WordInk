@@ -125,10 +125,22 @@
                     <h2>Interactive Keyboard Visualizer & Hotkey Builder</h2>
                     <p class="subtitle">Press any key on your keyboard right now to test layout detection, or click "Record Hotkey" to set your shortcut.</p>
 
+                    <!-- Recommended Hotkeys & Conflict Scanner -->
+                    <div class="recommended-hotkeys-section">
+                        <div class="section-subhead">
+                            <h3>Recommended Hotkeys & System Conflict Scan</h3>
+                            <button id="btn-rescan-hotkeys" class="btn btn-sm btn-secondary">↻ Rescan System</button>
+                        </div>
+                        <p class="subtitle-small">WordInk actively probes your operating system to see which shortcuts are available vs already in use by Gemini, Copilot, PowerToys, Discord, etc.:</p>
+                        <div id="hotkey-candidates-list" class="hotkey-grid">
+                            <div class="scanning-placeholder">Scanning system hotkeys...</div>
+                        </div>
+                    </div>
+
                     <!-- Live Keypress Visualizer Display -->
                     <div class="key-tester-stage">
                         <div class="visualizer-header">
-                            <span>Detected Key On Your Keyboard:</span>
+                            <span>Press Any Key On Your Physical Keyboard:</span>
                             <span id="keyboard-layout-tag" class="tag">Auto-Detecting Layout</span>
                         </div>
                         <div class="key-display-pill" id="live-key-display">
