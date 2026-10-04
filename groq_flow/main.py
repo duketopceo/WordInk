@@ -14,13 +14,12 @@ def check_requirements():
     from .config import config
 
     # Check API key
-    if not config.groq_api_key:
-        print("❌ ERROR: GROQ_API_KEY not configured!")
+    if not config.groq_api_key or config.groq_api_key in ("your_groq_key_here", "your_groq_api_key_here", ""):
+        print("❌ ERROR: Valid GROQ_API_KEY not configured!")
         print()
         print("Please set your Groq API key:")
-        print("1. Copy .env.example to .env")
-        print("2. Edit .env and add your Groq API key")
-        print("3. Get your API key from: https://console.groq.com/")
+        print("1. Edit .env and paste your Groq API key")
+        print("2. Get your free API key from: https://console.groq.com/keys")
         print()
         return False
 
