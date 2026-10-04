@@ -30,8 +30,8 @@ WordInk turns spoken thoughts into immediate text at the speed of thought. Built
 Clone your fork and install dependencies via `uv`:
 
 ```bash
-git clone https://github.com/duketopceo/wordink.git
-cd wordink
+git clone https://github.com/duketopceo/WordInk.git
+cd WordInk
 
 # Install dependencies and editable package
 uv sync
