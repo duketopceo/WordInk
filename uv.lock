@@ -186,43 +186,6 @@ wheels = [
 ]
 
 [[package]]
-name = "groq-flow"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "groq" },
-    { name = "keyboard" },
-    { name = "noisereduce" },
-    { name = "numpy" },
-    { name = "pillow" },
-    { name = "pyaudio" },
-    { name = "pyautogui" },
-    { name = "pyperclip" },
-    { name = "pystray" },
-    { name = "python-dotenv" },
-    { name = "scipy" },
-    { name = "setuptools" },
-    { name = "webrtcvad" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "groq", specifier = ">=0.11.0" },
-    { name = "keyboard", specifier = ">=0.13.5" },
-    { name = "noisereduce", specifier = ">=3.0.0" },
-    { name = "numpy", specifier = ">=1.26.4" },
-    { name = "pillow", specifier = ">=10.4.0" },
-    { name = "pyaudio", specifier = ">=0.2.14" },
-    { name = "pyautogui", specifier = ">=0.9.54" },
-    { name = "pyperclip", specifier = ">=1.9.0" },
-    { name = "pystray", specifier = ">=0.19.5" },
-    { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "scipy", specifier = ">=1.11.0" },
-    { name = "setuptools", specifier = ">=68.0.0,<81.0.0" },
-    { name = "webrtcvad", specifier = ">=2.0.10" },
-]
-
-[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3577,3 +3540,40 @@ name = "webrtcvad"
 version = "2.0.10"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/89/34/e2de2d97f3288512b9ea56f92e7452f8207eb5a0096500badf9dfd48f5e6/webrtcvad-2.0.10.tar.gz", hash = "sha256:f1bed2fb25b63fb7b1a55d64090c993c9c9167b28485ae0bcdd81cf6ede96aea", size = 66156, upload-time = "2017-01-07T23:05:18.732Z" }
+
+[[package]]
+name = "wordink"
+version = "0.2.0"
+source = { editable = "." }
+dependencies = [
+    { name = "groq" },
+    { name = "keyboard" },
+    { name = "noisereduce" },
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "pyaudio" },
+    { name = "pyautogui" },
+    { name = "pyperclip" },
+    { name = "pystray" },
+    { name = "python-dotenv" },
+    { name = "scipy" },
+    { name = "setuptools" },
+    { name = "webrtcvad" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "groq", specifier = ">=0.11.0" },
+    { name = "keyboard", specifier = ">=0.13.5" },
+    { name = "noisereduce", specifier = ">=3.0.0" },
+    { name = "numpy", specifier = ">=1.26.4" },
+    { name = "pillow", specifier = ">=10.4.0" },
+    { name = "pyaudio", specifier = ">=0.2.14" },
+    { name = "pyautogui", specifier = ">=0.9.54" },
+    { name = "pyperclip", specifier = ">=1.9.0" },
+    { name = "pystray", specifier = ">=0.19.5" },
+    { name = "python-dotenv", specifier = ">=1.0.1" },
+    { name = "scipy", specifier = ">=1.11.0" },
+    { name = "setuptools", specifier = ">=68.0.0,<81.0.0" },
+    { name = "webrtcvad", specifier = ">=2.0.10" },
+]
