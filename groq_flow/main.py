@@ -23,11 +23,26 @@ def check_requirements():
         print()
         return False
 
-    return True
+def ensure_single_instance():
+    """Ensure only one instance of Groq Flow runs at a time"""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            mutex_name = "Local\\GroqFlow_SingleInstance_Mutex"
+            # Keep mutex handle alive for lifetime of process
+            global _groq_flow_mutex
+            _groq_flow_mutex = kernel32.CreateMutexW(None, False, mutex_name)
+            if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+                print("ℹ️ Groq Flow is already running.")
+                sys.exit(0)
+        except Exception:
+            pass
 
 
 def main():
     """Main entry point"""
+    ensure_single_instance()
     print("="*60)
     print("🎤 Groq Flow - AI-Powered Speech-to-Text")
     print("   A Wispr Flow Alternative using Groq API")
