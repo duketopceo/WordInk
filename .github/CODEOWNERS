@@ -1,0 +1,12 @@
+* @duketopceo
+
+# Risk-weighted: a bad change here breaks dictation latency, paste, or boot.
+/wordink/engine.py @duketopceo
+/wordink/groq_service.py @duketopceo
+/wordink/audio.py @duketopceo
+/wordink/text_inserter.py @duketopceo
+/wordink/config.py @duketopceo
+/wordink/onboarding/server.py @duketopceo
+/wordink/telemetry/ @duketopceo
+pyproject.toml @duketopceo
+uv.lock @duketopceo
