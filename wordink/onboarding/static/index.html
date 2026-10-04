@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WordInk — Speech-to-Text Setup & Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">🖋️</span>
+                <span class="logo-text">Word<span class="gradient-text">Ink</span></span>
+                <span class="badge">v0.2.0</span>
+            </div>
+            <div class="header-nav">
+                <button class="nav-tab active" data-tab="setup">Setup Wizard</button>
+                <button class="nav-tab" data-tab="telemetry">Live Telemetry</button>
+                <button class="nav-tab" data-tab="tester">Key Visualizer</button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- TAB 1: SETUP WIZARD -->
+            <section id="tab-setup" class="tab-pane active">
+                <div class="steps-progress">
+                    <div class="step-dot active" data-step="1"><span>1</span> API Key</div>
+                    <div class="step-line"></div>
+                    <div class="step-dot" data-step="2"><span>2</span> Model</div>
+                    <div class="step-line"></div>
+                    <div class="step-dot" data-step="3"><span>3</span> Microphone</div>
+                    <div class="step-line"></div>
+                    <div class="step-dot" data-step="4"><span>4</span> Hotkey</div>
+                    <div class="step-line"></div>
+                    <div class="step-dot" data-step="5"><span>5</span> Finish</div>
+                </div>
+
+                <!-- Step 1: API Key -->
+                <div class="card wizard-step active" id="step-1">
+                    <h2>Connect Your Groq API Key</h2>
+                    <p class="subtitle">WordInk uses Groq Whisper Turbo for instant (~300ms) transcription. Groq includes up to 2 hours of audio free per day.</p>
+                    
+                    <div class="input-group">
+                        <label for="groq-key">Groq API Key</label>
+                        <div class="input-with-button">
+                            <input type="password" id="groq-key" placeholder="gsk_..." spellcheck="false" autocomplete="off">
+                            <button id="btn-validate-key" class="btn btn-primary">Test & Validate</button>
+                        </div>
+                        <div id="key-validation-status" class="status-msg"></div>
+                    </div>
+
+                    <div class="cta-row">
+                        <a href="https://console.groq.com/keys" target="_blank" class="btn btn-secondary">Get Free API Key on Groq ↗</a>
+                        <button class="btn btn-accent btn-next" data-next="2" disabled id="btn-next-1">Continue →</button>
+                    </div>
+                </div>
+
+                <!-- Step 2: Model Selection -->
+                <div class="card wizard-step" id="step-2">
+                    <h2>Select Voice Model</h2>
+                    <p class="subtitle">Whisper Large V3 Turbo is pre-selected for sub-second response times and high accuracy.</p>
+
+                    <div class="model-cards">
+                        <div class="model-card selected" data-model="whisper-large-v3-turbo">
+                            <div class="model-badge">Recommended</div>
+                            <div class="model-title">Whisper Large V3 Turbo</div>
+                            <div class="model-desc">Sub-second transcription latency (~300ms). Perfect for fast flow, punctuation, and coding.</div>
+                            <div class="model-metrics">
+                                <span>⚡ ~300ms</span>
+                                <span>💰 Free Tier Eligible ($0.04/hr)</span>
+                            </div>
+                        </div>
+                        <div class="model-card" data-model="whisper-large-v3">
+                            <div class="model-title">Whisper Large V3 (Standard)</div>
+                            <div class="model-desc">Standard large model. Slightly higher latency (~700ms), great for dense foreign accents.</div>
+                            <div class="model-metrics">
+                                <span>⚡ ~700ms</span>
+                                <span>💰 Free Tier Eligible ($0.04/hr)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="cta-row">
+                        <button class="btn btn-secondary btn-prev" data-prev="1">← Back</button>
+                        <button class="btn btn-accent btn-next" data-next="3">Continue →</button>
+                    </div>
+                </div>
+
+                <!-- Step 3: Microphone & Audio Meter -->
+                <div class="card wizard-step" id="step-3">
+                    <h2>Detect Microphone & Audio Check</h2>
+                    <p class="subtitle">Speak to test your audio levels. WordInk auto-detects real hardware mics and ignores dead virtual drivers.</p>
+
+                    <div class="mic-selector-box">
+                        <label for="mic-select">Active Input Device</label>
+                        <select id="mic-select" class="dropdown"></select>
+                        <div id="mic-warning" class="warning-banner" style="display: none;"></div>
+                    </div>
+
+                    <div class="audio-meter-box">
+                        <div class="meter-labels">
+                            <span>Audio Input Level</span>
+                            <span id="meter-db">Speak into mic...</span>
+                        </div>
+                        <div class="meter-bar-container">
+                            <div id="meter-bar" class="meter-bar-fill"></div>
+                        </div>
+                        <button id="btn-live-test" class="btn btn-secondary btn-sm">Start Level Test</button>
+                    </div>
+
+                    <div class="cta-row">
+                        <button class="btn btn-secondary btn-prev" data-prev="2">← Back</button>
+                        <button class="btn btn-accent btn-next" data-next="4">Continue →</button>
+                    </div>
+                </div>
+
+                <!-- Step 4: Interactive Hotkey Builder -->
+                <div class="card wizard-step" id="step-4">
+                    <h2>Interactive Keyboard Visualizer & Hotkey Builder</h2>
+                    <p class="subtitle">Press any key on your keyboard right now to test layout detection, or click "Record Hotkey" to set your shortcut.</p>
+
+                    <!-- Live Keypress Visualizer Display -->
+                    <div class="key-tester-stage">
+                        <div class="visualizer-header">
+                            <span>Detected Key On Your Keyboard:</span>
+                            <span id="keyboard-layout-tag" class="tag">Auto-Detecting Layout</span>
+                        </div>
+                        <div class="key-display-pill" id="live-key-display">
+                            <span class="key-icon">⌨️</span>
+                            <span class="key-name">Press Any Key</span>
+                        </div>
+                        <div class="key-meta" id="live-key-meta">Scan Code: -- | VK: -- | Extended: --</div>
+                    </div>
+
+                    <!-- Hotkey Record Section -->
+                    <div class="hotkey-assign-box">
+                        <div class="hotkey-current">
+                            <span>Current Dictation Shortcut:</span>
+                            <kbd id="active-hotkey-display">Alt + D</kbd>
+                        </div>
+                        <button id="btn-record-hotkey" class="btn btn-record">
+                            <span class="record-dot"></span> Click to Record New Hotkey
+                        </button>
+                    </div>
+
+                    <div class="mode-toggles">
+                        <label class="toggle-option selected" id="toggle-mode-toggle">
+                            <input type="radio" name="trigger_mode" value="toggle" checked>
+                            <div>
+                                <strong>Toggle Mode (Default)</strong>
+                                <p>Press once to start speaking, press again to stop and paste.</p>
+                            </div>
+                        </label>
+                        <label class="toggle-option" id="toggle-mode-hold">
+                            <input type="radio" name="trigger_mode" value="hold">
+                            <div>
+                                <strong>Push-to-Talk Mode</strong>
+                                <p>Hold down while speaking, release to instantly transcribe.</p>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="cta-row">
+                        <button class="btn btn-secondary btn-prev" data-prev="3">← Back</button>
+                        <button class="btn btn-accent btn-next" data-next="5">Continue →</button>
+                    </div>
+                </div>
+
+                <!-- Step 5: Finish & Preferences -->
+                <div class="card wizard-step" id="step-5">
+                    <h2>Pasting Style & System Startup</h2>
+                    <p class="subtitle">Configure how WordInk drops text into your applications.</p>
+
+                    <div class="pref-card">
+                        <div class="pref-title">
+                            <span>⚡ Instant Paste (All-at-Once)</span>
+                            <span class="badge badge-success">Enabled</span>
+                        </div>
+                        <p class="pref-desc">Pastes your entire transcribed paragraph in 0ms using native clipboard injection. Automatically adapts with bracketed paste for terminals (Ghostty, Windows Terminal, cmd).</p>
+                    </div>
+
+                    <div class="pref-card">
+                        <div class="pref-title">
+                            <span>🚀 Auto-Start on Windows Boot</span>
+                            <label class="switch">
+                                <input type="checkbox" id="chk-autostart" checked>
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <p class="pref-desc">Starts silently in the background with zero popups whenever you turn on your PC.</p>
+                    </div>
+
+                    <div class="cta-row">
+                        <button class="btn btn-secondary btn-prev" data-prev="4">← Back</button>
+                        <button id="btn-save-all" class="btn btn-primary btn-large">Save & Launch WordInk 🖋️</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 2: TELEMETRY & STATS -->
+            <section id="tab-telemetry" class="tab-pane">
+                <div class="card">
+                    <h2>Live Voice Telemetry & Savings</h2>
+                    <p class="subtitle">Track your speaking metrics, latency, and estimated savings stored locally on your machine.</p>
+
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-num" id="stat-words">0</div>
+                            <div class="stat-label">Total Words Dictated</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-num" id="stat-sessions">0</div>
+                            <div class="stat-label">Dictation Sessions</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-num" id="stat-latency">~300 ms</div>
+                            <div class="stat-label">Average Latency</div>
+                        </div>
+                        <div class="stat-card highlight">
+                            <div class="stat-num" id="stat-savings">$15.00 / mo</div>
+                            <div class="stat-label">Saved vs Wispr Flow</div>
+                        </div>
+                    </div>
+
+                    <h3 class="section-title">Recent Transcriptions</h3>
+                    <div id="recent-history-list" class="history-list">
+                        <div class="empty-state">No transcriptions recorded yet.</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 3: STANDALONE KEY TESTER -->
+            <section id="tab-tester" class="tab-pane">
+                <div class="card">
+                    <h2>Full-Keyboard Keypress Visualizer</h2>
+                    <p class="subtitle">Press any key or combination to see how WordInk interprets your physical keyboard.</p>
+
+                    <div class="giant-key-box" id="giant-key-box">
+                        <div class="giant-key-icon">⌨️</div>
+                        <div class="giant-key-text" id="giant-key-text">Awaiting Keystroke...</div>
+                        <div class="giant-key-detail" id="giant-key-detail">Press letter, number, function key, or numpad</div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

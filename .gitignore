@@ -16,6 +16,7 @@ config.json
 
 # Application data
 *.log
+*.db
 recordings/
 .DS_Store
 Thumbs.db

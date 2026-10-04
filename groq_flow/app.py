@@ -149,12 +149,26 @@ class GroqFlowApp:
             audio_data: Recorded audio data
         """
         try:
+            t0 = time.time()
             # Process audio through Groq API
             text = self.groq_service.process_audio(audio_data)
+            latency_ms = (time.time() - t0) * 1000.0
+            audio_duration_sec = max(0.1, len(audio_data) / 32000.0)
 
             if text:
+                try:
+                    from .telemetry import telemetry
+                    telemetry.record_session(
+                        duration_sec=audio_duration_sec,
+                        text=text,
+                        latency_ms=latency_ms,
+                        model_used=config.whisper_model
+                    )
+                except Exception:
+                    pass
+
                 # Insert text at cursor
-                print(f"📝 Inserting: {text}")
+                print(f"📝 Inserting: {text} ({latency_ms:.0f}ms)")
                 success = self.text_inserter.insert_text(text)
 
                 if success:
@@ -162,7 +176,7 @@ class GroqFlowApp:
                 else:
                     print("❌ Failed to insert text")
                     self.overlay.update_state(RecorderState.ERROR)
-                    time.sleep(2)
+                    time.sleep(1)
             else:
                 print("❌ No text generated")
                 self.overlay.update_state(RecorderState.ERROR)

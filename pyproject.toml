@@ -1,9 +1,14 @@
 [project]
-name = "groq-flow"
-version = "0.1.0"
-description = "AI-powered speech-to-text with auto-editing - A Wispr Flow alternative using Groq API"
+name = "wordink"
+version = "0.2.0"
+description = "WordInk — Sub-second voice dictation, SDK, and Grounded GUI voice driver powered by Groq Whisper Turbo"
 readme = "README.md"
 requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Duketop CEO", email = "duketopceo@users.noreply.github.com" },
+    { name = "Parth Jain" }
+]
 dependencies = [
     "groq>=0.11.0",
     "pyaudio>=0.2.14",
@@ -21,7 +26,9 @@ dependencies = [
 ]
 
 [project.scripts]
-groq-flow = "groq_flow.main:main"
+wordink = "wordink.main:main"
+wordink-onboard = "wordink.onboarding.server:start_onboarding_server"
+groq-flow = "wordink.main:main"
 
 [build-system]
 requires = ["hatchling"]
