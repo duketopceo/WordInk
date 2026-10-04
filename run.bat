@@ -1,21 +1,16 @@
 @echo off
-REM Groq Flow - Quick Start Script
-REM Run the application after installation
-
+cd /d "%~dp0"
+title Groq Flow - AI Talk to Text
+echo ============================================================
 echo Starting Groq Flow...
+echo ============================================================
 echo.
 
-REM Run the application using uv
-call uv run groq-flow
+"%~dp0.venv\Scripts\python.exe" -m groq_flow.main --no-tray %*
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
-    echo ERROR: Failed to start Groq Flow
-    echo.
-    echo Make sure you have:
-    echo 1. Installed dependencies (run setup.bat)
-    echo 2. Configured your Groq API key in .env
-    echo.
+    echo ERROR: Failed to run Groq Flow
     pause
     exit /b 1
 )

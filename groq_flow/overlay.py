@@ -65,6 +65,17 @@ class StatusOverlay:
     # Overlay thread & UI
     # ------------------------------------------------------------------
     def _run_overlay(self) -> None:
+        import sys
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hdesk = user32.OpenDesktopW("Default", 0, False, 0x01FF)
+                if hdesk:
+                    user32.SetThreadDesktop(hdesk)
+            except Exception:
+                pass
+
         self._root = tk.Tk()
         self._root.withdraw()
         self._root.overrideredirect(True)

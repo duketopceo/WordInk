@@ -24,20 +24,43 @@ class TextInserter:
             return False
 
         try:
-            # Store original clipboard content
-            original_clipboard = pyperclip.paste()
+            # Release any lingering modifier keys (like Alt from hotkey)
+            try:
+                import keyboard
+                for mod in ('alt', 'ctrl', 'shift'):
+                    try:
+                        keyboard.release(mod)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
             # Copy text to clipboard
             pyperclip.copy(text)
 
-            # Small delay to ensure clipboard is updated
-            time.sleep(delay)
+            # Check if active window is a terminal (Ghostty/noctty, Windows Terminal, console)
+            is_terminal = False
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetForegroundWindow()
+                class_buf = ctypes.create_unicode_buffer(256)
+                user32.GetClassNameW(hwnd, class_buf, 256)
+                class_name = class_buf.value.lower()
+                terminal_classes = ('noctty', 'ghostty', 'console', 'cascadia', 'terminal', 'mintty', 'wezterm', 'alacritty', 'term', 'xterm')
+                is_terminal = any(term in class_name for term in terminal_classes)
+            except Exception:
+                is_terminal = False
 
-            # Paste using Ctrl+V
-            pyautogui.hotkey('ctrl', 'v')
-
-            # Small delay after pasting
-            time.sleep(0.1)
+            if is_terminal:
+                # In terminals, type characters directly via SendInput
+                time.sleep(0.05)
+                keyboard.write(text, exact=True)
+            else:
+                # In standard GUI apps, paste via Ctrl+V
+                time.sleep(0.12)
+                pyautogui.hotkey('ctrl', 'v')
+                time.sleep(0.05)
 
             # Optionally restore original clipboard (commented out by default)
             # This allows users to paste the transcription again if needed
