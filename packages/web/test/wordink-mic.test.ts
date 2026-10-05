@@ -199,6 +199,65 @@ describe("input modes (R5)", () => {
     expect(last().press).toHaveBeenCalledTimes(2);
   });
 
+  it("hold: window blur releases a shortcut hold, and a new hold works afterwards", () => {
+    mount(`<wordink-mic shortcut="Alt+D"></wordink-mic>`);
+    key(document.body, "keydown", { key: "∂", code: "KeyD", altKey: true });
+    expect(last().press).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(new Event("blur"));
+    expect(last().release).toHaveBeenCalledTimes(1);
+    key(document.body, "keydown", { key: "∂", code: "KeyD", altKey: true });
+    expect(last().press).toHaveBeenCalledTimes(2);
+  });
+
+  it("hold: window blur releases a pointer hold exactly once", () => {
+    const mic = mount(`<wordink-mic></wordink-mic>`);
+    pointer(button(mic), "pointerdown");
+    window.dispatchEvent(new Event("blur"));
+    window.dispatchEvent(new Event("blur"));
+    expect(last().release).toHaveBeenCalledTimes(1);
+    pointer(button(mic), "pointerdown");
+    expect(last().press).toHaveBeenCalledTimes(2);
+  });
+
+  it("hold: a hidden tab releases, a visible visibilitychange does not", () => {
+    const mic = mount(`<wordink-mic></wordink-mic>`);
+    pointer(button(mic), "pointerdown");
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(last().release).not.toHaveBeenCalled();
+    hidden.mockReturnValue(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(last().release).toHaveBeenCalledTimes(1);
+    hidden.mockRestore();
+  });
+
+  it("hold: lostpointercapture releases", () => {
+    const mic = mount(`<wordink-mic></wordink-mic>`);
+    pointer(button(mic), "pointerdown");
+    mic.dispatchEvent(new Event("lostpointercapture"));
+    expect(last().release).toHaveBeenCalledTimes(1);
+  });
+
+  it("toggle: window blur and hidden tab do not release", () => {
+    const mic = mount(`<wordink-mic mode="toggle"></wordink-mic>`);
+    button(mic).click();
+    window.dispatchEvent(new Event("blur"));
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+    hidden.mockRestore();
+    expect(last().release).not.toHaveBeenCalled();
+  });
+
+  it("removes the blur and visibilitychange listeners on disconnect", () => {
+    const win = vi.spyOn(window, "removeEventListener");
+    const doc = vi.spyOn(document, "removeEventListener");
+    mount(`<wordink-mic></wordink-mic>`).remove();
+    expect(win.mock.calls.map((c) => c[0])).toContain("blur");
+    expect(doc.mock.calls.map((c) => c[0])).toContain("visibilitychange");
+    win.mockRestore();
+    doc.mockRestore();
+  });
+
   it("toggle: two clicks press twice (start, then stop); pointer events do nothing", () => {
     const mic = mount(`<wordink-mic mode="toggle"></wordink-mic>`);
     pointer(button(mic), "pointerdown");

@@ -80,6 +80,7 @@ export class WordInkMic extends Base {
     this.statusEl = this.root.querySelector('[part="status"]')!;
     this.addEventListener("pointerdown", this.onPointerDown);
     this.addEventListener("pointerup", this.onPointerUp);
+    this.addEventListener("lostpointercapture", this.onFocusLost);
     this.addEventListener("pointercancel", this.onPointerUp);
     this.addEventListener("click", this.onClick);
     this.addEventListener("keydown", this.onKeyDown);
@@ -190,12 +191,16 @@ export class WordInkMic extends Base {
     }
     document.addEventListener("keydown", this.onShortcutDown, true);
     document.addEventListener("keyup", this.onShortcutUp, true);
+    window.addEventListener("blur", this.onFocusLost);
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
     this.render();
   }
 
   disconnectedCallback(): void {
     document.removeEventListener("keydown", this.onShortcutDown, true);
     document.removeEventListener("keyup", this.onShortcutUp, true);
+    window.removeEventListener("blur", this.onFocusLost);
+    document.removeEventListener("visibilitychange", this.onVisibilityChange);
     this.reset();
   }
 
@@ -289,6 +294,15 @@ export class WordInkMic extends Base {
     this.holding = false;
     this.release();
   }
+
+  /** A hold whose release lands elsewhere (window blur, lost pointer capture) must not leave the mic open. */
+  private readonly onFocusLost = (): void => {
+    if (this.mode === "hold") this.holdEnd();
+  };
+
+  private readonly onVisibilityChange = (): void => {
+    if (document.hidden) this.onFocusLost();
+  };
 
   private readonly onPointerDown = (e: PointerEvent): void => {
     if (this.mode !== "hold" || e.button !== 0 || !this.fromControl(e)) return;
