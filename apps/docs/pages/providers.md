@@ -6,10 +6,10 @@ Every provider goes through the same interface, so switching is a configuration 
 
 | | Groq | OpenAI | Deepgram | Local |
 |---|---|---|---|---|
-| Default model | `whisper-large-v3-turbo` | `gpt-4o-transcribe` | `nova-3` | Moonshine tiny (English) |
+| Default model | `whisper-large-v3-turbo` | `gpt-live-transcribe` | `nova-3` | Moonshine tiny (English) |
 | Streaming (interim text) | No: final text only | Yes | Yes | No: final text only |
 | Latency class | Batch: one upload on release, fast | Streaming over a WebSocket | Streaming over a WebSocket | Batch, on the user's device; slower on WASM, first use waits for the model download |
-| Approximate cost per hour of audio | ~$0.04 | ~$0.36 | ~$0.46 (streaming) | Free (runs on the user's CPU or GPU) |
+| Approximate cost per hour of audio | ~$0.04 | Varies by model (`gpt-4o-transcribe` ~$0.36; check current pricing for `gpt-live-transcribe`) | ~$0.46 (streaming) | Free (runs on the user's CPU or GPU) |
 | Works offline | No | No | No | Yes, after the first load |
 | Key path | Your relay forwards the audio with your key (Groq has no temporary tokens) | Your relay mints a short-lived `ek_` client secret; the browser connects to OpenAI directly | Your relay mints a short-lived JWT; the browser connects to Deepgram directly | No key |
 | `hint` (custom vocabulary) | Sent as the prompt | Sent as the prompt | Sent as key terms (split on commas and new lines) | Ignored |
