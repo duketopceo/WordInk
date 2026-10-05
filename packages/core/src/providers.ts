@@ -18,7 +18,8 @@ export interface HostProviderCapabilities {
   /**
    * How long, in ms, the host waits for a result after release before failing the utterance with
    * ProviderDown. Defaults to `TRANSCRIBE_TIMEOUT_MS`. Set it longer when the first result can include
-   * a model download, and enforce your own shorter limits inside the provider.
+   * a model download; the provider should still fail stalled work itself. Must be a finite number in
+   * (0, 2147483647].
    */
   timeoutMs?: number;
 }
