@@ -83,6 +83,8 @@ const WS_ABNORMAL_CLOSE = 1006;
 export const WS_CONNECT_TIMEOUT_MS = 10_000;
 /** An utterance still transcribing after this long (a stalled socket or host provider) fails with ProviderDown. */
 export const TRANSCRIBE_TIMEOUT_MS = 30_000;
+/** The longest delay setTimeout honors (2^31 - 1 ms); a host provider's `timeoutMs` must not exceed it. */
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 let wasmReady: Promise<unknown> | undefined;
 
@@ -189,6 +191,14 @@ class DictationHost implements Dictation {
       const rate = provider.capabilities.sampleRate;
       if (!Number.isInteger(rate) || rate <= 0) {
         throw configError(`Host provider "${provider.id}" declared an invalid sample rate.`, "Declare a positive integer rate, e.g. 16000.");
+      }
+      const timeoutMs = provider.capabilities.timeoutMs;
+      // setTimeout treats anything outside 1..2^31-1 (Infinity, NaN, overflow) as ~0 and would fire at once.
+      if (timeoutMs !== undefined && !(Number.isFinite(timeoutMs) && timeoutMs > 0 && timeoutMs <= MAX_TIMEOUT_MS)) {
+        throw configError(
+          `Host provider "${provider.id}" declared an invalid timeoutMs.`,
+          `Declare a finite number of milliseconds between 1 and ${MAX_TIMEOUT_MS}, or omit it for the default.`,
+        );
       }
       this.hostProvider = provider;
       const off = provider.onResult((r) => this.onHostResult(r));

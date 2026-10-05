@@ -53,12 +53,22 @@ export interface LocalProvider extends HostProvider {
   on<K extends keyof LocalProviderEvents>(type: K, cb: (value: LocalProviderEvents[K]) => void): () => void;
 }
 
-/** A model load (download included) that has not finished by then fails, so a later utterance can retry. */
-const LOAD_TIMEOUT_MS = 120_000;
+/**
+ * A model load that goes this long without reporting download progress fails, so a later utterance can
+ * retry. The window restarts on every progress step (each 1% of the download), so a slow but moving
+ * download is never cut off; it also covers the stretches without progress (a cached load, and building
+ * the inference session after the download).
+ */
+const LOAD_STALL_TIMEOUT_MS = 120_000;
 /** Inference on one utterance that has not answered by then fails with ProviderDown. */
 const INFERENCE_TIMEOUT_MS = 30_000;
-/** Slack on top of this provider's own limits, so its timeouts report before the host watchdog. */
-const WATCHDOG_MARGIN_MS = 5_000;
+/**
+ * The host watchdog for one utterance. A stall timeout has no total bound, so this is what bounds the
+ * wait when the first utterance includes the model download: 10 minutes covers the ~28 MB download at
+ * about 50 KB/s. On a slower link that utterance fails with ProviderDown, but the load keeps going (the
+ * host's cancel() does not stop it) and the next utterance picks it up.
+ */
+const FIRST_RESULT_TIMEOUT_MS = 600_000;
 
 /** Rejects with `error` if `promise` has not settled within `ms`. */
 function withTimeout<T>(promise: Promise<T>, ms: number, error: Error): Promise<T> {
@@ -93,6 +103,8 @@ export function createLocalProvider(options: LocalProviderOptions = {}): LocalPr
   let worker: Worker | undefined;
   let loading: Promise<void> | undefined;
   let loadSettle: { resolve: () => void; reject: (e: Error) => void } | undefined;
+  /** Restarts the load's stall timer; set while a load is in flight. */
+  let loadProgressed: (() => void) | undefined;
   const pending = new Map<number, { resolve: (text: string) => void; reject: (e: Error) => void }>();
   let nextId = 0;
 
@@ -110,6 +122,7 @@ export function createLocalProvider(options: LocalProviderOptions = {}): LocalPr
   const onMessage = (msg: FromWorker) => {
     switch (msg.type) {
       case "progress":
+        loadProgressed?.();
         emit("progress", msg.percent);
         break;
       case "ready":
@@ -147,9 +160,21 @@ export function createLocalProvider(options: LocalProviderOptions = {}): LocalPr
           loading = undefined;
         }
       };
+      let rejectReady!: (e: Error) => void;
       const ready = new Promise<void>((resolve, reject) => {
+        rejectReady = reject;
         loadSettle = { resolve, reject };
       });
+      let stallTimer: ReturnType<typeof setTimeout> | undefined;
+      const armStallTimer = () => {
+        clearTimeout(stallTimer);
+        stallTimer = setTimeout(
+          () => rejectReady(new Error(`@wordink/local: model load made no progress for ${LOAD_STALL_TIMEOUT_MS} ms`)),
+          LOAD_STALL_TIMEOUT_MS,
+        );
+      };
+      loadProgressed = armStallTimer;
+      armStallTimer();
       const msg: ToWorker = {
         type: "load",
         device,
@@ -159,8 +184,10 @@ export function createLocalProvider(options: LocalProviderOptions = {}): LocalPr
       };
       w.postMessage(msg);
       try {
-        await withTimeout(ready, LOAD_TIMEOUT_MS, new Error(`@wordink/local: model load timed out after ${LOAD_TIMEOUT_MS} ms`));
+        await ready;
       } finally {
+        clearTimeout(stallTimer);
+        if (loadProgressed === armStallTimer) loadProgressed = undefined;
         loadSettle = undefined;
       }
     })();
@@ -203,8 +230,8 @@ export function createLocalProvider(options: LocalProviderOptions = {}): LocalPr
 
   return {
     id: "local",
-    // The first result can include the model download, which this provider bounds itself.
-    capabilities: { streaming: false, sampleRate: SAMPLE_RATE, timeoutMs: LOAD_TIMEOUT_MS + INFERENCE_TIMEOUT_MS + WATCHDOG_MARGIN_MS },
+    // The first result can include the model download, which this provider bounds only by stalls.
+    capabilities: { streaming: false, sampleRate: SAMPLE_RATE, timeoutMs: FIRST_RESULT_TIMEOUT_MS },
 
     start(sampleRate: number) {
       if (sampleRate !== SAMPLE_RATE) {

@@ -32,6 +32,25 @@ function fakeHostProvider(streaming: boolean, sampleRate = 16_000) {
 }
 
 describe("HostProvider (KTD5)", () => {
+  it("rejects a host provider timeoutMs that setTimeout cannot honor, and accepts a long finite one", () => {
+    installFakeAudio();
+    const withTimeout = (timeoutMs: number) => {
+      const fake = fakeHostProvider(false);
+      return { ...fake.provider, capabilities: { ...fake.provider.capabilities, timeoutMs } };
+    };
+    for (const bad of [Infinity, Number.NaN, 0, -1, 2 ** 31]) {
+      let err: unknown;
+      try {
+        createDictation({ provider: withTimeout(bad) });
+      } catch (e) {
+        err = e;
+      }
+      expect(err, String(bad)).toMatchObject({ code: "Config" });
+    }
+    expect(() => createDictation({ provider: withTimeout(155_000) }).destroy()).not.toThrow();
+    expect(() => createDictation({ provider: withTimeout(2 ** 31 - 1) }).destroy()).not.toThrow();
+  });
+
   it("a streaming host provider receives resampled audio while listening, and its final ends the session", async () => {
     const audio = installFakeAudio({ sampleRate: 48_000 });
     const fake = fakeHostProvider(true);

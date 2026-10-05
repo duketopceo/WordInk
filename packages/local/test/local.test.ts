@@ -236,8 +236,10 @@ describe("createLocalProvider", () => {
   it("is a batch 16 kHz HostProvider", () => {
     const p: HostProvider = createLocalProvider();
     expect(p.capabilities).toMatchObject({ streaming: false, sampleRate: 16000 });
-    // The host watchdog must outlast a first-use model download (bounded by the provider itself).
-    expect(p.capabilities.timeoutMs).toBeGreaterThan(120_000);
+    // The host watchdog must outlast a realistic first-use model download (~28 MB), which the provider
+    // only bounds by stalls: 10 minutes covers ~50 KB/s.
+    expect(p.capabilities.timeoutMs).toBeGreaterThanOrEqual(600_000);
+    expect(p.capabilities.timeoutMs).toBeLessThanOrEqual(2 ** 31 - 1);
     expect(p.id).toBe("local");
   });
 
@@ -379,13 +381,67 @@ describe("createLocalProvider", () => {
       await vi.advanceTimersByTimeAsync(1_000);
       await done;
       expect(results).toEqual([{ type: "error", code: "ProviderDown" }]);
-      expect(errors[0]?.message).toMatch(/timed out/i);
+      expect(errors[0]?.message).toMatch(/no progress/i);
       expect(stalled.terminated).toBe(true);
 
       // The next utterance starts a fresh worker and load.
       await p.start(16000);
       await vi.advanceTimersByTimeAsync(0);
       expect(FakeWorker.last).not.toBe(stalled);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a slow load that keeps reporting progress is not cut off by the stall timeout", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const p = createLocalProvider();
+      const errors: Error[] = [];
+      p.on("error", (e) => errors.push(e));
+      let loaded = false;
+      const loading = p.load().then(() => (loaded = true));
+      await vi.advanceTimersByTimeAsync(0);
+      const w = FakeWorker.last!;
+      // Five minutes of download, one progress step every 100 s: well past 120 s in total.
+      for (let percent = 1; percent <= 3; percent++) {
+        await vi.advanceTimersByTimeAsync(100_000);
+        w.emit({ type: "progress", percent });
+      }
+      await vi.advanceTimersByTimeAsync(100_000);
+      expect(errors).toEqual([]);
+      expect(w.terminated).toBe(false);
+      w.emit({ type: "ready", device: "wasm" });
+      await loading;
+      expect(loaded).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a load that stops reporting progress fails with ProviderDown after the stall window", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const p = createLocalProvider();
+      const results: HostProviderResult[] = [];
+      const errors: Error[] = [];
+      p.onResult((r) => results.push(r));
+      p.on("error", (e) => errors.push(e));
+      await p.start(16000);
+      await p.pushAudio(Int16Array.of(1));
+      const done = p.finish();
+      await vi.advanceTimersByTimeAsync(0);
+      const w = FakeWorker.last!;
+      await vi.advanceTimersByTimeAsync(60_000);
+      w.emit({ type: "progress", percent: 40 });
+      // The window restarts at the last progress: nothing for 119 s is still fine, 120 s is not.
+      await vi.advanceTimersByTimeAsync(119_000);
+      expect(results).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await done;
+      expect(results).toEqual([{ type: "error", code: "ProviderDown" }]);
+      expect(errors[0]?.message).toMatch(/no progress/i);
+      expect(w.terminated).toBe(true);
     } finally {
       vi.useRealTimers();
     }
