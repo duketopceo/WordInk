@@ -1,0 +1,13 @@
+name = "wordink-relay-example"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[vars]
+SESSION_CHECK_URL = "http://localhost:3000/api/session"
+ALLOWED_ORIGINS = "http://localhost:5173"
+
+# Provider keys are secrets, never [vars]:
+#   npx wrangler secret put GROQ_API_KEY
+#   npx wrangler secret put OPENAI_API_KEY
+#   npx wrangler secret put DEEPGRAM_API_KEY
+# For `wrangler dev`, put them in a git-ignored .dev.vars file instead.
