@@ -2,7 +2,7 @@ import { buildSync } from "esbuild";
 import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 4318;
+const PORT = 4319;
 
 // The page has no bundler: bundle the provider and its worker (with transformers.js) for the browser.
 // `new URL("./worker.js", import.meta.url)` in index.js then finds the bundled worker next to it.

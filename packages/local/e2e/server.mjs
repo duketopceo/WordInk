@@ -11,7 +11,7 @@ import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const port = Number(process.argv[2] ?? 4318);
+const port = Number(process.argv[2] ?? 4319);
 const modelCache = process.env.WORDINK_MODEL_CACHE ?? join(homedir(), ".cache", "wordink-models");
 // onnxruntime-web is a dependency of transformers.js; pnpm puts it next to it.
 const transformers = realpathSync(join(root, "node_modules", "@huggingface", "transformers"));
