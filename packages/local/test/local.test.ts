@@ -359,6 +359,58 @@ describe("createLocalProvider", () => {
     expect(results).toEqual([]);
   });
 
+  it("a model load that never finishes times out, reports ProviderDown, and a later utterance retries", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const p = createLocalProvider();
+      const results: HostProviderResult[] = [];
+      const errors: Error[] = [];
+      p.onResult((r) => results.push(r));
+      p.on("error", (e) => errors.push(e));
+      await p.start(16000);
+      await p.pushAudio(Int16Array.of(1));
+      const done = p.finish();
+      await vi.advanceTimersByTimeAsync(0);
+      const stalled = FakeWorker.last!;
+      await vi.advanceTimersByTimeAsync(119_000);
+      expect(results).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await done;
+      expect(results).toEqual([{ type: "error", code: "ProviderDown" }]);
+      expect(errors[0]?.message).toMatch(/timed out/i);
+      expect(stalled.terminated).toBe(true);
+
+      // The next utterance starts a fresh worker and load.
+      await p.start(16000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(FakeWorker.last).not.toBe(stalled);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("inference that never answers times out with ProviderDown and the next utterance gets a fresh worker", async () => {
+    const { p, w, results } = await readyProvider();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await p.start(16000);
+      await p.pushAudio(Int16Array.of(1));
+      const done = p.finish();
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(results).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await done;
+      expect(results).toEqual([{ type: "error", code: "ProviderDown" }]);
+      expect(w.terminated).toBe(true);
+
+      await p.start(16000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(FakeWorker.last).not.toBe(w);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects a sample rate other than the declared 16 kHz", () => {
     const p = createLocalProvider();
     expect(() => p.start(48000)).toThrow(/16000/);

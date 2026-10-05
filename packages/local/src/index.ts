@@ -53,6 +53,20 @@ export interface LocalProvider extends HostProvider {
   on<K extends keyof LocalProviderEvents>(type: K, cb: (value: LocalProviderEvents[K]) => void): () => void;
 }
 
+/** A model load (download included) that has not finished by then fails, so a later utterance can retry. */
+const LOAD_TIMEOUT_MS = 120_000;
+/** Inference on one utterance that has not answered by then fails with ProviderDown. */
+const TRANSCRIBE_TIMEOUT_MS = 30_000;
+
+/** Rejects with `error` if `promise` has not settled within `ms`. */
+function withTimeout<T>(promise: Promise<T>, ms: number, error: Error): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(error), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 type Listeners = { [K in keyof LocalProviderEvents]: Set<(v: LocalProviderEvents[K]) => void> };
 
 /** Creates the local Moonshine provider. Pass it as `provider` to `createDictation`. */
@@ -142,7 +156,11 @@ export function createLocalProvider(options: LocalProviderOptions = {}): LocalPr
         ...(options.wasmPaths !== undefined && { wasmPaths: new URL(options.wasmPaths, location.href).href }),
       };
       w.postMessage(msg);
-      await ready;
+      try {
+        await withTimeout(ready, LOAD_TIMEOUT_MS, new Error(`@wordink/local: model load timed out after ${LOAD_TIMEOUT_MS} ms`));
+      } finally {
+        loadSettle = undefined;
+      }
     })();
     loading = attempt;
     attempt.catch((err: unknown) => {
@@ -165,7 +183,20 @@ export function createLocalProvider(options: LocalProviderOptions = {}): LocalPr
     const text = new Promise<string>((resolve, reject) => pending.set(id, { resolve, reject }));
     const msg: ToWorker = { type: "transcribe", id, audio };
     w.postMessage(msg, [audio.buffer]);
-    return text;
+    const timedOut = new Error(`@wordink/local: transcription timed out after ${TRANSCRIBE_TIMEOUT_MS} ms`);
+    try {
+      return await withTimeout(text, TRANSCRIBE_TIMEOUT_MS, timedOut);
+    } catch (err) {
+      // A worker that stops answering is likely wedged: drop it so the next utterance starts a fresh one.
+      if (err === timedOut && worker === w) {
+        pending.delete(id);
+        w.terminate();
+        worker = undefined;
+        loading = undefined;
+        failAll(timedOut);
+      }
+      throw err;
+    }
   };
 
   return {

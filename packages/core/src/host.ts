@@ -77,12 +77,29 @@ export interface Dictation {
 export const DEFAULT_TRANSFORM_TIMEOUT_MS = 3000;
 /** Requests with no response by then are reported as failed (the core maps that to ProviderDown). */
 export const HTTP_TIMEOUT_MS = 30_000;
+/** A provider socket that has not opened by then is reported as failed to open. */
+export const WS_CONNECT_TIMEOUT_MS = 10_000;
+/** An utterance still transcribing after this long (a stalled socket or host provider) fails with ProviderDown. */
+export const TRANSCRIBE_TIMEOUT_MS = 30_000;
 
 let wasmReady: Promise<unknown> | undefined;
 
 function loadCore(): Promise<unknown> {
-  wasmReady ??= init();
+  // A failed load is not cached, so a later press retries it.
+  wasmReady ??= init().catch((err: unknown) => {
+    wasmReady = undefined;
+    throw err;
+  });
   return wasmReady;
+}
+
+function wasmLoadError(cause: unknown): WordInkError {
+  return new WordInkError(
+    "ProviderDown",
+    "The WordInk engine (wasm) failed to load.",
+    "Check your connection and that wordink_core_bg.wasm from @wordink/core is served by your bundler or CDN, then try again.",
+    { cause },
+  );
 }
 
 /** Effects as decoded from the core, with binary payloads attached. */
@@ -129,7 +146,7 @@ type Listener = (value: never) => void;
 const TIMEOUT = Symbol("timeout");
 
 class DictationHost implements Dictation {
-  readonly ready: Promise<void>;
+  private loaded: Promise<void>;
   private readonly options: DictationOptions;
   private readonly hostProvider: HostProvider | undefined;
   private readonly credentials: Credentials | undefined;
@@ -148,6 +165,8 @@ class DictationHost implements Dictation {
   private readonly sockets = new Map<number, WebSocket>();
   private readonly requests = new Set<AbortController>();
   private hostActive = false;
+  private watchdog: ReturnType<typeof setTimeout> | undefined;
+  private readonly connectTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>();
   private unsubscribeHost: (() => void) | undefined;
 
   constructor(options: DictationOptions) {
@@ -175,9 +194,13 @@ class DictationHost implements Dictation {
     } else {
       throw configError("`provider` is missing or invalid.", 'Use "groq", "openai", "deepgram" or a HostProvider.');
     }
-    this.ready = loadCore().then(() => undefined);
+    this.loaded = loadCore().then(() => undefined);
     // Surface load failures through press()/start(), not as an unhandled rejection.
-    this.ready.catch(() => {});
+    this.loaded.catch(() => {});
+  }
+
+  get ready(): Promise<void> {
+    return this.loaded;
   }
 
   get state(): DictationState {
@@ -221,6 +244,7 @@ class DictationHost implements Dictation {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.clearWatchdog();
     this.closeMic();
     for (const ws of this.sockets.values()) this.closeSocket(ws);
     this.sockets.clear();
@@ -238,6 +262,8 @@ class DictationHost implements Dictation {
   // --- input -----------------------------------------------------------------------------------
 
   private isStartable(): boolean {
+    // While a transform is pending the core is already idle but the UI still shows transcribing.
+    if (this.paused) return false;
     const state = this.session?.state() ?? "idle";
     return state === "idle" || state === "error";
   }
@@ -256,14 +282,23 @@ class DictationHost implements Dictation {
   }
 
   private async doPress(): Promise<void> {
-    await this.ready;
-    if (this.destroyed) return;
+    try {
+      await this.load();
+    } catch (err) {
+      if (this.destroyed) return;
+      this.dropContext();
+      this.setState("error");
+      this.emit("error", wasmLoadError(err));
+      return;
+    }
+    if (this.destroyed || this.paused) return;
     const starting = this.isStartable();
     if (!this.session || (starting && this.needsToken())) {
       let credential: string;
       try {
         credential = await this.sessionCredential();
       } catch (err) {
+        if (this.destroyed) return;
         this.dropContext();
         this.setState("error");
         this.emit("error", err instanceof WordInkError ? err : sessionError("ProviderDown"));
@@ -273,6 +308,14 @@ class DictationHost implements Dictation {
       this.replaceSession(credential);
     }
     if (this.session) this.feed(this.session, (s) => s.press());
+  }
+
+  /** The core load, retried if an earlier attempt failed. */
+  private load(): Promise<void> {
+    const next = this.loaded.catch(() => loadCore().then(() => undefined));
+    next.catch(() => {});
+    this.loaded = next;
+    return next;
   }
 
   /** OpenAI and Deepgram through a relay need a fresh short-lived token per session. */
@@ -287,7 +330,15 @@ class DictationHost implements Dictation {
     if (creds.kind === "devKey") return creds.key;
     if (provider === "groq") return relayUrl(creds.endpoint, "");
     this.setState("requesting-mic");
-    return mintToken(provider as "openai" | "deepgram", creds.endpoint);
+    const controller = new AbortController();
+    this.requests.add(controller);
+    const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+    try {
+      return await mintToken(provider as "openai" | "deepgram", creds.endpoint, fetch, controller.signal);
+    } finally {
+      clearTimeout(timer);
+      this.requests.delete(controller);
+    }
   }
 
   private replaceSession(credential: string): void {
@@ -348,6 +399,8 @@ class DictationHost implements Dictation {
     const session = this.session!;
     switch (e.t) {
       case "state":
+        if (e.s === "transcribing") this.startWatchdog(session);
+        else this.clearWatchdog();
         this.setState(e.s);
         if (e.s === "error") this.emit("error", sessionError(e.code ?? "ProviderDown", this.micErrorName));
         if (e.s !== "listening" && e.s !== "transcribing") this.hostActive = false;
@@ -399,6 +452,30 @@ class DictationHost implements Dictation {
         void this.callHost(() => this.hostProvider?.cancel?.());
         return;
     }
+  }
+
+  /** Fails an utterance whose provider never answers, so the user can retry (the core has no clock). */
+  private startWatchdog(session: WasmSession): void {
+    this.clearWatchdog();
+    this.watchdog = setTimeout(() => {
+      this.watchdog = undefined;
+      if (this.destroyed || session !== this.session || session.state() !== "transcribing") return;
+      for (const [id, ws] of [...this.sockets]) {
+        this.sockets.delete(id);
+        this.closeSocket(ws);
+        this.feed(session, (s) => s.ws_closed(id, 1006));
+      }
+      if (this.hostProvider && session.state() === "transcribing") {
+        this.hostActive = false;
+        void this.callHost(() => this.hostProvider?.cancel?.());
+        this.feed(session, (s) => s.host_error("ProviderDown"));
+      }
+    }, TRANSCRIBE_TIMEOUT_MS);
+  }
+
+  private clearWatchdog(): void {
+    clearTimeout(this.watchdog);
+    this.watchdog = undefined;
   }
 
   private setState(state: DictationState): void {
@@ -518,19 +595,39 @@ class DictationHost implements Dictation {
     }
     ws.binaryType = "arraybuffer";
     this.sockets.set(id, ws);
-    ws.onopen = () => this.feed(session, (s) => s.ws_opened(id));
+    this.connectTimers.set(
+      ws,
+      setTimeout(() => {
+        // Never opened: report it like a socket that failed to open.
+        if (this.sockets.get(id) !== ws) return;
+        this.sockets.delete(id);
+        this.closeSocket(ws);
+        this.feed(session, (s) => s.ws_closed(id, 1006));
+      }, WS_CONNECT_TIMEOUT_MS),
+    );
+    ws.onopen = () => {
+      this.clearConnectTimer(ws);
+      this.feed(session, (s) => s.ws_opened(id));
+    };
     ws.onmessage = (m: MessageEvent<string | ArrayBuffer>) => {
       const data = m.data;
       if (typeof data === "string") this.feed(session, (s) => s.ws_text(id, data));
       else this.feed(session, (s) => s.ws_binary(id, new Uint8Array(data)));
     };
     ws.onclose = (c) => {
+      this.clearConnectTimer(ws);
       if (this.sockets.get(id) === ws) this.sockets.delete(id);
       this.feed(session, (s) => s.ws_closed(id, c.code));
     };
   }
 
+  private clearConnectTimer(ws: WebSocket): void {
+    clearTimeout(this.connectTimers.get(ws));
+    this.connectTimers.delete(ws);
+  }
+
   private closeSocket(ws: WebSocket): void {
+    this.clearConnectTimer(ws);
     ws.onopen = ws.onmessage = ws.onclose = null;
     if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) ws.close(1000);
   }

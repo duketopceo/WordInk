@@ -156,6 +156,30 @@ describe("transform hook (KTD11)", () => {
     expect(log.slice(-3)).toEqual(["warning:TransformFailed", "final:hello world", "state:idle"]);
     d.destroy();
   });
+
+  it("ignores a press and release while the transform is pending (still visibly transcribing)", async () => {
+    const audio = installFakeAudio();
+    relayReturning("hello world");
+    let settle: (text: string) => void = () => {};
+    const transform = vi.fn(() => new Promise<string>((resolve) => (settle = resolve)));
+    const d = createDictation({ provider: "groq", endpoint: ENDPOINT, transform, transformTimeoutMs: 10_000 });
+    const log = record(d);
+    await dictate(d, audio);
+    await vi.waitFor(() => expect(transform).toHaveBeenCalled());
+    expect(d.state).toBe("transcribing");
+
+    await d.press();
+    await d.release();
+    settle("Hello world.");
+    await vi.waitFor(() => expect(d.state).toBe("idle"));
+    // Let any deferred effects of the ignored press run.
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(audio.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(log.slice(-3)).toEqual(["state:transcribing", "final:Hello world.", "state:idle"]);
+    expect(d.state).toBe("idle");
+    d.destroy();
+  });
 });
 
 describe("microphone errors (R9, AE2)", () => {

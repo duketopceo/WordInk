@@ -6,6 +6,7 @@ import { initSync } from "../wasm/wordink_core.js";
 initSync({ module: readFileSync(new URL("../wasm/wordink_core_bg.wasm", import.meta.url)) });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
