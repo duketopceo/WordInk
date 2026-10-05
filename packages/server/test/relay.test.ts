@@ -470,6 +470,18 @@ describe("origin check (CSRF)", () => {
     expect(res.status).toBe(200);
   });
 
+  it("never routes a URL whose path begins with // (it can't borrow the attacker's origin)", async () => {
+    const authorize = vi.fn(() => true);
+    const req = new Request("https://relay.example.com//evil.com/openai/token", {
+      method: "POST",
+      headers: { origin: "https://evil.com" },
+    });
+    const res = await relay({ authorize, allowedOrigins: [] })(req);
+    expect([403, 404]).toContain(res.status);
+    expect(authorize).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("sends a request with no Origin header on to authorize", async () => {
     const authorize = vi.fn(() => true);
     const req = post("/deepgram/token");
@@ -497,6 +509,24 @@ describe("upstream timeout", () => {
       expect(await res.json()).toEqual({ error: "upstream_unreachable" });
     },
   );
+
+  it("answers 502 upstream_unreachable with CORS headers when the Groq body stalls past the timeout", async () => {
+    fetchMock.mockImplementationOnce(async (_input, init) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+        },
+      });
+      return new Response(body, { status: 200, headers: { "content-type": "text/plain" } });
+    });
+    const res = await relay({ upstreamTimeoutMs: 50 })(post("/groq/transcriptions", { body: audioForm() }));
+    expect(res.status).toBe(502);
+    expect(res.headers.get("access-control-allow-origin")).toBe(ALLOWED);
+    expect(await res.json()).toEqual({ error: "upstream_unreachable" });
+    const logged = errorSpy.mock.calls.flat().map(String).join("\n");
+    expect(logged).toContain("TimeoutError");
+    expect(logged).not.toContain(GROQ_KEY);
+  });
 
   it("passes a default timeout signal to the upstream fetch", async () => {
     await relay()(post("/openai/token"));
@@ -641,5 +671,89 @@ describe("Node adapter", () => {
     expect(result).toEqual({ status: 200, text: "hello world" });
     const forwarded = upstreamCall().init.body as ArrayBuffer | Uint8Array;
     expect(forwarded.byteLength).toBe(body.length);
+  });
+
+  /** Raw HTTP/1.1 over a socket, so the request-target is sent exactly as written. */
+  async function rawPost(
+    base: string,
+    target: string,
+    headers: Record<string, string>,
+  ): Promise<{ status: number; body: string }> {
+    const { connect } = await import("node:net");
+    const { port } = new URL(base);
+    return new Promise((resolve, reject) => {
+      const sock = connect(Number(port), "127.0.0.1");
+      let data = "";
+      sock.setEncoding("utf8");
+      sock.on("data", (d: string) => (data += d));
+      sock.on("error", reject);
+      sock.on("end", () => {
+        const status = Number(/^HTTP\/1\.1 (\d{3})/.exec(data)?.[1] ?? 0);
+        resolve({ status, body: data.slice(data.indexOf("\r\n\r\n") + 4) });
+      });
+      const lines = [`POST ${target} HTTP/1.1`, "Connection: close", "Content-Length: 2"];
+      for (const [k, v] of Object.entries(headers)) lines.push(`${k}: ${v}`);
+      sock.write(lines.join("\r\n") + "\r\n\r\n{}");
+    });
+  }
+
+  it("does not let a protocol-relative request-target (//evil.com/...) borrow the attacker's origin", async () => {
+    const authorize = vi.fn(() => true);
+    const base = await listen(createNodeHandler({ keys: { openai: OPENAI_KEY }, authorize }));
+    const res = await rawPost(base, "//evil.com/openai/token", {
+      Host: "relay.example",
+      Origin: "http://evil.com",
+    });
+    expect([403, 404]).toContain(res.status);
+    expect(res.body).not.toContain("ek_test_ephemeral");
+    expect(authorize).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("treats X-Forwarded-Proto/Host as the relay's origin only with trustProxy", async () => {
+    const authorize = vi.fn(() => true);
+    const headers = {
+      Host: "127.0.0.1",
+      "X-Forwarded-Proto": "https",
+      "X-Forwarded-Host": "relay.example",
+      Origin: "https://relay.example",
+    };
+    const config = { keys: { deepgram: DEEPGRAM_KEY }, authorize };
+    const trusted = await listen(createNodeHandler(config, { trustProxy: true }));
+    expect((await rawPost(trusted, "/deepgram/token", headers)).status).toBe(200);
+    expect(authorize).toHaveBeenCalledTimes(1);
+    await new Promise<void>((r) => server!.close(() => r()));
+
+    const untrusted = await listen(createNodeHandler(config));
+    const spoofed = await rawPost(untrusted, "/deepgram/token", headers);
+    expect(spoofed.status).toBe(403);
+    expect(JSON.parse(spoofed.body)).toEqual({ error: "origin_not_allowed" });
+    expect(authorize).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses https:// for the relay's own origin on an encrypted (TLS) socket", async () => {
+    const { Readable } = await import("node:stream");
+    const authorize = vi.fn((_req: Request) => true);
+    const handler = createNodeHandler({ keys: { deepgram: DEEPGRAM_KEY }, authorize });
+    // Stand-in for an https.createServer request: same shape, socket.encrypted set by TLSSocket.
+    const req = Object.assign(Readable.from([Buffer.from("{}")]), {
+      url: "/deepgram/token",
+      method: "POST",
+      headers: { host: "relay.example", origin: "https://relay.example" },
+      socket: { encrypted: true, remoteAddress: "127.0.0.1" },
+    });
+    const status = await new Promise<number>((resolve) => {
+      const res = {
+        statusCode: 0,
+        headersSent: false,
+        setHeader() {},
+        end() {
+          resolve(res.statusCode);
+        },
+      };
+      handler(req as never, res as never);
+    });
+    expect(status).toBe(200);
+    expect(authorize.mock.calls[0]?.[0].url).toBe("https://relay.example/deepgram/token");
   });
 });

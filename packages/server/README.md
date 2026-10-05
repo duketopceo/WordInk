@@ -116,7 +116,7 @@ authorize: async (request) => {
 
 Cross-origin cookie auth needs the browser to send credentials; the relay sends `Access-Control-Allow-Credentials: true` for allowed origins.
 
-**If your app and relay are on different origins, list the app's origin in `allowedOrigins`.** A request whose `Origin` header (including `Origin: null`) is neither the relay's own origin nor in `allowedOrigins` gets `403 {"error":"origin_not_allowed"}` before `authorize` runs and without an upstream call. That stops another site from making a signed-in user's browser spend your quota with their cookie (CSRF). Requests with no `Origin` header (server-to-server, curl) still go to `authorize`. The relay's own origin comes from the request URL, so behind a TLS-terminating proxy where the Node adapter sees `http://`, list your public origin too.
+**If your app and relay are on different origins, list the app's origin in `allowedOrigins`.** A request whose `Origin` header (including `Origin: null`) is neither the relay's own origin nor in `allowedOrigins` gets `403 {"error":"origin_not_allowed"}` before `authorize` runs and without an upstream call. That stops another site from making a signed-in user's browser spend your quota with their cookie (CSRF). Requests with no `Origin` header (server-to-server, curl) still go to `authorize`. The relay's own origin comes from the request URL. Behind a TLS-terminating proxy, where the Node adapter's socket is plain `http://`, set `trustProxy: true` if the proxy sets `X-Forwarded-Proto` and `X-Forwarded-Host`, or list your public origin in `allowedOrigins`.
 
 ## Options
 
@@ -132,7 +132,7 @@ Cross-origin cookie auth needs the browser to send credentials; the relay sends 
 | `tokenTtlSeconds` | `120` | Lifetime of minted credentials. Any TTL the client sends is ignored. |
 | `upstreamTimeoutMs` | `15000` | An upstream provider call that takes longer is aborted and answers `502`. |
 
-The Node adapter takes a second argument, `{ trustProxy }`. By default it replaces `X-Forwarded-For` and `CF-Connecting-IP` with the socket address so callers can't choose their own rate-limit bucket. Set `trustProxy: true` only behind a proxy that overwrites those headers.
+The Node adapter takes a second argument, `{ trustProxy }`. By default it replaces `X-Forwarded-For` and `CF-Connecting-IP` with the socket address so callers can't choose their own rate-limit bucket, and it takes the relay's own origin from the socket (`https` on a TLS socket) and the `Host` header, ignoring `X-Forwarded-Proto` and `X-Forwarded-Host`. Set `trustProxy: true` only behind a proxy that overwrites all of those headers; the forwarded scheme and host then become the relay's origin.
 
 The built-in limiter is in memory: per process on Node, per isolate on Workers. For a hard global limit across instances, pass a `rateLimit` function backed by KV, Redis or a Durable Object.
 

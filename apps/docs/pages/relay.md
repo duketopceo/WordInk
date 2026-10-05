@@ -51,8 +51,10 @@ createServer(
 ```
 
 The Node adapter takes a second argument, `{ trustProxy }`. By default it replaces `X-Forwarded-For`
-and `CF-Connecting-IP` with the socket address, so callers can't pick their own rate-limit bucket. Set
-`trustProxy: true` only behind a proxy that overwrites those headers.
+and `CF-Connecting-IP` with the socket address, so callers can't pick their own rate-limit bucket,
+and it takes the relay's own origin from the socket (`https` on a TLS socket) and the `Host` header,
+ignoring `X-Forwarded-Proto` and `X-Forwarded-Host`. Set `trustProxy: true` only behind a proxy that
+overwrites all of those headers; the forwarded scheme and host then become the relay's origin.
 
 ## Any Fetch API runtime
 
@@ -79,8 +81,9 @@ Cross-origin cookie deployments **must** list the app's origin in `allowedOrigin
 gets `403 {"error":"origin_not_allowed"}` before `authorize` runs and without any upstream call.
 That stops another site from making a signed-in user's browser spend your quota with their cookie
 (CSRF). Requests with no `Origin` header (server-to-server, curl) still go to `authorize`. The
-relay's own origin comes from the request URL, so behind a TLS-terminating proxy where the Node
-adapter sees `http://`, list your public origin too.
+relay's own origin comes from the request URL. Behind a TLS-terminating proxy, where the Node
+adapter's socket is plain `http://`, set `trustProxy: true` if the proxy sets `X-Forwarded-Proto`
+and `X-Forwarded-Host`, or list your public origin in `allowedOrigins`.
 
 ## `authorize` is required
 

@@ -171,7 +171,14 @@ export function createRelay(config: RelayConfig): RelayHandler {
     }
 
     if (route === "/groq/transcriptions") {
-      const text = await upstream.text();
+      let text: string;
+      try {
+        text = await upstream.text();
+      } catch (err) {
+        // The body can stall past the upstream timeout (or the connection drop) after the headers.
+        console.error(`${LOG_PREFIX} ${route} upstream body unreadable.`, errorName(err));
+        return reply(502, { error: "upstream_unreachable" });
+      }
       return new Response(text, {
         status: 200,
         headers: {
