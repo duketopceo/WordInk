@@ -12,7 +12,8 @@ venv/
 
 # Environment and config
 .env
-config.json
+/config.json
+/legacy/config.json
 
 # Application data
 *.log
