@@ -235,7 +235,9 @@ describe("createLocalProvider", () => {
 
   it("is a batch 16 kHz HostProvider", () => {
     const p: HostProvider = createLocalProvider();
-    expect(p.capabilities).toEqual({ streaming: false, sampleRate: 16000 });
+    expect(p.capabilities).toMatchObject({ streaming: false, sampleRate: 16000 });
+    // The host watchdog must outlast a first-use model download (bounded by the provider itself).
+    expect(p.capabilities.timeoutMs).toBeGreaterThan(120_000);
     expect(p.id).toBe("local");
   });
 

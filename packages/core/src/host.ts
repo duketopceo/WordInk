@@ -470,7 +470,7 @@ class DictationHost implements Dictation {
         void this.callHost(() => this.hostProvider?.cancel?.());
         this.feed(session, (s) => s.host_error("ProviderDown"));
       }
-    }, TRANSCRIBE_TIMEOUT_MS);
+    }, this.hostProvider?.capabilities.timeoutMs ?? TRANSCRIBE_TIMEOUT_MS);
   }
 
   private clearWatchdog(): void {

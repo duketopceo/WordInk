@@ -15,6 +15,12 @@ export interface HostProviderCapabilities {
   streaming: boolean;
   /** Rate in Hz of the mono PCM16 audio the provider wants. The core resamples to it (KTD4). */
   sampleRate: number;
+  /**
+   * How long, in ms, the host waits for a result after release before failing the utterance with
+   * ProviderDown. Defaults to `TRANSCRIBE_TIMEOUT_MS`. Set it longer when the first result can include
+   * a model download, and enforce your own shorter limits inside the provider.
+   */
+  timeoutMs?: number;
 }
 
 /**

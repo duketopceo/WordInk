@@ -235,6 +235,27 @@ describe("watchdogs: a stalled provider ends in an error the user can retry from
     d.destroy();
   });
 
+  it("a host provider that declares a longer timeoutMs is given that long", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const audio = installFakeAudio();
+    const fake = fakeHostProvider(false);
+    (fake.provider.capabilities as { timeoutMs?: number }).timeoutMs = 150_000;
+    const d = createDictation({ provider: fake.provider });
+    const errors: string[] = [];
+    d.on("error", (e) => errors.push(e.code));
+    await d.start();
+    await vi.waitFor(() => expect(d.state).toBe("listening"));
+    audio.speak(0.5);
+    await d.stop();
+    // A first-use model download can outlast the default 30 s watchdog.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(d.state).toBe("transcribing");
+    fake.result({ type: "final", text: "slow but fine" });
+    expect(d.state).toBe("idle");
+    expect(errors).toEqual([]);
+    d.destroy();
+  });
+
   it("the watchdog is cleared when the utterance completes", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const audio = installFakeAudio();

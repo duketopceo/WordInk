@@ -201,7 +201,8 @@ export function createLocalProvider(options: LocalProviderOptions = {}): LocalPr
 
   return {
     id: "local",
-    capabilities: { streaming: false, sampleRate: SAMPLE_RATE },
+    // The first result can include the model download, which this provider bounds itself.
+    capabilities: { streaming: false, sampleRate: SAMPLE_RATE, timeoutMs: LOAD_TIMEOUT_MS + TRANSCRIBE_TIMEOUT_MS + 5_000 },
 
     start(sampleRate: number) {
       if (sampleRate !== SAMPLE_RATE) {
