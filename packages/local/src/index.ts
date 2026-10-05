@@ -56,7 +56,9 @@ export interface LocalProvider extends HostProvider {
 /** A model load (download included) that has not finished by then fails, so a later utterance can retry. */
 const LOAD_TIMEOUT_MS = 120_000;
 /** Inference on one utterance that has not answered by then fails with ProviderDown. */
-const TRANSCRIBE_TIMEOUT_MS = 30_000;
+const INFERENCE_TIMEOUT_MS = 30_000;
+/** Slack on top of this provider's own limits, so its timeouts report before the host watchdog. */
+const WATCHDOG_MARGIN_MS = 5_000;
 
 /** Rejects with `error` if `promise` has not settled within `ms`. */
 function withTimeout<T>(promise: Promise<T>, ms: number, error: Error): Promise<T> {
@@ -183,9 +185,9 @@ export function createLocalProvider(options: LocalProviderOptions = {}): LocalPr
     const text = new Promise<string>((resolve, reject) => pending.set(id, { resolve, reject }));
     const msg: ToWorker = { type: "transcribe", id, audio };
     w.postMessage(msg, [audio.buffer]);
-    const timedOut = new Error(`@wordink/local: transcription timed out after ${TRANSCRIBE_TIMEOUT_MS} ms`);
+    const timedOut = new Error(`@wordink/local: transcription timed out after ${INFERENCE_TIMEOUT_MS} ms`);
     try {
-      return await withTimeout(text, TRANSCRIBE_TIMEOUT_MS, timedOut);
+      return await withTimeout(text, INFERENCE_TIMEOUT_MS, timedOut);
     } catch (err) {
       // A worker that stops answering is likely wedged: drop it so the next utterance starts a fresh one.
       if (err === timedOut && worker === w) {
@@ -202,7 +204,7 @@ export function createLocalProvider(options: LocalProviderOptions = {}): LocalPr
   return {
     id: "local",
     // The first result can include the model download, which this provider bounds itself.
-    capabilities: { streaming: false, sampleRate: SAMPLE_RATE, timeoutMs: LOAD_TIMEOUT_MS + TRANSCRIBE_TIMEOUT_MS + 5_000 },
+    capabilities: { streaming: false, sampleRate: SAMPLE_RATE, timeoutMs: LOAD_TIMEOUT_MS + INFERENCE_TIMEOUT_MS + WATCHDOG_MARGIN_MS },
 
     start(sampleRate: number) {
       if (sampleRate !== SAMPLE_RATE) {

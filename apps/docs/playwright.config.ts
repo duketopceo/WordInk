@@ -5,7 +5,7 @@ import { DOCS_HOST, QUICKSTART_DIR, QUICKSTART_PORT, SITE_PORT, writeFakeMicClip
 mkdirSync(QUICKSTART_DIR, { recursive: true });
 writeFakeMicClip();
 
-// Chromium only (the suite was written against it; the mic is a getUserMedia stub). The model is real (Moonshine
+// Chromium only; the mic is a getUserMedia stub (see fakeMicFromClip). The model is real (Moonshine
 // on WASM), so allow minutes. `pnpm test:e2e` first builds the site with base /WordInk/ into e2e/.site.
 export default defineConfig({
   testDir: "e2e",

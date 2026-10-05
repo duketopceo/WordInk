@@ -77,6 +77,8 @@ export interface Dictation {
 export const DEFAULT_TRANSFORM_TIMEOUT_MS = 3000;
 /** Requests with no response by then are reported as failed (the core maps that to ProviderDown). */
 export const HTTP_TIMEOUT_MS = 30_000;
+/** WebSocket close code for a connection lost without a close frame. */
+const WS_ABNORMAL_CLOSE = 1006;
 /** A provider socket that has not opened by then is reported as failed to open. */
 export const WS_CONNECT_TIMEOUT_MS = 10_000;
 /** An utterance still transcribing after this long (a stalled socket or host provider) fails with ProviderDown. */
@@ -330,11 +332,18 @@ class DictationHost implements Dictation {
     if (creds.kind === "devKey") return creds.key;
     if (provider === "groq") return relayUrl(creds.endpoint, "");
     this.setState("requesting-mic");
+    return this.withRequestAbort((signal) =>
+      mintToken(provider as "openai" | "deepgram", creds.endpoint, fetch, signal),
+    );
+  }
+
+  /** Runs a request that aborts after `HTTP_TIMEOUT_MS` or on `destroy()`. */
+  private async withRequestAbort<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const controller = new AbortController();
     this.requests.add(controller);
     const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
     try {
-      return await mintToken(provider as "openai" | "deepgram", creds.endpoint, fetch, controller.signal);
+      return await run(controller.signal);
     } finally {
       clearTimeout(timer);
       this.requests.delete(controller);
@@ -399,8 +408,9 @@ class DictationHost implements Dictation {
     const session = this.session!;
     switch (e.t) {
       case "state":
-        if (e.s === "transcribing") this.startWatchdog(session);
-        else this.clearWatchdog();
+        // Arm on entry only, so a repeated transcribing effect can't slide the deadline.
+        if (e.s !== "transcribing") this.clearWatchdog();
+        else if (this.currentState !== "transcribing") this.startWatchdog(session);
         this.setState(e.s);
         if (e.s === "error") this.emit("error", sessionError(e.code ?? "ProviderDown", this.micErrorName));
         if (e.s !== "listening" && e.s !== "transcribing") this.hostActive = false;
@@ -460,11 +470,7 @@ class DictationHost implements Dictation {
     this.watchdog = setTimeout(() => {
       this.watchdog = undefined;
       if (this.destroyed || session !== this.session || session.state() !== "transcribing") return;
-      for (const [id, ws] of [...this.sockets]) {
-        this.sockets.delete(id);
-        this.closeSocket(ws);
-        this.feed(session, (s) => s.ws_closed(id, 1006));
-      }
+      for (const [id, ws] of [...this.sockets]) this.failSocket(session, id, ws);
       if (this.hostProvider && session.state() === "transcribing") {
         this.hostActive = false;
         void this.callHost(() => this.hostProvider?.cancel?.());
@@ -562,26 +568,26 @@ class DictationHost implements Dictation {
       if ("data" in p) form.append(p.name, new Blob([p.data as Uint8Array<ArrayBuffer>], { type: p.type }), p.filename);
       else form.append(p.name, p.text);
     }
-    const controller = new AbortController();
-    this.requests.add(controller);
-    const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
-    fetch(e.url, {
-      method: e.method,
-      headers: e.headers,
-      body: form,
-      signal: controller.signal,
-      // Relays authenticate with the app's own session (cookies); a direct dev-key call sends none.
-      credentials: this.credentials?.kind === "relay" ? "include" : "omit",
-    })
-      .then(async (r) => {
-        const body = await r.text();
-        this.feed(session, (s) => s.http_response(e.id, r.status, body));
-      })
-      .catch(() => this.feed(session, (s) => s.http_failed(e.id)))
-      .finally(() => {
-        clearTimeout(timer);
-        this.requests.delete(controller);
+    this.withRequestAbort(async (signal) => {
+      const r = await fetch(e.url, {
+        method: e.method,
+        headers: e.headers,
+        body: form,
+        signal,
+        // Relays authenticate with the app's own session (cookies); a direct dev-key call sends none.
+        credentials: this.credentials?.kind === "relay" ? "include" : "omit",
       });
+      return { status: r.status, body: await r.text() };
+    })
+      .then(({ status, body }) => this.feed(session, (s) => s.http_response(e.id, status, body)))
+      .catch(() => this.feed(session, (s) => s.http_failed(e.id)));
+  }
+
+  /** Closes a socket and reports it to the core as failed (the code browsers give a lost socket). */
+  private failSocket(session: WasmSession, id: number, ws: WebSocket): void {
+    this.sockets.delete(id);
+    this.closeSocket(ws);
+    this.feed(session, (s) => s.ws_closed(id, WS_ABNORMAL_CLOSE));
   }
 
   private openSocket(session: WasmSession, id: number, url: string, protocols: string[]): void {
@@ -590,7 +596,7 @@ class DictationHost implements Dictation {
       ws = new WebSocket(url, protocols);
     } catch {
       // An invalid URL or subprotocol: report it like a socket that failed to open.
-      queueMicrotask(() => this.feed(session, (s) => s.ws_closed(id, 1006)));
+      queueMicrotask(() => this.feed(session, (s) => s.ws_closed(id, WS_ABNORMAL_CLOSE)));
       return;
     }
     ws.binaryType = "arraybuffer";
@@ -599,10 +605,7 @@ class DictationHost implements Dictation {
       ws,
       setTimeout(() => {
         // Never opened: report it like a socket that failed to open.
-        if (this.sockets.get(id) !== ws) return;
-        this.sockets.delete(id);
-        this.closeSocket(ws);
-        this.feed(session, (s) => s.ws_closed(id, 1006));
+        if (this.sockets.get(id) === ws) this.failSocket(session, id, ws);
       }, WS_CONNECT_TIMEOUT_MS),
     );
     ws.onopen = () => {
