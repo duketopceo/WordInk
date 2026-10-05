@@ -30,7 +30,7 @@ pub struct OpenAi {
 
 impl OpenAi {
     /// Default model. Model names are in flux, so this is configurable.
-    pub const DEFAULT_MODEL: &'static str = "gpt-4o-transcribe";
+    pub const DEFAULT_MODEL: &'static str = "gpt-live-transcribe";
 
     /// OpenAI with a client secret.
     pub fn new(secret: impl Into<String>) -> Self {
@@ -45,8 +45,12 @@ impl OpenAi {
 pub(crate) struct OpenAiRun {
     socket: Socket,
     session_update: String,
-    /// Deltas received so far.
+    /// Transcripts of items completed so far.
+    done: String,
+    /// Deltas received for the current item.
     text: String,
+    /// Release committed the buffer: the next completed item is the final.
+    finishing: bool,
 }
 
 impl OpenAiRun {
@@ -55,20 +59,23 @@ impl OpenAiRun {
             "realtime".to_owned(),
             format!("openai-insecure-api-key.{}", o.secret),
         ];
-        // Manual turns: the session commits once, on release.
+        // GA transcription session. Manual turns: the session commits once,
+        // on release.
         let mut update = String::from(
-            r#"{"type":"transcription_session.update","session":{"input_audio_format":"pcm16","input_audio_transcription":{"model":"#,
+            r#"{"type":"session.update","session":{"type":"transcription","audio":{"input":{"format":{"type":"audio/pcm","rate":24000},"transcription":{"model":"#,
         );
         json::quote(&o.model, &mut update);
         if let Some(hint) = hint {
             update.push_str(r#","prompt":"#);
             json::quote(hint, &mut update);
         }
-        update.push_str(r#"},"turn_detection":null}}"#);
+        update.push_str(r#"},"turn_detection":null}}}}"#);
         Self {
             socket: Socket::new(URL.to_owned(), vec![protocols]),
             session_update: update,
+            done: String::new(),
             text: String::new(),
+            finishing: false,
         }
     }
 
@@ -83,17 +90,42 @@ impl OpenAiRun {
         self.socket.send(WsData::Text(msg), fx);
     }
 
+    /// Completed items plus the current item's deltas.
+    fn so_far(&self) -> String {
+        match (self.done.is_empty(), self.text.is_empty()) {
+            (_, true) => self.done.clone(),
+            (true, false) => self.text.clone(),
+            (false, false) => format!("{} {}", self.done, self.text.trim_start()),
+        }
+    }
+
     fn message(&mut self, v: &Value, fx: &mut Vec<Effect>) -> Option<Progress> {
         match v.get("type").str()? {
             "conversation.item.input_audio_transcription.delta" => {
                 self.text.push_str(v.get("delta").str()?);
-                Some(Progress::Interim(self.text.clone()))
+                Some(Progress::Interim(self.so_far()))
             }
             "conversation.item.input_audio_transcription.completed" => {
+                // An item completed before release (the provider ended a
+                // turn on its own) is kept and shown; only the commit on
+                // release produces the final.
+                self.text = v.get("transcript").str()?.to_owned();
+                self.done = self.so_far();
+                self.text.clear();
+                if !self.finishing {
+                    return Some(Progress::Interim(self.done.clone()));
+                }
                 self.socket.close(fx);
-                Some(Progress::Final(v.get("transcript").str()?.to_owned()))
+                Some(Progress::Final(core::mem::take(&mut self.done)))
             }
-            "error" => Some(Progress::Failed(error_code(v.get("error")))),
+            "error" => match error_code(v.get("error")) {
+                // Everything was already transcribed before release.
+                ErrorCode::NoSpeech if self.finishing && !self.done.is_empty() => {
+                    self.socket.close(fx);
+                    Some(Progress::Final(core::mem::take(&mut self.done)))
+                }
+                code => Some(Progress::Failed(code)),
+            },
             _ => None,
         }
     }
@@ -125,6 +157,7 @@ impl Run for OpenAiRun {
 
     fn finish(&mut self, _all: &[i16], rest: &[i16], _ids: &mut Ids, fx: &mut Vec<Effect>) {
         self.append(rest, fx);
+        self.finishing = true;
         let commit = r#"{"type":"input_audio_buffer.commit"}"#.to_owned();
         self.socket.send(WsData::Text(commit), fx);
     }

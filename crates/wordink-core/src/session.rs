@@ -17,6 +17,11 @@ pub const MIN_SPEECH_MS: u64 = 300;
 /// recording with no such window ends in [`ErrorCode::NoSpeech`].
 pub const SPEECH_RMS_THRESHOLD: f32 = 0.01;
 
+/// Default longest utterance. Capture stops on its own here, as if the
+/// button were released, and what was captured is transcribed. 60 s of
+/// 16 kHz PCM16 WAV is about 1.9 MB, under the relay's 2 MB body cap.
+pub const MAX_UTTERANCE_MS: u64 = 60_000;
+
 /// Level events per second of audio.
 const LEVEL_HZ: u32 = 20;
 
@@ -45,6 +50,10 @@ pub struct SessionConfig {
     /// own form: Whisper and OpenAI prompt, Deepgram keyterms (split on
     /// commas and newlines), or the host provider's start effect.
     pub hint: Option<String>,
+    /// Longest utterance in milliseconds of captured audio, after which the
+    /// session stops capture and transcribes. Defaults to
+    /// [`MAX_UTTERANCE_MS`].
+    pub max_utterance_ms: u64,
 }
 
 impl SessionConfig {
@@ -54,6 +63,7 @@ impl SessionConfig {
             mode,
             provider,
             hint: None,
+            max_utterance_ms: MAX_UTTERANCE_MS,
         }
     }
 }
@@ -85,6 +95,8 @@ pub struct Session {
     state: State,
     recording: Option<Recording>,
     run: Option<Box<dyn Run>>,
+    /// A final the run reported while still listening.
+    early_final: Option<String>,
     ids: Ids,
 }
 
@@ -96,6 +108,7 @@ impl Session {
             state: State::Idle,
             recording: None,
             run: None,
+            early_final: None,
             ids: Ids::default(),
         }
     }
@@ -141,10 +154,12 @@ impl Session {
                     None => None,
                 };
                 match progress {
-                    // A final before release (a misbehaving streaming provider)
-                    // is shown as interim text; the session ends on release.
+                    // A final before release (a streaming provider that ended
+                    // on its own) is shown as interim text; release then
+                    // completes with it, as the run has nothing more to give.
                     Some(Progress::Interim(text)) => fx.push(Effect::Interim { text }),
                     Some(Progress::Final(text)) if self.state == State::Listening => {
+                        self.early_final = Some(text.clone());
                         fx.push(Effect::Interim { text })
                     }
                     Some(Progress::Final(text)) => self.complete(text, &mut fx),
@@ -160,15 +175,28 @@ impl Session {
     /// Feeds captured mono Float32 audio at the rate given in
     /// [`Event::MicGranted`]. Returns [`Effect::Level`] meter updates, about
     /// 20 per second of audio. Ignored outside `Listening`.
+    ///
+    /// Once the recording reaches [`SessionConfig::max_utterance_ms`], the
+    /// rest of `samples` is dropped and the session stops as if released,
+    /// so the effects can also include [`Effect::StopMic`], a state change
+    /// and the provider's request.
     pub fn push_audio(&mut self, samples: &[f32]) -> Vec<Effect> {
         let mut fx = Vec::new();
         if let Some(rec) = self.recording.as_mut() {
-            rec.push(samples, &mut fx);
+            let max = self.config.max_utterance_ms * u64::from(rec.input_rate) / 1000;
+            let room = max.saturating_sub(rec.input_samples);
+            let take = samples
+                .len()
+                .min(usize::try_from(room).unwrap_or(usize::MAX));
+            rec.push(&samples[..take], &mut fx);
             let streaming = self.config.provider.capabilities().streaming;
             if let Some(run) = self.run.as_mut().filter(|_| streaming) {
                 if let Some(chunk) = rec.stream_chunk() {
                     run.audio(chunk, &mut fx);
                 }
+            }
+            if rec.input_samples >= max {
+                self.stop(&mut fx);
             }
         }
         fx
@@ -180,6 +208,7 @@ impl Session {
     }
 
     fn start(&mut self, fx: &mut Vec<Effect>) {
+        self.early_final = None;
         self.set(State::RequestingMic, fx);
         fx.push(Effect::RequestMic);
     }
@@ -188,6 +217,9 @@ impl Session {
     fn stop(&mut self, fx: &mut Vec<Effect>) {
         fx.push(Effect::StopMic);
         let finished = self.recording.take().and_then(Recording::finish);
+        if let Some(text) = self.early_final.take() {
+            return self.complete(text, fx);
+        }
         match finished {
             Some((pcm, streamed)) if self.run.is_some() => {
                 self.set(State::Transcribing, fx);

@@ -362,15 +362,18 @@ fn openai_opens_socket_with_ephemeral_secret_and_configures_session() {
     let opened = s.handle(Event::WsOpened { id });
     let texts = sent_texts(&opened, id);
     let update = json(&texts[0]);
-    assert_eq!(update["type"], "transcription_session.update");
+    // The GA transcription session shape (the relay mints GA client secrets).
+    assert_eq!(update["type"], "session.update");
     let session = &update["session"];
-    assert_eq!(session["input_audio_format"], "pcm16");
+    assert_eq!(session["type"], "transcription");
+    let input = &session["audio"]["input"];
     assert_eq!(
-        session["input_audio_transcription"]["model"],
-        "gpt-4o-transcribe"
+        input["format"],
+        json(r#"{"type":"audio/pcm","rate":24000}"#)
     );
-    assert_eq!(session["input_audio_transcription"]["prompt"], HINT);
-    assert!(session["turn_detection"].is_null());
+    assert_eq!(input["transcription"]["model"], "gpt-live-transcribe");
+    assert_eq!(input["transcription"]["prompt"], HINT);
+    assert!(input.get("turn_detection").is_some_and(Value::is_null));
     assert!(texts.len() > 1, "held audio is flushed after the update");
     for t in &texts[1..] {
         assert_eq!(json(t)["type"], "input_audio_buffer.append");
@@ -468,6 +471,83 @@ fn openai_rejected_handshake_is_auth_failed() {
             Effect::State(State::Error(ErrorCode::AuthFailed))
         ]
     );
+}
+
+#[test]
+fn openai_without_hint_omits_prompt() {
+    let mut s = Session::new(SessionConfig::new(Mode::PushToTalk, openai()));
+    let (id, _, _) = ws_open(&begin(&mut s));
+    let update = json(&sent_texts(&s.handle(Event::WsOpened { id }), id)[0]);
+    let transcription = &update["session"]["audio"]["input"]["transcription"];
+    assert_eq!(transcription["model"], "gpt-live-transcribe");
+    assert!(transcription.get("prompt").is_none());
+}
+
+/// Delta and completed lines from the fixture: one finished item.
+fn openai_item() -> Vec<String> {
+    fixture_lines("openai_delta_completed.jsonl")
+        .into_iter()
+        .filter(|l| l.contains("input_audio_transcription"))
+        .collect()
+}
+
+#[test]
+fn openai_completed_before_release_still_finalizes_on_release() {
+    // A completed item while the button is still held keeps the socket open
+    // and shows as interim text; the commit on release produces the final.
+    let mut s = session(openai());
+    let (id, _, _) = ws_open(&begin(&mut s));
+    s.handle(Event::WsOpened { id });
+    push(&mut s, &tone(500, 0.5));
+    let early = feed_ws(&mut s, id, &openai_item());
+    assert!(
+        !early.contains(&Effect::WsClose { id }),
+        "socket stays open"
+    );
+    assert!(finals(&early).is_empty());
+    assert_eq!(
+        interims(&early).last().unwrap(),
+        "Hello world, how are \"you\"? Café."
+    );
+    assert_eq!(s.state(), State::Listening);
+
+    push(&mut s, &tone(500, 0.5));
+    let released = s.handle(Event::Release);
+    assert_eq!(
+        json(sent_texts(&released, id).last().unwrap()),
+        json(r#"{"type":"input_audio_buffer.commit"}"#)
+    );
+    assert_eq!(s.state(), State::Transcribing);
+
+    let delta = r#"{"type":"conversation.item.input_audio_transcription.delta","item_id":"item_002","content_index":0,"delta":"More."}"#;
+    let completed = r#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"item_002","content_index":0,"transcript":"More."}"#;
+    let fx = feed_ws(&mut s, id, &[delta.into(), completed.into()]);
+    assert_eq!(
+        interims(&fx),
+        vec!["Hello world, how are \"you\"? Café. More."]
+    );
+    assert_eq!(
+        finals(&fx),
+        vec!["Hello world, how are \"you\"? Café. More."]
+    );
+    assert!(fx.contains(&Effect::WsClose { id }));
+    assert_eq!(s.state(), State::Idle);
+}
+
+#[test]
+fn openai_completed_before_release_then_empty_commit_is_final() {
+    // If the provider already transcribed everything, the commit on release
+    // finds an empty buffer; the text so far is the final.
+    let mut s = session(openai());
+    let (id, _, _) = ws_open(&begin(&mut s));
+    s.handle(Event::WsOpened { id });
+    push(&mut s, &tone(500, 0.5));
+    feed_ws(&mut s, id, &openai_item());
+    s.handle(Event::Release);
+    let empty = r#"{"type":"error","error":{"type":"invalid_request_error","code":"input_audio_buffer_commit_empty","message":"buffer too small"}}"#;
+    let fx = feed_ws(&mut s, id, &[empty.into()]);
+    assert_eq!(finals(&fx), vec!["Hello world, how are \"you\"? Café."]);
+    assert_eq!(fx.last(), Some(&Effect::State(State::Idle)));
 }
 
 // --------------------------------------------------------------- Deepgram
@@ -786,4 +866,87 @@ fn host_provider_error_and_cancel() {
             Effect::State(State::Error(ErrorCode::NoSpeech))
         ]
     );
+}
+
+#[test]
+fn streaming_host_final_before_release_completes_on_release() {
+    // A streaming host provider that reports its final while the button is
+    // held has finished: release completes with that text, not a hang.
+    let mut s = session(host(true, 16_000));
+    begin(&mut s);
+    push(&mut s, &tone(500, 0.5));
+    let early = s.handle(Event::HostProviderResult(HostResult::Final {
+        text: "hello world".into(),
+    }));
+    assert_eq!(
+        early,
+        vec![Effect::Interim {
+            text: "hello world".into()
+        }]
+    );
+    assert_eq!(s.state(), State::Listening);
+
+    let released = s.handle(Event::Release);
+    assert_eq!(finals(&released), vec!["hello world"]);
+    assert_eq!(released.last(), Some(&Effect::State(State::Idle)));
+    assert_eq!(s.state(), State::Idle);
+}
+
+// ------------------------------------------------------ utterance limit
+
+#[test]
+fn utterance_auto_stops_at_the_limit_and_groq_gets_at_most_60_s() {
+    assert_eq!(wordink_core::session::MAX_UTTERANCE_MS, 60_000);
+    let config = SessionConfig::new(Mode::PushToTalk, groq());
+    assert_eq!(config.max_utterance_ms, 60_000);
+
+    let mut s = session(groq());
+    begin(&mut s);
+    let audio = tone(61_000, 0.5);
+    let mut fx = Vec::new();
+    let mut stopped_at = None;
+    for (i, chunk) in audio.chunks(128).enumerate() {
+        let out = s.push_audio(chunk);
+        if stopped_at.is_none() && out.contains(&Effect::State(State::Transcribing)) {
+            stopped_at = Some((i + 1) * 128);
+        }
+        fx.extend(out);
+    }
+    // Stops on its own, in the chunk that reaches 60 s, without a release.
+    let stopped_at = stopped_at.expect("auto-stop while holding");
+    assert!(stopped_at >= 60 * MIC_RATE as usize && stopped_at < 60 * MIC_RATE as usize + 128);
+    assert_eq!(s.state(), State::Transcribing);
+    assert_eq!(fx.iter().filter(|e| **e == Effect::StopMic).count(), 1);
+
+    let req = http_request(&fx);
+    let HttpBody::Multipart(parts) = &req.body else {
+        unreachable!()
+    };
+    let PartValue::File { data, .. } = &parts[0].value else {
+        panic!("file part")
+    };
+    let samples = (data.len() - 44) / 2;
+    assert!(samples <= 60 * 16_000, "{samples} samples");
+    assert!(samples >= 60 * 16_000 - 16, "{samples} samples");
+
+    // Release after the auto-stop does nothing.
+    assert!(s.handle(Event::Release).is_empty());
+}
+
+#[test]
+fn utterance_limit_is_configurable() {
+    let mut config = SessionConfig::new(Mode::Toggle, groq());
+    config.max_utterance_ms = 1_000;
+    let mut s = Session::new(config);
+    begin(&mut s);
+    let fx = push(&mut s, &tone(1_500, 0.5));
+    assert_eq!(s.state(), State::Transcribing);
+    let req = http_request(&fx);
+    let HttpBody::Multipart(parts) = &req.body else {
+        unreachable!()
+    };
+    let PartValue::File { data, .. } = &parts[0].value else {
+        panic!("file part")
+    };
+    assert!((data.len() - 44) / 2 <= 16_000);
 }
