@@ -40,8 +40,11 @@ export interface RelayConfig {
   /** Path prefix the routes live under, e.g. `/api/wordink`. Default: none. */
   basePath?: string;
   /**
-   * Origins that receive CORS allow headers. Browser hygiene only: Origin is trivially forged
-   * outside a browser, so this is never a substitute for `authorize`.
+   * Cross-origin browser apps allowed to call the relay; they also get CORS allow headers. A request
+   * whose `Origin` (including `null`) is neither the relay's own origin nor listed here gets 403
+   * before `authorize` runs, so a cross-site page can't spend quota with the user's cookie.
+   * Requests with no Origin header (server-to-server) still go to `authorize`. Origin is trivially
+   * forged outside a browser, so this is never a substitute for `authorize`.
    */
   allowedOrigins?: readonly string[];
   /** Override the built-in limiter's settings, or supply your own limiter. */
@@ -55,12 +58,15 @@ export interface RelayConfig {
   maxBodyBytes?: number;
   /** Lifetime of minted OpenAI/Deepgram credentials. Fixed server-side; client values are ignored. Default 120. */
   tokenTtlSeconds?: number;
+  /** Abort an upstream provider call after this many ms; the relay then answers 502. Default 15 000. */
+  upstreamTimeoutMs?: number;
 }
 
 export type RelayHandler = (request: Request) => Promise<Response>;
 
 export const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_TOKEN_TTL_SECONDS = 120;
+export const DEFAULT_UPSTREAM_TIMEOUT_MS = 15_000;
 export const DEFAULT_RATE_LIMIT: Required<RateLimitOptions> = { windowMs: 60_000, max: 20, dailyMax: 1000 };
 
 const LOG_PREFIX = "[@wordink/server]";
@@ -90,6 +96,7 @@ export function createRelay(config: RelayConfig): RelayHandler {
   const allowedOrigins = new Set(config.allowedOrigins ?? []);
   const maxBodyBytes = config.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const ttl = config.tokenTtlSeconds ?? DEFAULT_TOKEN_TTL_SECONDS;
+  const timeoutMs = config.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS;
   const clientIdOf = config.clientId ?? defaultClientId;
   const limiter =
     typeof config.rateLimit === "function" ? config.rateLimit : createMemoryLimiter(config.rateLimit);
@@ -108,6 +115,11 @@ export function createRelay(config: RelayConfig): RelayHandler {
       return new Response(null, { status: 204, headers: { ...cors, vary: "Origin" } });
     }
     if (request.method !== "POST") return reply(405, { error: "method_not_allowed" }, { allow: "POST, OPTIONS" });
+
+    // Browsers set Origin on cross-site POSTs; an untrusted one never reaches authorize (CSRF).
+    if (origin !== null && origin !== new URL(request.url).origin && !allowedOrigins.has(origin)) {
+      return reply(403, { error: "origin_not_allowed" });
+    }
 
     if (typeof authorize !== "function") return reply(403, { error: "relay_not_configured" });
     let allowed = false;
@@ -138,11 +150,11 @@ export function createRelay(config: RelayConfig): RelayHandler {
     let upstream: Response;
     try {
       if (route === "/groq/transcriptions") {
-        upstream = await forwardGroq(key, audio ?? new Uint8Array(), request.headers.get("content-type"));
+        upstream = await forwardGroq(key, audio ?? new Uint8Array(), request.headers.get("content-type"), timeoutMs);
       } else if (route === "/openai/token") {
-        upstream = await requestOpenAIClientSecret(key, ttl);
+        upstream = await requestOpenAIClientSecret(key, ttl, timeoutMs);
       } else {
-        upstream = await requestDeepgramGrant(key, ttl);
+        upstream = await requestDeepgramGrant(key, ttl, timeoutMs);
       }
     } catch (err) {
       console.error(`${LOG_PREFIX} ${route} upstream unreachable.`, errorName(err));

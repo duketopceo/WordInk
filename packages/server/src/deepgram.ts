@@ -6,11 +6,12 @@ export interface DeepgramGrant {
   expires_in: number;
 }
 
-export function requestDeepgramGrant(apiKey: string, ttlSeconds: number): Promise<Response> {
+export function requestDeepgramGrant(apiKey: string, ttlSeconds: number, timeoutMs: number): Promise<Response> {
   return fetch(DEEPGRAM_GRANT_URL, {
     method: "POST",
     headers: { authorization: `Token ${apiKey}`, "content-type": "application/json" },
     body: JSON.stringify({ ttl_seconds: ttlSeconds }),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 }
 

@@ -72,7 +72,7 @@ All routes are `POST`, under the optional `basePath`.
 | `/openai/token` | `POST https://api.openai.com/v1/realtime/client_secrets` | `{ "value": "ek_...", "expires_at": 1730000000 }` |
 | `/deepgram/token` | `POST https://api.deepgram.com/v1/auth/grant` | `{ "access_token": "eyJ...", "expires_in": 120 }` |
 
-A route whose key isn't configured answers `503`. Status codes the browser can see: `403` (not authorized, or no `authorize` hook), `413` (upload too large), `429` (rate limited, by the relay or upstream, with `Retry-After`), `502` (upstream failed; its error body is never passed through, because provider errors can quote part of the key).
+A route whose key isn't configured answers `503`. Status codes the browser can see: `403` (not authorized, no `authorize` hook, or an `Origin` that isn't allowed), `413` (upload too large), `429` (rate limited, by the relay or upstream, with `Retry-After`), `502` (upstream failed or timed out; its error body is never passed through, because provider errors can quote part of the key).
 
 ## `authorize` is required
 
@@ -116,6 +116,8 @@ authorize: async (request) => {
 
 Cross-origin cookie auth needs the browser to send credentials; the relay sends `Access-Control-Allow-Credentials: true` for allowed origins.
 
+**If your app and relay are on different origins, list the app's origin in `allowedOrigins`.** A request whose `Origin` header (including `Origin: null`) is neither the relay's own origin nor in `allowedOrigins` gets `403 {"error":"origin_not_allowed"}` before `authorize` runs and without an upstream call. That stops another site from making a signed-in user's browser spend your quota with their cookie (CSRF). Requests with no `Origin` header (server-to-server, curl) still go to `authorize`. The relay's own origin comes from the request URL, so behind a TLS-terminating proxy where the Node adapter sees `http://`, list your public origin too.
+
 ## Options
 
 | Option | Default | Notes |
@@ -123,11 +125,12 @@ Cross-origin cookie auth needs the browser to send credentials; the relay sends 
 | `authorize` | none (all `403`) | Required. See above. |
 | `keys` | env in the adapters | `{ groq?, openai?, deepgram? }`. |
 | `basePath` | `""` | e.g. `"/api/wordink"`. |
-| `allowedOrigins` | `[]` | Origins that get CORS allow headers. |
+| `allowedOrigins` | `[]` | Cross-origin apps allowed to call the relay; they get CORS allow headers. Any other `Origin` (besides the relay's own) gets `403`. |
 | `rateLimit` | `{ windowMs: 60000, max: 20, dailyMax: 1000 }` | `max` upstream calls per client per window, `dailyMax` upstream calls per UTC day across all clients. Or pass `(clientId, request) => boolean \| Promise<boolean>` to use your own store. |
 | `clientId` | CF-Connecting-IP, then first X-Forwarded-For, then `"anon"` | Rate-limit key. Prefer your user id. |
 | `maxBodyBytes` | `2 MB` (about 60 s of 16 kHz PCM16) | Larger Groq uploads get `413` before any upstream call. |
 | `tokenTtlSeconds` | `120` | Lifetime of minted credentials. Any TTL the client sends is ignored. |
+| `upstreamTimeoutMs` | `15000` | An upstream provider call that takes longer is aborted and answers `502`. |
 
 The Node adapter takes a second argument, `{ trustProxy }`. By default it replaces `X-Forwarded-For` and `CF-Connecting-IP` with the socket address so callers can't choose their own rate-limit bucket. Set `trustProxy: true` only behind a proxy that overwrites those headers.
 
@@ -135,7 +138,7 @@ The built-in limiter is in memory: per process on Node, per isolate on Workers. 
 
 ## Security notes
 
-- **Origin and CORS are not authentication.** `allowedOrigins` only controls which web pages a browser lets read the responses. Any script outside a browser can send any `Origin` header. `authorize` is what protects your keys and quota.
+- **Origin and CORS are not authentication.** `allowedOrigins` controls which web pages a browser lets call the relay and read its responses. Any script outside a browser can send any `Origin` header. `authorize` is what protects your keys and quota.
 - **Dev keys are public keys.** WordInk's browser `devKey` mode (localhost only) puts your provider key in the page, where anyone with page access can read it. Use it for local experiments only, and use this relay for anything deployed.
 - **No body logging.** The relay never logs request or response bodies (audio, transcripts, tokens) or keys. It logs only a setup error, upstream HTTP status codes and error names.
 - **Keys never echo.** Successful mint responses are rebuilt from only the fields above; upstream error bodies are dropped.

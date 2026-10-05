@@ -72,8 +72,15 @@ const relay = createRelay({
 
 Set the element's (or hook's) `endpoint` to the relay's base URL including `basePath`, for example
 `endpoint="https://relay.example.com/wordink"` or `endpoint="/wordink"` on the same origin. Relay
-requests are sent with `credentials: "include"`, so your session cookie reaches `authorize`; for a
-relay on another origin, list your app's origin in `allowedOrigins`.
+requests are sent with `credentials: "include"`, so your session cookie reaches `authorize`.
+
+Cross-origin cookie deployments **must** list the app's origin in `allowedOrigins`. A request whose
+`Origin` header (including `Origin: null`) is neither the relay's own origin nor in `allowedOrigins`
+gets `403 {"error":"origin_not_allowed"}` before `authorize` runs and without any upstream call.
+That stops another site from making a signed-in user's browser spend your quota with their cookie
+(CSRF). Requests with no `Origin` header (server-to-server, curl) still go to `authorize`. The
+relay's own origin comes from the request URL, so behind a TLS-terminating proxy where the Node
+adapter sees `http://`, list your public origin too.
 
 ## `authorize` is required
 
@@ -126,6 +133,7 @@ const relay = createRelay({
 | `clientId` | `CF-Connecting-IP`, then the first `X-Forwarded-For`, then `"anon"` | The rate-limit key. Prefer your user id |
 | `maxBodyBytes` | 2 MB (about 60 s of 16 kHz PCM16) | Larger Groq uploads get `413` before any upstream call |
 | `tokenTtlSeconds` | `120` | Lifetime of minted OpenAI and Deepgram credentials. Fixed on the server; any TTL the client sends is ignored |
+| `upstreamTimeoutMs` | `15000` | An upstream provider call that takes longer is aborted and answers `502` |
 
 The built-in limiter is in memory: per process on Node, per isolate on Workers. For a hard global
 limit across instances, pass `rateLimit: (clientId, request) => boolean | Promise<boolean>` backed by
@@ -141,8 +149,8 @@ All routes are `POST`, under `basePath`.
 | `/openai/token` | OpenAI `realtime/client_secrets` | `{ "value": "ek_…", "expires_at": … }` |
 | `/deepgram/token` | Deepgram `auth/grant` | `{ "access_token": "…", "expires_in": 120 }` |
 
-`403`: not authorized, or no `authorize` hook. `413`: upload too large. `429`: rate limited, by the
-relay or upstream. `502`: upstream failed (its error body is never passed through, because provider
+`403`: not authorized, no `authorize` hook, or an `Origin` that isn't allowed. `413`: upload too
+large. `429`: rate limited, by the relay or upstream. `502`: upstream failed or timed out (its error body is never passed through, because provider
 errors can quote part of the key). `503`: no key configured for that route.
 
 ## What the relay logs

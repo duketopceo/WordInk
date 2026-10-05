@@ -436,6 +436,74 @@ describe("CORS", () => {
   });
 });
 
+describe("origin check (CSRF)", () => {
+  it("rejects an authorized cookie request from a disallowed Origin with 403 and no upstream call", async () => {
+    const authorize = vi.fn(() => true);
+    const res = await relay({ authorize })(
+      post("/groq/transcriptions", {
+        body: audioForm(),
+        headers: { origin: "https://evil.example", cookie: "session=valid" },
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "origin_not_allowed" });
+    expect(authorize).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects the opaque Origin: null", async () => {
+    const res = await relay()(post("/deepgram/token", { headers: { origin: "null" } }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "origin_not_allowed" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("lets a same-origin request through without listing it", async () => {
+    const res = await relay({ allowedOrigins: [] })(
+      post("/deepgram/token", { headers: { origin: "https://relay.example.com" } }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("lets an allowed origin through", async () => {
+    const res = await relay()(post("/deepgram/token", { headers: { origin: ALLOWED } }));
+    expect(res.status).toBe(200);
+  });
+
+  it("sends a request with no Origin header on to authorize", async () => {
+    const authorize = vi.fn(() => true);
+    const req = post("/deepgram/token");
+    req.headers.delete("origin");
+    const res = await relay({ authorize })(req);
+    expect(authorize).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("upstream timeout", () => {
+  const hang = (_input: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+    });
+
+  it.each(["/groq/transcriptions", "/openai/token", "/deepgram/token"])(
+    "answers 502 upstream_unreachable when %s never responds",
+    async (path) => {
+      fetchMock.mockImplementationOnce(hang);
+      const res = await relay({ upstreamTimeoutMs: 20 })(
+        post(path, path === "/groq/transcriptions" ? { body: audioForm() } : {}),
+      );
+      expect(res.status).toBe(502);
+      expect(await res.json()).toEqual({ error: "upstream_unreachable" });
+    },
+  );
+
+  it("passes a default timeout signal to the upstream fetch", async () => {
+    await relay()(post("/openai/token"));
+    expect(upstreamCall().init.signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
 describe("routing and hygiene", () => {
   it("honours a base path", async () => {
     const handler = relay({ basePath: "/api/wordink/" });
@@ -482,7 +550,11 @@ describe("routing and hygiene", () => {
 describe("Cloudflare adapter", () => {
   it("builds the relay from env keys and reuses it (rate-limit state persists)", async () => {
     const worker = createWorker<{ GROQ_API_KEY: string; OPENAI_API_KEY: string; DEEPGRAM_API_KEY: string }>(
-      () => ({ authorize: () => true, rateLimit: { windowMs: 60_000, max: 1, dailyMax: 10 } }),
+      () => ({
+        authorize: () => true,
+        allowedOrigins: [ALLOWED],
+        rateLimit: { windowMs: 60_000, max: 1, dailyMax: 10 },
+      }),
     );
     const env = { GROQ_API_KEY: GROQ_KEY, OPENAI_API_KEY: OPENAI_KEY, DEEPGRAM_API_KEY: DEEPGRAM_KEY };
     const ctx = { waitUntil: () => {}, passThroughOnException: () => {} };

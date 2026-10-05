@@ -6,7 +6,7 @@ export interface OpenAIClientSecret {
   expires_at: number;
 }
 
-export function requestOpenAIClientSecret(apiKey: string, ttlSeconds: number): Promise<Response> {
+export function requestOpenAIClientSecret(apiKey: string, ttlSeconds: number, timeoutMs: number): Promise<Response> {
   return fetch(OPENAI_CLIENT_SECRETS_URL, {
     method: "POST",
     headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
@@ -14,6 +14,7 @@ export function requestOpenAIClientSecret(apiKey: string, ttlSeconds: number): P
       expires_after: { anchor: "created_at", seconds: ttlSeconds },
       session: { type: "transcription" },
     }),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 }
 
