@@ -20,3 +20,13 @@ config.json
 recordings/
 .DS_Store
 Thumbs.db
+
+# Rust
+target/
+
+# Node
+node_modules/
+*.tsbuildinfo
+.turbo/
+packages/*/dist/
+apps/*/dist/

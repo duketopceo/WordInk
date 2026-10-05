@@ -1,0 +1,9 @@
+[package]
+name = "wordink-core"
+description = "Sans-I/O dictation core for WordInk: sessions, audio pipeline, provider protocols"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

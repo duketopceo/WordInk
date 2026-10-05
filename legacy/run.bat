@@ -6,7 +6,7 @@ echo Starting Groq Flow...
 echo ============================================================
 echo.
 
-"%~dp0.venv\Scripts\python.exe" -m groq_flow.main --no-tray %*
+"%~dp0.venv\Scripts\python.exe" -m wordink.main --no-tray %*
 
 if %ERRORLEVEL% NEQ 0 (
     echo.

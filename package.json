@@ -1,0 +1,16 @@
+{
+  "name": "wordink-monorepo",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "pnpm@10.20.0",
+  "scripts": {
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "build": "pnpm -r --if-present build",
+    "changeset": "changeset"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.29.0",
+    "typescript": "^5.9.0"
+  }
+}
