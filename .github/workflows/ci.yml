@@ -60,6 +60,13 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @wordink/core exec playwright install --with-deps chromium firefox webkit
+      # Firefox's media graph needs an audio server: without one its fake microphone is silent and
+      # every dictation ends in NoSpeech. A PulseAudio null sink gives it one.
+      - name: Start a PulseAudio null sink
+        run: |
+          sudo apt-get install -y --no-install-recommends pulseaudio
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink
       - run: pnpm test:e2e
   legacy:
     runs-on: ubuntu-latest

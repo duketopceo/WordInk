@@ -10,7 +10,9 @@
     <output id="final"></output>
     <script type="module">
       import { createDictation } from "/dist/index.js";
-      const d = createDictation({ provider: "groq", endpoint: "/relay" });
+      // ?run=<id> scopes the relay path so the e2e server can hand the spec this run's upload.
+      const run = new URLSearchParams(location.search).get("run");
+      const d = createDictation({ provider: "groq", endpoint: run ? `/relay/${run}` : "/relay" });
       const log = [];
       d.on("state", (s) => {
         log.push(`state:${s}`);
@@ -21,6 +23,10 @@
         document.getElementById("final").textContent = t;
       });
       d.on("error", (e) => log.push(`error:${e.code}`));
+      // Marks the first non-zero meter level: audio is actually reaching the core.
+      d.on("level", (l) => {
+        if (l > 0) document.body.dataset.audio = "flowing";
+      });
       window.wordink = { dictation: d, log };
       // Tap to start, tap to stop: each click is a trusted user gesture (AudioContext autoplay rules).
       document.getElementById("mic").addEventListener("click", () => {

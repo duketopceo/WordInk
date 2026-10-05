@@ -26,18 +26,28 @@ const TYPES = {
   ".wav": "audio/wav",
 };
 
+/** In-flight Hub downloads, so browsers loading the same file in parallel share one fetch. */
+const downloads = new Map();
+
 async function fromHub(path) {
   const file = join(modelCache, path);
   try {
     return await readFile(file);
   } catch {
-    const res = await fetch(`https://huggingface.co/${path}`);
-    if (!res.ok) throw Object.assign(new Error(`hub ${res.status}`), { status: res.status });
-    const body = Buffer.from(await res.arrayBuffer());
-    await mkdir(dirname(file), { recursive: true });
-    await writeFile(`${file}.part`, body);
-    await rename(`${file}.part`, file);
-    return body;
+    let download = downloads.get(path);
+    if (!download) {
+      download = (async () => {
+        const res = await fetch(`https://huggingface.co/${path}`);
+        if (!res.ok) throw Object.assign(new Error(`hub ${res.status}`), { status: res.status });
+        const body = Buffer.from(await res.arrayBuffer());
+        await mkdir(dirname(file), { recursive: true });
+        await writeFile(`${file}.part`, body);
+        await rename(`${file}.part`, file);
+        return body;
+      })().finally(() => downloads.delete(path));
+      downloads.set(path, download);
+    }
+    return download;
   }
 }
 

@@ -49,21 +49,17 @@ function findWav(body: Buffer) {
   };
 }
 
-test("a recorded clip reaches the mocked Groq relay as a valid 16 kHz mono WAV", async ({ page }) => {
-  let body: Buffer | undefined;
-  let contentType = "";
-  await page.route("**/relay/groq/transcriptions", async (route) => {
-    body = route.request().postDataBuffer() ?? undefined;
-    contentType = (await route.request().headerValue("content-type")) ?? "";
-    await route.fulfill({ status: 200, contentType: "text/plain", body: "hello from the relay\n" });
-  });
-
-  await page.goto("/e2e/index.html");
+test("a recorded clip reaches the mocked Groq relay as a valid 16 kHz mono WAV", async ({ page, browserName }) => {
+  // The e2e server plays the relay and records the upload for this run id (see e2e/server.mjs).
+  const run = `${browserName}-${Date.now()}`;
+  await page.goto(`/e2e/index.html?run=${run}`);
   await page.waitForFunction(() => "wordink" in window);
   await page.evaluate(() => (window as unknown as { wordink: { dictation: { ready: Promise<void> } } }).wordink.dictation.ready);
 
   await page.click("#mic");
   await expect(page.locator("#state")).toHaveText("listening");
+  // Time the capture from when audio flows: device start-up varies (e.g. behind an audio server).
+  await expect(page.locator("body")).toHaveAttribute("data-audio", "flowing");
   await page.waitForTimeout(1500);
   await page.click("#mic");
   await expect(page.locator("#final")).toHaveText("hello from the relay");
@@ -78,6 +74,11 @@ test("a recorded clip reaches the mocked Groq relay as a valid 16 kHz mono WAV",
     "state:idle",
   ]);
 
+  const upload = await page.request.get(`/__uploads/${run}`);
+  expect(upload.ok(), "the relay received an upload").toBe(true);
+  const recorded = (await upload.json()) as { contentType: string; body: string };
+  const contentType = recorded.contentType;
+  const body = Buffer.from(recorded.body, "base64");
   expect(contentType).toMatch(/^multipart\/form-data; boundary=/);
   expect(body).toBeDefined();
   const multipart = body!.toString("latin1");
