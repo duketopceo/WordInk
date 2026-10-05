@@ -13,7 +13,7 @@ Detailed plan for the current phase: [`docs/plans/2026-10-04-1757-feat-wordink-w
 | Phase | What ships | Status |
 |---|---|---|
 | **0. Foundation** | Repo cleanup: archive the legacy Python app under `legacy/`, monorepo tooling, CI, positioning | Next |
-| **1. Core + Web SDK** | `@wordink/core` (provider-agnostic engine), `<wordink-mic>` web component, `useWordInk` React hook, Groq/OpenAI/Deepgram + local engine, reference credential server, docs site with live demo | Planned |
+| **1. Core + Web SDK** | `@wordink/core` (provider-agnostic engine), `<wordink-mic>` web component, `useDictation` React hook, Groq/OpenAI/Deepgram + local engine, reference credential server, docs site with live demo | Planned |
 | **2. WordInk Desktop: Linux** | System-wide hold-to-talk dictation on Wayland (Hyprland/Omarchy first, then GNOME/KDE) and X11. Portal global shortcuts, virtual-keyboard injection with clipboard fallback, tray, optional LLM cleanup. AUR and Omarchy packages | Planned |
 | **3. WordInk Desktop: Windows + macOS** | The same app on Windows (replacing today's Python daemon) and macOS (accessibility-permission flow, signed builds) | Planned |
 | **4. More SDKs** | Python SDK for agents and CLIs; then mobile (React Native / native) based on demand | Exploring |
@@ -21,7 +21,7 @@ Detailed plan for the current phase: [`docs/plans/2026-10-04-1757-feat-wordink-w
 ### Phase 1 milestones (Core + Web SDK)
 
 1. **Core engine:** the provider interface, audio capture, session state machine, Groq adapter.
-2. **Web component + React hook:** `<wordink-mic>`, `useWordInk`, text insertion with native undo, themeable.
+2. **Web component + React hook:** `<wordink-mic>`, `useDictation`, text insertion with native undo, themeable.
 3. **Providers + keys:** OpenAI and Deepgram adapters, streaming partials, reference credential server.
 4. **Local engine:** in-browser model, works offline after first load.
 5. **Docs + launch:** docs site, live demo, npm publish, launch post.
