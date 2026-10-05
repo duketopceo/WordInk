@@ -6,7 +6,7 @@ import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { release, snippet } from "../site.js";
-import { DOCS_DIR, QUICKSTART_DIR, QUICKSTART_PORT, fakeThirdParties, holdToTalk, withoutWebGPU } from "./env.js";
+import { DOCS_DIR, QUICKSTART_DIR, QUICKSTART_PORT, fakeThirdParties, fakeMicFromClip, holdToTalk, withoutWebGPU } from "./env.js";
 
 const PAGE = `http://127.0.0.1:${QUICKSTART_PORT}/`;
 
@@ -34,6 +34,7 @@ test("the HTML quickstart with the local engine dictates into the textarea in un
   // Step 3: open it and dictate.
   const served = await fakeThirdParties(context);
   await withoutWebGPU(page);
+  await fakeMicFromClip(page);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(PAGE);

@@ -2,11 +2,12 @@
 // engine and no key, its wasm and worker assets resolve under the base path, and the dev-key form
 // exists only on localhost (KTD3).
 import { expect, test } from "@playwright/test";
-import { DOCS_HOST, SITE_PORT, fakeThirdParties, holdToTalk, withoutWebGPU } from "./env.js";
+import { DOCS_HOST, SITE_PORT, fakeThirdParties, fakeMicFromClip, holdToTalk, withoutWebGPU } from "./env.js";
 
 test("on a public hostname the demo dictates with the local engine and offers no dev-key form", async ({ page, context }) => {
   const served = await fakeThirdParties(context);
   await withoutWebGPU(page);
+  await fakeMicFromClip(page);
   const failed: string[] = [];
   page.on("response", (r) => {
     if (r.status() >= 400) failed.push(`${r.status()} ${r.url()}`);

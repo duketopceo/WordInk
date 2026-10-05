@@ -18,7 +18,7 @@ export const DOCS_DIR = here("../");
 /** The clean directory the quickstart spec builds its page in (emptied by the spec). */
 export const QUICKSTART_DIR = here("./.work/quickstart/");
 const FIXTURE_WAV = here("../../../packages/local/test/fixtures/hello-world.wav");
-/** What Chromium's fake microphone plays, in a loop: see {@link writeFakeMicClip}. */
+/** What the fake microphone plays once per mic open: see {@link writeFakeMicClip} and {@link fakeMicFromClip}. */
 export const FAKE_MIC_WAV = here("./.work/hello-world-padded.wav");
 const WEB_DIST = here("../../../packages/web/dist/");
 // Same on-disk model cache as @wordink/local's e2e, so reruns skip the download.
@@ -33,9 +33,8 @@ const CORS = { "access-control-allow-origin": "*", "cache-control": "no-store" }
 
 /**
  * Writes @wordink/local's hello-world fixture with 0.3 s of silence before and 2.5 s after, at half
- * volume. Chromium loops the fake-mic file, and Moonshine tiny returns nothing for a window that
- * catches the clip restarting ("…world. Hel"); the silence keeps a 3.5 s hold to one utterance, and
- * the lower gain leaves headroom for the capture's automatic gain control, which clips the original.
+ * volume. The leading silence mirrors a real press, the trailing silence fills the rest of a 3.5 s
+ * hold, and the lower gain leaves headroom for the capture's automatic gain control, which clips the original.
  */
 export function writeFakeMicClip(): void {
   const wav = readFileSync(FIXTURE_WAV);
@@ -117,7 +116,39 @@ export const withoutWebGPU = (page: Page) =>
     Object.defineProperty(Navigator.prototype, "gpu", { get: () => undefined, configurable: true });
   });
 
-/** Hold the element's button for `ms` while Chromium's fake microphone plays the fixture. */
+/**
+ * Stubs getUserMedia so each mic open plays the padded clip once from its start. Chromium's
+ * file-backed fake device starts looping at browser launch, so where a hold lands in the clip
+ * depended on how long setup took, and a hold that caught the loop restarting ("…world. Hel")
+ * transcribed to nothing. Call before navigating.
+ */
+export async function fakeMicFromClip(page: Page): Promise<void> {
+  const wav = readFileSync(FAKE_MIC_WAV);
+  const rate = wav.readUInt32LE(24);
+  const pcm = wav.subarray(44).toString("base64");
+  await page.addInitScript(
+    ({ pcm, rate }: { pcm: string; rate: number }) => {
+      const bytes = Uint8Array.from(atob(pcm), (c) => c.charCodeAt(0));
+      const samples = new Int16Array(bytes.buffer);
+      navigator.mediaDevices.getUserMedia = async () => {
+        const ctx = new AudioContext();
+        await ctx.resume();
+        const buffer = ctx.createBuffer(1, samples.length, rate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < samples.length; i++) data[i] = samples[i]! / 32768;
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        const dest = ctx.createMediaStreamDestination();
+        source.connect(dest);
+        source.start();
+        return dest.stream;
+      };
+    },
+    { pcm, rate },
+  );
+}
+
+/** Hold the element's button for `ms` while the fake microphone plays the clip (see {@link fakeMicFromClip}). */
 export async function holdToTalk(page: Page, ms: number): Promise<void> {
   const mic = page.locator("wordink-mic").first();
   await mic.locator('[part="button"]').hover();
