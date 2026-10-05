@@ -1,5 +1,8 @@
 // U8 end-to-end: the real Moonshine model in a real browser, through the HostProvider contract.
 // Each test gets a fresh browser context, so its Cache API starts empty (a first visit).
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { type Page, expect, test } from "@playwright/test";
 
 type Result = { type: "final"; text: string } | { type: "error"; code: string };
@@ -48,7 +51,18 @@ test("without WebGPU it initializes on WASM and transcribes a hello world clip",
   expectHelloWorld(result);
 });
 
-test("first load reports progress 0 to 100; a second load is served from cache with no download", async ({ page }) => {
+test("first load reports progress 0 to 100; a second load is served from cache with no download", async ({
+  playwright,
+  browserName,
+  baseURL,
+}) => {
+  // A fresh persistent context (still a first visit): Playwright's WebKit drops Cache Storage across a
+  // reload in its default ephemeral context, which would fail the second-load check for a reason
+  // unrelated to the provider.
+  const context = await playwright[browserName].launchPersistentContext(mkdtempSync(join(tmpdir(), "wordink-cache-")), {
+    ...(baseURL ? { baseURL } : {}),
+  });
+  const page = await context.newPage();
   await open(page);
   await load(page);
   const first = await events(page);
@@ -70,6 +84,7 @@ test("first load reports progress 0 to 100; a second load is served from cache w
   expect(second.ready).toHaveLength(1);
   expect(second.progress).toEqual([]);
   expect(modelRequests).toEqual([]);
+  await context.close();
 });
 
 test("AE4: after the model loads, dictation works with the network disconnected", async ({ page, context }) => {

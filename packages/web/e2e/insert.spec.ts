@@ -1,7 +1,7 @@
 // Insertion with native undo (R2, KTD7) needs a real browser: the full element, worklet and wasm core
 // run against the fake mic, and only the Groq relay is mocked.
 import { expect, test } from "@playwright/test";
-import { fakeMic } from "./fake-mic.js";
+import { fakeMic, waitForAudio } from "./fake-mic.js";
 
 test.beforeEach(async ({ page, browserName }) => {
   await fakeMic(page, browserName);
@@ -22,6 +22,7 @@ test("a final transcript lands at the caret and undo restores the original", asy
   await button.click();
   await expect(mic).toHaveAttribute("data-state", "listening");
   await expect(button).toHaveAttribute("aria-pressed", "true");
+  await waitForAudio(page);
   await page.waitForTimeout(1200);
   await button.click();
 

@@ -24,3 +24,14 @@ export async function fakeMic(page: Page, browserName: string): Promise<void> {
     };
   }, CLIP_SAMPLE_SOURCE);
 }
+
+/**
+ * Waits until the element's meter shows a non-zero level, i.e. audio is reaching the core. Device
+ * start-up varies (slower behind an audio server, as on CI), so holds are timed from here.
+ */
+export async function waitForAudio(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const meter = document.querySelector("wordink-mic")?.shadowRoot?.querySelector<HTMLElement>('[part="meter"]');
+    return Number(meter?.style.getPropertyValue("--wordink-level") || 0) > 0;
+  });
+}

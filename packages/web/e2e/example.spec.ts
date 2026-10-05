@@ -1,7 +1,7 @@
 // AE1: the plain HTML example, served as static files with the CDN bundle loaded by a relative path
 // (no build step on the page), dictates into its textarea. Fake mic; the relay is mocked.
 import { expect, test } from "@playwright/test";
-import { fakeMic } from "./fake-mic.js";
+import { fakeMic, waitForAudio } from "./fake-mic.js";
 
 test("examples/html dictates into its textarea with push-to-talk", async ({ page, browserName }) => {
   await fakeMic(page, browserName);
@@ -23,6 +23,7 @@ test("examples/html dictates into its textarea with push-to-talk", async ({ page
   await mic.locator('[part="button"]').hover();
   await page.mouse.down();
   await expect(mic).toHaveAttribute("data-state", "listening");
+  await waitForAudio(page);
   await page.waitForTimeout(1200);
   await page.mouse.up();
 
