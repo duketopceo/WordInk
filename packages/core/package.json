@@ -1,0 +1,39 @@
+{
+  "name": "@wordink/core",
+  "version": "0.0.0",
+  "description": "WordInk dictation core for the browser: the Rust engine as WebAssembly plus a small TypeScript host (mic capture, providers, credentials).",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "wasm/wordink_core.js",
+    "wasm/wordink_core.d.ts",
+    "wasm/wordink_core_bg.wasm",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/duketopceo/WordInk.git",
+    "directory": "packages/core"
+  },
+  "scripts": {
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build": "node scripts/build-wasm.mjs && tsc -p tsconfig.build.json && node scripts/size-check.mjs",
+    "typecheck": "node scripts/build-wasm.mjs && tsc --noEmit",
+    "test": "node scripts/build-wasm.mjs && vitest run && node scripts/size-check.mjs",
+    "size": "node scripts/size-check.mjs",
+    "test:e2e": "pnpm run build && playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.20.5",
+    "vitest": "^5.0.3"
+  }
+}

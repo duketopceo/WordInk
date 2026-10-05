@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WordInk core e2e</title>
+  </head>
+  <body>
+    <button id="mic">Hold to talk</button>
+    <output id="state">idle</output>
+    <output id="final"></output>
+    <script type="module">
+      import { createDictation } from "/dist/index.js";
+      const d = createDictation({ provider: "groq", endpoint: "/relay" });
+      const log = [];
+      d.on("state", (s) => {
+        log.push(`state:${s}`);
+        document.getElementById("state").textContent = s;
+      });
+      d.on("final", (t) => {
+        log.push(`final:${t}`);
+        document.getElementById("final").textContent = t;
+      });
+      d.on("error", (e) => log.push(`error:${e.code}`));
+      window.wordink = { dictation: d, log };
+      // Tap to start, tap to stop: each click is a trusted user gesture (AudioContext autoplay rules).
+      document.getElementById("mic").addEventListener("click", () => {
+        if (d.state === "listening" || d.state === "requesting-mic") d.stop();
+        else d.start();
+      });
+    </script>
+  </body>
+</html>

@@ -12,3 +12,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wordink-core = { path = "../wordink-core" }
+# Pinned exactly: the generated JS glue must match the wasm-bindgen CLI
+# (packages/core/scripts/build-wasm.mjs, CI installs the same version).
+wasm-bindgen = "=0.2.129"
