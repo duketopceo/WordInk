@@ -1,12 +1,23 @@
-use wordink_core::{Effect, ErrorCode, Event, Mode, Session, SessionConfig, State};
+use wordink_core::providers::{Capabilities, HostProvider, Provider};
+use wordink_core::{Effect, ErrorCode, Event, HostResult, Mode, Session, SessionConfig, State};
 
 const MIC_RATE: u32 = 48_000;
 
+/// A session with a batch host provider at 16 kHz, so the utterance arrives
+/// whole on release, as with any batch provider.
 fn session(mode: Mode) -> Session {
-    Session::new(SessionConfig {
-        mode,
-        target_sample_rate: 16_000,
-    })
+    let provider = Provider::Host(HostProvider::new(
+        "test",
+        Capabilities {
+            streaming: false,
+            sample_rate: 16_000,
+        },
+    ));
+    Session::new(SessionConfig::new(mode, provider))
+}
+
+fn final_result(text: &str) -> Event {
+    Event::HostProviderResult(HostResult::Final { text: text.into() })
 }
 
 /// A 440 Hz sine of `ms` milliseconds at the mic rate.
@@ -35,8 +46,13 @@ fn levels(effects: &[Effect]) -> Vec<f32> {
         .collect()
 }
 
-fn has_transcribe(effects: &[Effect]) -> bool {
-    effects.iter().any(|e| matches!(e, Effect::Transcribe(_)))
+fn has_provider_effect(effects: &[Effect]) -> bool {
+    effects.iter().any(|e| {
+        !matches!(
+            e,
+            Effect::State(_) | Effect::RequestMic | Effect::StopMic | Effect::Level { .. }
+        )
+    })
 }
 
 /// Drives a full dictation using `stop` as the stop input, returning every
@@ -50,9 +66,7 @@ fn full_run(mode: Mode, stop: Event) -> Vec<Effect> {
     }));
     all.extend(push(&mut s, &tone(500, 0.5)));
     all.extend(s.handle(stop));
-    all.extend(s.handle(Event::TranscriptFinal {
-        text: "hello world".into(),
-    }));
+    all.extend(s.handle(final_result("hello world")));
     assert_eq!(s.state(), State::Idle);
     all
 }
@@ -79,22 +93,31 @@ fn push_to_talk_happy_path() {
     let released = s.handle(Event::Release);
     assert_eq!(released[0], Effect::StopMic);
     assert_eq!(released[1], Effect::State(State::Transcribing));
-    match &released[2] {
-        Effect::Transcribe(u) => {
-            assert_eq!(u.sample_rate, 16_000);
-            // 500 ms at 16 kHz.
-            assert!((u.samples.len() as i64 - 8_000).abs() <= 1);
-            assert!(u.samples.iter().any(|&x| x.unsigned_abs() > 10_000));
+    assert_eq!(
+        released[2],
+        Effect::HostProviderStart {
+            id: "test".into(),
+            sample_rate: 16_000,
+            hint: None
         }
-        other => panic!("expected Transcribe, got {other:?}"),
+    );
+    match &released[3] {
+        Effect::HostProviderAudio { samples, .. } => {
+            // 500 ms at 16 kHz.
+            assert!((samples.len() as i64 - 8_000).abs() <= 1);
+            assert!(samples.iter().any(|&x| x.unsigned_abs() > 10_000));
+        }
+        other => panic!("expected HostProviderAudio, got {other:?}"),
     }
-    assert_eq!(released.len(), 3);
+    assert_eq!(
+        released[4],
+        Effect::HostProviderFinish { id: "test".into() }
+    );
+    assert_eq!(released.len(), 5);
     assert_eq!(s.state(), State::Transcribing);
 
     assert_eq!(
-        s.handle(Event::TranscriptFinal {
-            text: "hello world".into()
-        }),
+        s.handle(final_result("hello world")),
         vec![
             Effect::Final {
                 text: "hello world".into()
@@ -165,7 +188,7 @@ fn under_300_ms_is_no_speech_without_provider_effect() {
     });
     push(&mut s, &tone(250, 0.5));
     let effects = s.handle(Event::Release);
-    assert!(!has_transcribe(&effects));
+    assert!(!has_provider_effect(&effects));
     assert_eq!(
         effects,
         vec![
@@ -185,6 +208,6 @@ fn silent_audio_is_no_speech_without_provider_effect() {
     });
     push(&mut s, &vec![0.0; MIC_RATE as usize]);
     let effects = s.handle(Event::Release);
-    assert!(!has_transcribe(&effects));
+    assert!(!has_provider_effect(&effects));
     assert_eq!(s.state(), State::Error(ErrorCode::NoSpeech));
 }

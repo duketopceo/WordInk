@@ -6,8 +6,9 @@
 //! recording; the transitions and effects are the same.
 
 use crate::audio::{to_pcm16, Resampler};
-use crate::effects::{Effect, Event, Utterance};
+use crate::effects::{Effect, Event};
 use crate::error::ErrorCode;
+use crate::providers::{Ids, Progress, Provider, Run};
 
 /// Recordings shorter than this end in [`ErrorCode::NoSpeech`].
 pub const MIN_SPEECH_MS: u64 = 300;
@@ -19,6 +20,10 @@ pub const SPEECH_RMS_THRESHOLD: f32 = 0.01;
 /// Level events per second of audio.
 const LEVEL_HZ: u32 = 20;
 
+/// Streaming providers get audio in chunks of at least this many per second
+/// (50 ms), rather than one message per AudioWorklet block.
+const STREAM_CHUNKS_HZ: u32 = 20;
+
 /// How the button maps to start and stop (R5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -29,12 +34,28 @@ pub enum Mode {
 }
 
 /// Session configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SessionConfig {
     /// Button behavior.
     pub mode: Mode,
-    /// Rate in Hz the utterance is resampled to: 16000 or 24000 (KTD4).
-    pub target_sample_rate: u32,
+    /// Speech provider. Audio is resampled to its declared rate (KTD4).
+    pub provider: Provider,
+    /// Custom vocabulary or prompt hint (R15), passed to the provider in its
+    /// own form: Whisper and OpenAI prompt, Deepgram keyterms (split on
+    /// commas and newlines), or the host provider's start effect.
+    pub hint: Option<String>,
+}
+
+impl SessionConfig {
+    /// A configuration with no hint.
+    pub fn new(mode: Mode, provider: Provider) -> Self {
+        Self {
+            mode,
+            provider,
+            hint: None,
+        }
+    }
 }
 
 /// Visible session state (R6).
@@ -63,6 +84,8 @@ pub struct Session {
     config: SessionConfig,
     state: State,
     recording: Option<Recording>,
+    run: Option<Box<dyn Run>>,
+    ids: Ids,
 }
 
 impl Session {
@@ -72,6 +95,8 @@ impl Session {
             config,
             state: State::Idle,
             recording: None,
+            run: None,
+            ids: Ids::default(),
         }
     }
 
@@ -100,15 +125,32 @@ impl Session {
                 self.stop(&mut fx)
             }
             (Event::MicGranted { sample_rate }, State::RequestingMic) => {
-                self.recording = Some(Recording::new(sample_rate, self.config.target_sample_rate));
+                let rate = self.config.provider.capabilities().sample_rate;
+                self.recording = Some(Recording::new(sample_rate, rate));
                 self.set(State::Listening, &mut fx);
+                let mut run = self.config.provider.run(self.config.hint.as_deref());
+                run.start(&mut self.ids, &mut fx);
+                self.run = Some(run);
             }
             (Event::MicDenied, State::RequestingMic) => {
                 self.set(State::Error(ErrorCode::MicDenied), &mut fx)
             }
-            (Event::TranscriptFinal { text }, State::Transcribing) => {
-                fx.push(Effect::Final { text });
-                self.set(State::Idle, &mut fx);
+            (event, State::Listening | State::Transcribing) => {
+                let progress = match self.run.as_mut() {
+                    Some(run) => run.event(event, &mut self.ids, &mut fx),
+                    None => None,
+                };
+                match progress {
+                    // A final before release (a misbehaving streaming provider)
+                    // is shown as interim text; the session ends on release.
+                    Some(Progress::Interim(text)) => fx.push(Effect::Interim { text }),
+                    Some(Progress::Final(text)) if self.state == State::Listening => {
+                        fx.push(Effect::Interim { text })
+                    }
+                    Some(Progress::Final(text)) => self.complete(text, &mut fx),
+                    Some(Progress::Failed(code)) => self.fail(code, &mut fx),
+                    None => {}
+                }
             }
             _ => {}
         }
@@ -122,6 +164,12 @@ impl Session {
         let mut fx = Vec::new();
         if let Some(rec) = self.recording.as_mut() {
             rec.push(samples, &mut fx);
+            let streaming = self.config.provider.capabilities().streaming;
+            if let Some(run) = self.run.as_mut().filter(|_| streaming) {
+                if let Some(chunk) = rec.stream_chunk() {
+                    run.audio(chunk, &mut fx);
+                }
+            }
         }
         fx
     }
@@ -139,12 +187,42 @@ impl Session {
     /// Ends capture: transcribe if there is usable speech, else `NoSpeech`.
     fn stop(&mut self, fx: &mut Vec<Effect>) {
         fx.push(Effect::StopMic);
-        match self.recording.take().and_then(Recording::finish) {
-            Some(utterance) => {
+        let finished = self.recording.take().and_then(Recording::finish);
+        match finished {
+            Some((pcm, streamed)) if self.run.is_some() => {
                 self.set(State::Transcribing, fx);
-                fx.push(Effect::Transcribe(utterance));
+                if let Some(run) = self.run.as_mut() {
+                    run.finish(&pcm, &pcm[streamed..], &mut self.ids, fx);
+                }
             }
-            None => self.set(State::Error(ErrorCode::NoSpeech), fx),
+            _ => self.fail(ErrorCode::NoSpeech, fx),
+        }
+    }
+
+    /// Ends the session with the provider's final text.
+    fn complete(&mut self, text: String, fx: &mut Vec<Effect>) {
+        self.end_run(fx);
+        let text = text.trim();
+        if text.is_empty() {
+            self.set(State::Error(ErrorCode::NoSpeech), fx);
+        } else {
+            fx.push(Effect::Final { text: text.into() });
+            self.set(State::Idle, fx);
+        }
+    }
+
+    /// Ends the session in an error, stopping capture if it is running.
+    fn fail(&mut self, code: ErrorCode, fx: &mut Vec<Effect>) {
+        if self.recording.take().is_some() {
+            fx.push(Effect::StopMic);
+        }
+        self.end_run(fx);
+        self.set(State::Error(code), fx);
+    }
+
+    fn end_run(&mut self, fx: &mut Vec<Effect>) {
+        if let Some(mut run) = self.run.take() {
+            run.end(fx);
         }
     }
 }
@@ -158,6 +236,8 @@ struct Recording {
     resampler: Resampler,
     scratch: Vec<f32>,
     pcm: Vec<i16>,
+    /// How much of `pcm` has been handed to a streaming provider.
+    streamed: usize,
     level_window: u32,
     window_sum: f64,
     window_len: u32,
@@ -173,6 +253,7 @@ impl Recording {
             resampler: Resampler::new(input_rate, target_rate),
             scratch: Vec::new(),
             pcm: Vec::new(),
+            streamed: 0,
             level_window: (input_rate / LEVEL_HZ).max(1),
             window_sum: 0.0,
             window_len: 0,
@@ -208,8 +289,20 @@ impl Recording {
         rms
     }
 
-    /// Finishes the recording, or `None` if it holds no usable speech.
-    fn finish(mut self) -> Option<Utterance> {
+    /// Audio not yet streamed, once at least one chunk's worth is ready.
+    fn stream_chunk(&mut self) -> Option<&[i16]> {
+        let min = (self.target_rate / STREAM_CHUNKS_HZ).max(1) as usize;
+        let start = self.streamed;
+        (self.pcm.len() - start >= min).then(|| {
+            self.streamed = self.pcm.len();
+            &self.pcm[start..]
+        })
+    }
+
+    /// Finishes the recording, returning the PCM16 utterance at the target
+    /// rate and how much of it was streamed, or `None` if it holds no usable
+    /// speech.
+    fn finish(mut self) -> Option<(Vec<i16>, usize)> {
         if self.window_len > 0 {
             self.close_window();
         }
@@ -218,9 +311,6 @@ impl Recording {
             return None;
         }
         self.resample(|r, out| r.flush(out));
-        Some(Utterance {
-            samples: self.pcm,
-            sample_rate: self.target_rate,
-        })
+        Some((self.pcm, self.streamed))
     }
 }

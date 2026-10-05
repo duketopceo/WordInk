@@ -1,0 +1,2 @@
+{"type":"Results","channel_index":[0,1],"start":0.0,"duration":0.6,"is_final":true,"speech_final":true,"channel":{"alternatives":[{"transcript":"","confidence":0.0,"words":[]}]},"metadata":{"request_id":"req_002","model_info":{"name":"nova-3","version":"2025-04-17","arch":"nova-3"},"model_uuid":"m_001"},"from_finalize":true}
+{"type":"Metadata","transaction_key":"deprecated","request_id":"req_002","sha256":"0f1e2d3c","created":"2026-10-04T17:00:00.000Z","duration":0.6,"channels":1,"models":["m_001"]}
