@@ -61,3 +61,5 @@ The e2e suite bundles it with esbuild (see `playwright.config.ts`).
 
 The only network traffic is the model download (from Hugging Face, or your `modelBaseUrl`) and the
 onnxruntime-web runtime (jsDelivr, or your `wasmPaths`). No telemetry.
+
+Full docs, including a plain-HTML setup and a live demo: <https://duketopceo.github.io/WordInk/local.html>.

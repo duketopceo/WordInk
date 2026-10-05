@@ -3,6 +3,17 @@
   "version": "0.0.0",
   "description": "<wordink-mic>: a drop-in push-to-talk dictation web component for any input, textarea or contenteditable.",
   "license": "MIT",
+  "homepage": "https://duketopceo.github.io/WordInk/",
+  "keywords": [
+    "dictation",
+    "speech-to-text",
+    "voice",
+    "web-component",
+    "custom-element",
+    "push-to-talk",
+    "microphone",
+    "wordink"
+  ],
   "type": "module",
   "files": [
     "dist",
@@ -35,5 +46,9 @@
     "esbuild": "^0.28.2",
     "happy-dom": "^20.14.5",
     "vitest": "^5.0.3"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

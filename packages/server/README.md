@@ -142,6 +142,8 @@ The built-in limiter is in memory: per process on Node, per isolate on Workers. 
 - **Short-lived credentials.** Minted tokens live for `tokenTtlSeconds` (default 120 s), fixed on the server.
 - The relay sends no telemetry anywhere.
 
+Full docs: <https://duketopceo.github.io/WordInk/relay.html>.
+
 ## License
 
 MIT

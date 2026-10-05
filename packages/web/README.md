@@ -10,8 +10,16 @@ the cursor, and the field's native undo still works.
 <textarea id="message"></textarea>
 <wordink-mic for="message" endpoint="/api/wordink"></wordink-mic>
 
-<script type="module" src="https://cdn.jsdelivr.net/npm/@wordink/web/dist/wordink-web.cdn.js"></script>
+<script
+  type="module"
+  src="https://cdn.jsdelivr.net/npm/@wordink/web@VERSION/dist/wordink-web.cdn.js"
+  integrity="sha384-…"
+  crossorigin="anonymous"
+></script>
 ```
+
+Pin an exact version and its Subresource Integrity hash. The [HTML quickstart](https://duketopceo.github.io/WordInk/quickstart-html.html)
+shows the current release with its hash filled in and how to compute it yourself.
 
 The CDN build is one ES module (about 11 KB gzipped, budget 40 KB) with `@wordink/core` bundled in.
 It fetches the core wasm (`wordink_core_bg.wasm`, about 35 KB gzipped) from beside itself, so if you
@@ -115,4 +123,4 @@ The default control is a real `<button>` with an `aria-label` and `aria-pressed`
 or Enter held on the focused button works like holding the pointer. State changes and errors are
 announced through a `role="status"` live region (the status part).
 
-No telemetry is sent anywhere.
+No telemetry is sent anywhere. Full docs and a live demo: <https://duketopceo.github.io/WordInk/>.

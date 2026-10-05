@@ -1,0 +1,4 @@
+e2e/.site/
+e2e/.work/
+test-results/
+playwright-report/

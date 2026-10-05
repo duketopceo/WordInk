@@ -75,3 +75,5 @@ audio to its declared rate and calls `start(sampleRate, hint)`, `pushAudio(pcm: 
 The wasm is loaded from `wasm/wordink_core_bg.wasm` relative to the module (`new URL(..., import.meta.url)`),
 which Vite, webpack 5 and plain ES-module CDNs resolve. The core wasm is about 35 KB gzipped
 (budget: 150 KB). No telemetry is sent anywhere.
+
+Full docs and a live demo: <https://duketopceo.github.io/WordInk/>.

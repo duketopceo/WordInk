@@ -92,3 +92,5 @@ JSX once `@wordink/react` is imported.
 For a React-controlled field the element's insertion fires an `input` event, so `onChange` sees it.
 
 Both are safe to import during server rendering. No telemetry is sent anywhere.
+
+Full docs and a live demo: <https://duketopceo.github.io/WordInk/>.

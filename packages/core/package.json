@@ -3,6 +3,17 @@
   "version": "0.0.0",
   "description": "WordInk dictation core for the browser: the Rust engine as WebAssembly plus a small TypeScript host (mic capture, providers, credentials).",
   "license": "MIT",
+  "homepage": "https://duketopceo.github.io/WordInk/",
+  "keywords": [
+    "dictation",
+    "speech-to-text",
+    "voice",
+    "transcription",
+    "webassembly",
+    "wasm",
+    "push-to-talk",
+    "wordink"
+  ],
   "type": "module",
   "sideEffects": false,
   "files": [
@@ -35,5 +46,9 @@
     "@playwright/test": "^1.63.0",
     "@types/node": "^22.20.5",
     "vitest": "^5.0.3"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

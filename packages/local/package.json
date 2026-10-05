@@ -3,6 +3,17 @@
   "version": "0.0.0",
   "description": "Offline WordInk speech engine: Moonshine via transformers.js in a Web Worker (WebGPU, WASM fallback).",
   "license": "MIT",
+  "homepage": "https://duketopceo.github.io/WordInk/",
+  "keywords": [
+    "dictation",
+    "speech-to-text",
+    "offline",
+    "moonshine",
+    "transformers.js",
+    "webgpu",
+    "wasm",
+    "wordink"
+  ],
   "type": "module",
   "sideEffects": false,
   "files": [
@@ -38,5 +49,9 @@
     "@wordink/core": "workspace:*",
     "esbuild": "^0.28.2",
     "vitest": "^5.0.3"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

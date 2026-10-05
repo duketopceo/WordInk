@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Dictation</title>
+  </head>
+  <body>
+    <textarea id="message" rows="5"></textarea>
+    <wordink-mic for="message"></wordink-mic>
+
+    <script
+      type="module"
+      src="https://cdn.jsdelivr.net/npm/@wordink/web@__WEB_VERSION__/dist/wordink-web.cdn.js"
+      integrity="__WEB_SRI__"
+      crossorigin="anonymous"
+    ></script>
+    <script type="module">
+      import { createLocalProvider } from "./wordink-local/index.js";
+      document.querySelector("wordink-mic").provider = createLocalProvider();
+    </script>
+  </body>
+</html>
