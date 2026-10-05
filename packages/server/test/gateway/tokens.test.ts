@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { generateToken, hashToken } from "../../src/gateway/tokens.js";
 import { FileTokenStore, defaultTokenPath } from "../../src/gateway/file-tokens.js";
 
@@ -95,6 +95,16 @@ describe("FileTokenStore", () => {
     writeFileSync(path, "{not json");
     expect(await new FileTokenStore(path).verify(token)).toBeNull();
     expect(warn).toHaveBeenCalled();
+  });
+
+  it("refuses to create or revoke over a corrupt file, leaving it untouched", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "{not json");
+    const store = new FileTokenStore(path);
+    await expect(store.create("y")).rejects.toThrow(/unreadable/);
+    await expect(store.revoke("some-id")).rejects.toThrow(/unreadable/);
+    expect(readFileSync(path, "utf8")).toBe("{not json");
   });
 });
 
