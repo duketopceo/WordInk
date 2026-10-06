@@ -293,6 +293,36 @@ describe("lifecycle", () => {
     expect(log).toEqual([]);
   });
 
+  it("release while the mic grant is still pending closes the late grant, and the next press works", async () => {
+    // Blur during a pending start (wasm load, token mint or the permission prompt) must not leave
+    // the mic open: the release lands on RequestingMic, and a getUserMedia that resolves afterwards
+    // hits the micGeneration guard (R11).
+    const audio = installFakeAudio();
+    const realImpl = audio.getUserMedia.getMockImplementation()!;
+    let grant: ((stream: MediaStream) => void) | undefined;
+    audio.getUserMedia.mockImplementation(() => new Promise<MediaStream>((resolve) => (grant = resolve)));
+    relayReturning("unused");
+    const d = createDictation({ provider: "groq", endpoint: ENDPOINT });
+    const log = record(d);
+
+    void d.press();
+    await vi.waitFor(() => expect(audio.getUserMedia).toHaveBeenCalled());
+    await d.release(); // lands on RequestingMic: stop-mic + NoSpeech
+    await vi.waitFor(() => expect(d.state).toBe("error"));
+    expect(log).toContain("error:NoSpeech");
+
+    // The prompt resolves after the release: the generation guard closes it at once.
+    const track = { stopped: false, stop() { this.stopped = true; } };
+    grant!({ getTracks: () => [track] } as unknown as MediaStream);
+    await vi.waitFor(() => expect(track.stopped).toBe(true));
+
+    // A new press still starts cleanly on the same dictation.
+    audio.getUserMedia.mockImplementation(realImpl);
+    await d.press();
+    await vi.waitFor(() => expect(d.state).toBe("listening"));
+    d.destroy();
+  });
+
   it("rejects invalid options with a Config error", () => {
     expect(() => createDictation({ provider: "whisper" as "groq", endpoint: ENDPOINT })).toThrow(WordInkError);
     expect(() => createDictation({ provider: "groq", endpoint: ENDPOINT, mode: "push" as "hold" })).toThrow(/mode/);

@@ -219,6 +219,24 @@ describe("input modes (R5)", () => {
     expect(last().press).toHaveBeenCalledTimes(2);
   });
 
+  it("hold: blur during a pending press (wasm load or token mint) still releases", () => {
+    // onFocusLost ends the hold without waiting for the dictation's press to settle (R11).
+    createDictation.mockImplementationOnce((options) => {
+      const d = new FakeDictation(options);
+      d.press.mockReturnValue(new Promise(() => {}));
+      created.push(d);
+      return d;
+    });
+    const mic = mount(`<wordink-mic></wordink-mic>`);
+    pointer(button(mic), "pointerdown");
+    expect(last().press).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(new Event("blur"));
+    expect(last().release).toHaveBeenCalledTimes(1);
+    // The hold is cleared, not stuck: a new hold presses again.
+    pointer(button(mic), "pointerdown");
+    expect(last().press).toHaveBeenCalledTimes(2);
+  });
+
   it("hold: a hidden tab releases, a visible visibilitychange does not", () => {
     const mic = mount(`<wordink-mic></wordink-mic>`);
     pointer(button(mic), "pointerdown");

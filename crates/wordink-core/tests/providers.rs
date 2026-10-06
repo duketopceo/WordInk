@@ -1000,3 +1000,44 @@ fn utterance_limit_is_configurable() {
     };
     assert!((data.len() - 44) / 2 <= 16_000);
 }
+
+#[test]
+fn openai_streaming_auto_stops_at_the_limit_and_sends_at_most_60_s() {
+    // The cap ends a streaming utterance the same way it ends a batch one: capture stops and the
+    // provider finalizes with what it has (R11). The wire carries only the capped audio + commit.
+    let mut s = session(openai());
+    let (id, _, _) = ws_open(&begin(&mut s));
+    s.handle(Event::WsOpened { id });
+    let audio = tone(61_000, 0.5);
+    let mut fx = Vec::new();
+    let mut stopped_at = None;
+    for (i, chunk) in audio.chunks(128).enumerate() {
+        let out = s.push_audio(chunk);
+        if stopped_at.is_none() && out.contains(&Effect::State(State::Transcribing)) {
+            stopped_at = Some((i + 1) * 128);
+        }
+        fx.extend(out);
+    }
+    // Stops on its own, in the chunk that reaches 60 s, without a release.
+    let stopped_at = stopped_at.expect("auto-stop while holding");
+    assert!(stopped_at >= 60 * MIC_RATE as usize && stopped_at < 60 * MIC_RATE as usize + 128);
+    assert_eq!(s.state(), State::Transcribing);
+    assert_eq!(fx.iter().filter(|e| **e == Effect::StopMic).count(), 1);
+
+    let texts = sent_texts(&fx, id);
+    assert_eq!(
+        json(texts.last().unwrap()),
+        json(r#"{"type":"input_audio_buffer.commit"}"#)
+    );
+    let mut bytes = 0;
+    for t in &texts[1..texts.len() - 1] {
+        let v = json(t);
+        assert_eq!(v["type"], "input_audio_buffer.append");
+        bytes += b64decode(v["audio"].as_str().unwrap()).len();
+    }
+    // At most 60 s of 24 kHz PCM16 reached the provider.
+    assert!(bytes / 2 <= 24_000 * 60, "{} samples", bytes / 2);
+
+    // Release after the auto-stop does nothing.
+    assert!(s.handle(Event::Release).is_empty());
+}
