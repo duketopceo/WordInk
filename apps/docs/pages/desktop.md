@@ -13,7 +13,11 @@ What the gateway adds over calling a provider directly:
 The gateway is a local service. It listens on `127.0.0.1:8941` by default.
 
 ```sh
-npm install -g @wordink/server
+# @wordink/server isn't on npm yet; build the CLI from the repo:
+pnpm --filter @wordink/server build
+ln -sf "$(pwd)/packages/server/dist/bin/wordink-gateway.js" ~/.local/bin/wordink-gateway
+# (once published: npm install -g @wordink/server)
+
 wordink-gateway check                 # which providers have keys (never prints them)
 wordink-gateway serve                 # or install the systemd user service, see below
 wordink-gateway tokens create laptop  # prints the device token once
