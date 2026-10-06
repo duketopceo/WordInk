@@ -15,6 +15,8 @@ export interface ProviderEntry {
   keyEnv: string;
   /** Provider model to call. Defaults per provider (KTD4). */
   model?: string;
+  /** Override the provider's request URL (a compatible endpoint or a local fake). */
+  url?: string;
 }
 
 /** A provider entry with its key resolved from the environment. */
@@ -22,6 +24,8 @@ export interface ResolvedEntry {
   provider: ProviderName;
   key: string;
   model?: string;
+  /** Override the provider's request URL (a compatible endpoint or a local fake). */
+  url?: string;
 }
 
 export const DEFAULT_MODELS: Readonly<Record<ProviderName, string>> = {
@@ -81,7 +85,7 @@ export async function transcribe(
     if (language) query.set("language", language);
     query.set("smart_format", "true");
     for (const term of keyterms(vocabulary)) query.append("keyterm", term);
-    url = `${DEEPGRAM_LISTEN_URL}?${query}`;
+    url = `${entry.url ?? DEEPGRAM_LISTEN_URL}?${query}`;
     init = {
       method: "POST",
       headers: { authorization: `Token ${entry.key}`, "content-type": audio.type || "application/octet-stream" },
@@ -91,7 +95,7 @@ export async function transcribe(
     const model =
       entry.provider === "openai" && verbose ? OPENAI_VERBOSE_MODEL : (entry.model ?? DEFAULT_MODELS[entry.provider]);
     const temperature = cleanTemperature(options.temperature);
-    url = entry.provider === "groq" ? GROQ_AUDIO_URL : OPENAI_AUDIO_URL;
+    url = entry.url ?? (entry.provider === "groq" ? GROQ_AUDIO_URL : OPENAI_AUDIO_URL);
     init = {
       method: "POST",
       headers: { authorization: `Bearer ${entry.key}` },

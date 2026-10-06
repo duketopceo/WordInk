@@ -35,8 +35,11 @@
       "import": "./dist/node.js"
     }
   },
+  "bin": {
+    "wordink-gateway": "dist/bin/wordink-gateway.js"
+  },
   "engines": {
-    "node": ">=18.17"
+    "node": ">=20"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
