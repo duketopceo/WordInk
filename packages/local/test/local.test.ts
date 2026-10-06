@@ -218,8 +218,11 @@ class FakeWorker {
   ) {
     FakeWorker.last = this;
   }
-  postMessage(msg: ToWorker) {
-    this.sent.push(msg);
+  postMessage(msg: ToWorker, transfer?: Transferable[]) {
+    // Structured clone: the worker gets its own copy, and the caller's transferred buffers detach.
+    const received = msg.type === "transcribe" ? { ...msg, audio: msg.audio.slice() } : msg;
+    for (const t of transfer ?? []) (t as ArrayBuffer & { transfer?(): ArrayBuffer }).transfer?.();
+    this.sent.push(received as ToWorker);
   }
   terminate() {
     this.terminated = true;

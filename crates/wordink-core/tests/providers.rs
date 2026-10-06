@@ -1035,8 +1035,10 @@ fn openai_streaming_auto_stops_at_the_limit_and_sends_at_most_60_s() {
         assert_eq!(v["type"], "input_audio_buffer.append");
         bytes += b64decode(v["audio"].as_str().unwrap()).len();
     }
-    // At most 60 s of 24 kHz PCM16 reached the provider.
-    assert!(bytes / 2 <= 24_000 * 60, "{} samples", bytes / 2);
+    // At most 60 s of 24 kHz PCM16 reached the provider, and only a chunk-scale remainder was lost.
+    let samples = bytes / 2;
+    assert!(samples <= 24_000 * 60, "{samples} samples");
+    assert!(samples >= 24_000 * 59, "{samples} samples");
 
     // Release after the auto-stop does nothing.
     assert!(s.handle(Event::Release).is_empty());

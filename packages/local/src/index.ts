@@ -209,9 +209,10 @@ export function createLocalProvider(options: LocalProviderOptions = {}): LocalPr
     if (!w) throw new Error("@wordink/local worker is not running");
     const id = nextId++;
     const text = new Promise<string>((resolve, reject) => pending.set(id, { resolve, reject }));
+    // The deadline must be read before the transfer detaches audio.buffer (length becomes 0).
+    const timeoutMs = inferenceTimeoutMs(audio.length);
     const msg: ToWorker = { type: "transcribe", id, audio };
     w.postMessage(msg, [audio.buffer]);
-    const timeoutMs = inferenceTimeoutMs(audio.length);
     const timedOut = new Error(`@wordink/local: transcription timed out after ${timeoutMs} ms`);
     try {
       return await withTimeout(text, timeoutMs, timedOut);
