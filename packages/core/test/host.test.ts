@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createDictation, type Dictation, WordInkError } from "../src/index.js";
-import { installFakeAudio, record } from "./fakes.js";
+import { FakeWebSocket, installFakeAudio, record } from "./fakes.js";
 
 const ENDPOINT = "https://app.test/api/wordink";
 
@@ -231,6 +231,50 @@ describe("microphone errors (R9, AE2)", () => {
     await d.stop();
     expect(errors).toEqual(["NoSpeech"]);
     expect(fetchMock).not.toHaveBeenCalled();
+    d.destroy();
+  });
+});
+
+describe("socket connect failures (R9, AE3)", () => {
+  /** A relay that always mints a token, and a dictation wired to Deepgram's two-candidate socket. */
+  function deepgram() {
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ access_token: "jwt", expires_in: 120 })));
+    return createDictation({ provider: "deepgram", endpoint: "https://app.test/relay" });
+  }
+
+  it("a socket that never opens before the connect timeout ends in ProviderDown, not AuthFailed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    installFakeAudio();
+    const d = deepgram();
+    const errors: string[] = [];
+    d.on("error", (e) => errors.push(e.code));
+    await d.start();
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+
+    // A stall feeds the private stall code; for a close before open only that code
+    // reaches ProviderDown — a real rejection (fed as 1006) stays AuthFailed.
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2)); // the next candidate still retries
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => expect(d.state).toBe("error"));
+    expect(errors).toEqual(["ProviderDown"]);
+    d.destroy();
+  });
+
+  it("a socket whose onclose fires with 1006 before open still ends in AuthFailed", async () => {
+    installFakeAudio();
+    const d = deepgram();
+    const errors: string[] = [];
+    d.on("error", (e) => errors.push(e.code));
+    await d.start();
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    FakeWebSocket.instances[0]!.serverClose(1006); // a rejected handshake looks like this
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    FakeWebSocket.instances[1]!.serverClose(1006);
+    await vi.waitFor(() => expect(d.state).toBe("error"));
+    expect(errors).toEqual(["AuthFailed"]);
     d.destroy();
   });
 });

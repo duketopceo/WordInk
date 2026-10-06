@@ -3,7 +3,9 @@
 //! compared against.
 
 use serde_json::Value;
-use wordink_core::providers::{Capabilities, Deepgram, Groq, HostProvider, OpenAi, Provider};
+use wordink_core::providers::{
+    Capabilities, Deepgram, Groq, HostProvider, OpenAi, Provider, WS_CLOSE_STALL,
+};
 use wordink_core::{
     Effect, ErrorCode, Event, HostResult, HttpBody, HttpRequest, Mode, PartValue, Session,
     SessionConfig, State, WsData,
@@ -474,6 +476,25 @@ fn openai_rejected_handshake_is_auth_failed() {
 }
 
 #[test]
+fn openai_stalled_connect_is_provider_down() {
+    // The host's private stall code marks a connect timeout (R9): the
+    // provider could not be reached, so it did not reject the credential.
+    let mut s = session(openai());
+    let (id, _, _) = ws_open(&begin(&mut s));
+    let fx = s.handle(Event::WsClosed {
+        id,
+        code: WS_CLOSE_STALL,
+    });
+    assert_eq!(
+        fx,
+        vec![
+            Effect::StopMic,
+            Effect::State(State::Error(ErrorCode::ProviderDown))
+        ]
+    );
+}
+
+#[test]
 fn openai_without_hint_omits_prompt() {
     let mut s = Session::new(SessionConfig::new(Mode::PushToTalk, openai()));
     let (id, _, _) = ws_open(&begin(&mut s));
@@ -606,6 +627,35 @@ fn deepgram_falls_back_to_bearer_subprotocol() {
         vec![
             Effect::StopMic,
             Effect::State(State::Error(ErrorCode::AuthFailed))
+        ]
+    );
+}
+
+#[test]
+fn deepgram_stalled_candidate_retries_then_is_provider_down() {
+    // A mid-chain stall is like any close before open: the next subprotocol
+    // candidate gets its own attempt.
+    let mut s = session(deepgram());
+    let (first, _, _) = ws_open(&begin(&mut s));
+    let retry = s.handle(Event::WsClosed {
+        id: first,
+        code: WS_CLOSE_STALL,
+    });
+    let (second, _, protocols) = ws_open(&retry);
+    assert_ne!(first, second);
+    assert_eq!(protocols, vec!["bearer", "dg.jwt.token"]);
+    assert_eq!(s.state(), State::Listening);
+
+    // The last candidate stalling out ends in ProviderDown, not AuthFailed.
+    let fx = s.handle(Event::WsClosed {
+        id: second,
+        code: WS_CLOSE_STALL,
+    });
+    assert_eq!(
+        fx,
+        vec![
+            Effect::StopMic,
+            Effect::State(State::Error(ErrorCode::ProviderDown))
         ]
     );
 }

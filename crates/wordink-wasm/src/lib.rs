@@ -15,6 +15,15 @@ use wordink_core::{
     WsData,
 };
 
+/// The close code a host reports for a socket that timed out before it
+/// opened; the core maps it to `ProviderDown`, every other pre-open code to
+/// `AuthFailed` (`wordink_core::providers::WS_CLOSE_STALL`). Exported as a
+/// getter: wasm-bindgen does not export constants.
+#[wasm_bindgen]
+pub fn ws_connect_stall_code() -> u16 {
+    wordink_core::providers::WS_CLOSE_STALL
+}
+
 /// A binary payload waiting for the host.
 #[derive(Debug)]
 enum Blob {

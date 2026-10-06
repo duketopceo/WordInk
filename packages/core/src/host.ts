@@ -2,7 +2,7 @@
  * The browser host (KTD2): runs the wasm core, performs the effects it emits (microphone, fetch,
  * WebSocket, host providers) and feeds the results back as events.
  */
-import init, { WasmSession } from "../wasm/wordink_core.js";
+import init, { WasmSession, ws_connect_stall_code } from "../wasm/wordink_core.js";
 import { type Credentials, mintToken, relayUrl, resolveCredentials } from "./credentials.js";
 import { configError, type ErrorCode, sessionError, WordInkError } from "./errors.js";
 import { type CloudProvider, type HostProvider, type HostProviderResult, isHostProvider } from "./providers.js";
@@ -480,7 +480,7 @@ class DictationHost implements Dictation {
     this.watchdog = setTimeout(() => {
       this.watchdog = undefined;
       if (this.destroyed || session !== this.session || session.state() !== "transcribing") return;
-      for (const [id, ws] of [...this.sockets]) this.failSocket(session, id, ws);
+      for (const [id, ws] of [...this.sockets]) this.failSocket(session, id, ws, WS_ABNORMAL_CLOSE);
       if (this.hostProvider && session.state() === "transcribing") {
         this.hostActive = false;
         void this.callHost(() => this.hostProvider?.cancel?.());
@@ -593,11 +593,11 @@ class DictationHost implements Dictation {
       .catch(() => this.feed(session, (s) => s.http_failed(e.id)));
   }
 
-  /** Closes a socket and reports it to the core as failed (the code browsers give a lost socket). */
-  private failSocket(session: WasmSession, id: number, ws: WebSocket): void {
+  /** Closes a socket and reports it to the core as failed with `code` (the close code it stands in for). */
+  private failSocket(session: WasmSession, id: number, ws: WebSocket, code: number): void {
     this.sockets.delete(id);
     this.closeSocket(ws);
-    this.feed(session, (s) => s.ws_closed(id, WS_ABNORMAL_CLOSE));
+    this.feed(session, (s) => s.ws_closed(id, code));
   }
 
   private openSocket(session: WasmSession, id: number, url: string, protocols: string[]): void {
@@ -614,8 +614,9 @@ class DictationHost implements Dictation {
     this.connectTimers.set(
       ws,
       setTimeout(() => {
-        // Never opened: report it like a socket that failed to open.
-        if (this.sockets.get(id) === ws) this.failSocket(session, id, ws);
+        // Never opened: a stall, not a rejection. The core maps the private stall code
+        // to ProviderDown (a real failed handshake arrives as a 1006 close and stays AuthFailed).
+        if (this.sockets.get(id) === ws) this.failSocket(session, id, ws, ws_connect_stall_code());
       }, WS_CONNECT_TIMEOUT_MS),
     );
     ws.onopen = () => {

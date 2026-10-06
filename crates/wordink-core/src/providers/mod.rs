@@ -121,6 +121,13 @@ pub(crate) fn http_error(status: u16) -> ErrorCode {
     }
 }
 
+/// The close code a host reports for a socket that never opened before its
+/// connect timeout. WordInk-private: RFC 6455 reserves 4000–4999 for
+/// application use, so a real provider close never carries it. It lets a
+/// stalled connect be told apart from a rejected handshake (a 401 surfaces
+/// to the host as a 1006 close before open).
+pub const WS_CLOSE_STALL: u16 = 4408;
+
 /// Maps the close code of a socket that had opened to an error code.
 fn ws_close_error(code: u16) -> ErrorCode {
     match code {
@@ -155,10 +162,12 @@ pub(crate) enum SocketEvent {
     Text(String),
     /// The socket closed after opening.
     Closed(u16),
-    /// The socket never opened with any candidate. Browsers hide the
-    /// handshake status, and with a reachable provider a rejected handshake
-    /// almost always means a rejected credential.
-    Rejected,
+    /// The socket never opened with any candidate, with the close code the
+    /// host reported. Browsers hide the handshake status, and with a
+    /// reachable provider a rejected handshake almost always means a
+    /// rejected credential; the host's private [`WS_CLOSE_STALL`] code marks
+    /// a connect timeout instead.
+    Rejected(u16),
 }
 
 impl Socket {
@@ -229,7 +238,7 @@ impl Socket {
                     SocketEvent::None
                 } else {
                     self.closed = true;
-                    SocketEvent::Rejected
+                    SocketEvent::Rejected(code)
                 }
             }
             _ => SocketEvent::None,
@@ -240,7 +249,11 @@ impl Socket {
     pub(crate) fn failure(event: &SocketEvent) -> Option<Progress> {
         match event {
             SocketEvent::Closed(code) => Some(Progress::Failed(ws_close_error(*code))),
-            SocketEvent::Rejected => Some(Progress::Failed(ErrorCode::AuthFailed)),
+            SocketEvent::Rejected(code) => Some(Progress::Failed(match *code {
+                // The host's connect timeout fired: a stall, not a verdict.
+                WS_CLOSE_STALL => ErrorCode::ProviderDown,
+                _ => ErrorCode::AuthFailed,
+            })),
             _ => None,
         }
     }
