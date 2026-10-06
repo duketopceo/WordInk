@@ -42,7 +42,7 @@ test("on localhost the demo renders the dev-key form, and every docs page loads"
   await expect(page.locator('#demo-devkey input[type="password"]')).toHaveCount(1);
 
   const links = await page.locator("nav.side a").evaluateAll((as) => as.map((a) => (a as HTMLAnchorElement).href));
-  expect(links).toHaveLength(9);
+  expect(links).toHaveLength(10);
   for (const href of links) {
     await page.goto(href);
     await expect(page.locator("main.content h1")).toHaveCount(1);
