@@ -11,6 +11,7 @@ import {
   type GpuLike,
   type ToWorker,
   defaultModelBaseUrl,
+  inferenceTimeoutMs,
   pcm16ToFloat32,
   selectDevice,
 } from "./moonshine.js";
@@ -60,8 +61,6 @@ export interface LocalProvider extends HostProvider {
  * the inference session after the download).
  */
 const LOAD_STALL_TIMEOUT_MS = 120_000;
-/** Inference on one utterance that has not answered by then fails with ProviderDown. */
-const INFERENCE_TIMEOUT_MS = 30_000;
 /**
  * The host watchdog for one utterance. A stall timeout has no total bound, so this is what bounds the
  * wait when the first utterance includes the model download: 10 minutes covers the ~28 MB download at
@@ -212,9 +211,10 @@ export function createLocalProvider(options: LocalProviderOptions = {}): LocalPr
     const text = new Promise<string>((resolve, reject) => pending.set(id, { resolve, reject }));
     const msg: ToWorker = { type: "transcribe", id, audio };
     w.postMessage(msg, [audio.buffer]);
-    const timedOut = new Error(`@wordink/local: transcription timed out after ${INFERENCE_TIMEOUT_MS} ms`);
+    const timeoutMs = inferenceTimeoutMs(audio.length);
+    const timedOut = new Error(`@wordink/local: transcription timed out after ${timeoutMs} ms`);
     try {
-      return await withTimeout(text, INFERENCE_TIMEOUT_MS, timedOut);
+      return await withTimeout(text, timeoutMs, timedOut);
     } catch (err) {
       // A worker that stops answering is likely wedged: drop it so the next utterance starts a fresh one.
       if (err === timedOut && worker === w) {

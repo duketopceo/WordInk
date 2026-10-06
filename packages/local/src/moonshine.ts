@@ -67,6 +67,18 @@ export function maxNewTokens(samples: number, rate: number): number {
   return Math.max(6, Math.ceil((samples / rate) * 6));
 }
 
+/** Inference on one utterance that has not answered by then fails with ProviderDown. */
+export const INFERENCE_TIMEOUT_MS = 30_000;
+
+/**
+ * The inference deadline for one utterance. It scales with the audio: 60 s of speech measured about
+ * 0.06 RTF on a fast WASM device, so one second of allowance per second of audio covers a device an
+ * order of magnitude slower; the 30 s floor still bounds short clips.
+ */
+export function inferenceTimeoutMs(samples: number): number {
+  return Math.max(INFERENCE_TIMEOUT_MS, Math.ceil((samples / SAMPLE_RATE) * 1000));
+}
+
 /** Concatenates PCM16 chunks into one Float32Array in [-1, 1). */
 export function pcm16ToFloat32(chunks: readonly Int16Array[]): Float32Array {
   let n = 0;

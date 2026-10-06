@@ -8,6 +8,7 @@ import {
   ProgressTracker,
   createVerifiedFetch,
   defaultModelBaseUrl,
+  inferenceTimeoutMs,
   maxNewTokens,
   pcm16ToFloat32,
   selectDevice,
@@ -189,6 +190,12 @@ describe("helpers", () => {
   it("allows enough tokens for utterances under a second", () => {
     expect(maxNewTokens(8000, 16000)).toBeGreaterThanOrEqual(6);
     expect(maxNewTokens(16000 * 10, 16000)).toBe(60);
+  });
+
+  it("scales the inference timeout with utterance length past a 30 s floor", () => {
+    expect(inferenceTimeoutMs(0)).toBe(30_000);
+    expect(inferenceTimeoutMs(16000 * 29)).toBe(30_000);
+    expect(inferenceTimeoutMs(16000 * 60)).toBe(60_000);
   });
 
   it("joins PCM16 chunks into normalized float samples", () => {
@@ -464,6 +471,27 @@ describe("createLocalProvider", () => {
       await p.start(16000);
       await vi.advanceTimersByTimeAsync(0);
       expect(FakeWorker.last).not.toBe(w);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a 60 s utterance's inference is not cut off at the 30 s floor", async () => {
+    const { p, w, results } = await readyProvider();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await p.start(16000);
+      await p.pushAudio(new Int16Array(16000 * 60));
+      const done = p.finish();
+      await vi.advanceTimersByTimeAsync(0);
+      const msg = w.sent.at(-1) as Extract<ToWorker, { type: "transcribe" }>;
+      // The deadline is ~60 s for a minute of audio: still pending at 30 s, answered at 59 s.
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(results).toEqual([]);
+      w.emit({ type: "result", id: msg.id, text: "a minute of speech" });
+      await done;
+      expect(results).toEqual([{ type: "final", text: "a minute of speech" }]);
+      expect(w.terminated).toBe(false);
     } finally {
       vi.useRealTimers();
     }
