@@ -13,6 +13,16 @@ import {
   OPENAI_AUDIO_URL,
   type ResolvedEntry,
 } from "../../src/gateway/providers.js";
+import {
+  hang,
+  makeUpstream,
+  ok,
+  sentForm,
+  statusWith,
+  upstreamCall,
+  type FetchMock,
+  type Responder,
+} from "./fakes.js";
 
 const GROQ_KEY_A = "gsk_test_KEY_A_0123456789";
 const GROQ_KEY_B = "gsk_test_KEY_B_0123456789";
@@ -73,51 +83,16 @@ class MemoryTokenStore implements TokenStore {
   }
 }
 
-type Responder = (signal: AbortSignal | undefined) => Response | Promise<Response>;
-const ok = (text: string): Responder => () => Response.json({ text });
-const status =
-  (code: number): Responder =>
-  () =>
-    Response.json({ error: { message: `provider detail ${GROQ_KEY_A}` } }, { status: code });
-/** Never answers; rejects with the abort reason like real fetch does. */
-const hang: Responder = (signal) =>
-  new Promise((_resolve, reject) => {
-    signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-  });
+const status = statusWith(GROQ_KEY_A);
 
-let responders: Map<string, Responder[]>;
-let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
+let fetchMock: FetchMock;
+let on: (key: string, ...rs: Responder[]) => void;
+let keysCalled: () => string[];
 let errorSpy: ReturnType<typeof vi.spyOn>;
 let warnSpy: ReturnType<typeof vi.spyOn>;
 let tokenStore: MemoryTokenStore;
 let deviceToken: string;
 let deviceId: string;
-
-/** Queue responses per provider key; the last one repeats. */
-function on(key: string, ...rs: Responder[]): void {
-  responders.set(key, rs);
-}
-
-function keysCalled(): string[] {
-  return fetchMock.mock.calls.map(([, init]) => {
-    const auth = new Headers(init?.headers).get("authorization") ?? "";
-    return auth.replace(/^(Bearer|Token) /, "");
-  });
-}
-
-function upstreamCall(i = 0): { url: string; init: RequestInit; headers: Headers } {
-  const c = fetchMock.mock.calls[i];
-  if (!c) throw new Error(`no upstream call #${i}`);
-  const [input, init] = c;
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  return { url, init: init ?? {}, headers: new Headers(init?.headers) };
-}
-
-function sentForm(i = 0): FormData {
-  const { init } = upstreamCall(i);
-  expect(init.body).toBeInstanceOf(FormData);
-  return init.body as FormData;
-}
 
 interface PostOptions {
   /** Bearer token; `false` sends no Authorization header at all. Defaults to the valid token. */
@@ -165,22 +140,18 @@ function relay(gateway: Partial<GatewayConfig> = {}, config: Partial<RelayConfig
   });
 }
 
-async function expectOpenAIError(res: Response, status: number, type?: string): Promise<void> {
+async function expectOpenAIError(res: Response, status: number, type?: string, code?: string): Promise<void> {
   expect(res.status).toBe(status);
   const body: unknown = await res.json();
-  expect(body).toMatchObject({ error: { message: expect.any(String), type: type ?? expect.any(String) } });
+  const error = (body as { error: Record<string, unknown> }).error;
+  expect(error.message).toEqual(expect.any(String));
+  expect(error.type).toBe(type ?? expect.any(String));
+  if (code) expect(error.code).toBe(code);
   expect(Object.keys(body as Record<string, unknown>)).toEqual(["error"]);
 }
 
 beforeEach(async () => {
-  responders = new Map();
-  fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
-    const key = (new Headers(init?.headers).get("authorization") ?? "").replace(/^(Bearer|Token) /, "");
-    const queue = responders.get(key);
-    if (!queue || queue.length === 0) throw new Error(`no responder for ${key}`);
-    const r = queue.length > 1 ? queue.shift()! : queue[0]!;
-    return r(init?.signal ?? undefined);
-  });
+  ({ fetchMock, on, keysCalled } = makeUpstream());
   vi.stubGlobal("fetch", fetchMock);
   errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -205,10 +176,10 @@ describe("routing", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ text: "hello world" });
 
-    const { url, headers } = upstreamCall();
+    const { url, headers } = upstreamCall(fetchMock);
     expect(url).toBe(GROQ_AUDIO_URL);
     expect(headers.get("authorization")).toBe(`Bearer ${GROQ_KEY_A}`);
-    const form = sentForm();
+    const form = sentForm(fetchMock);
     // The client's `model` is accepted but the entry's own model is called (R3).
     expect(form.get("model")).toBe("whisper-large-v3-turbo");
     expect(form.get("language")).toBe("en");
@@ -237,6 +208,7 @@ describe("routing", () => {
   it("405s non-POST methods on the route", async () => {
     const res = await relay()(new Request(`${BASE}/v1/audio/transcriptions`, { method: "OPTIONS" }));
     expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toBe("POST");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -251,7 +223,7 @@ describe("routing", () => {
 describe("device-token auth", () => {
   it("missing Bearer gets 401 in the OpenAI shape, no provider call (AE2)", async () => {
     const res = await relay()(post({ token: false }));
-    await expectOpenAIError(res, 401);
+    await expectOpenAIError(res, 401, "invalid_request_error", "invalid_api_key");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -266,7 +238,7 @@ describe("device-token auth", () => {
 
   it("unknown Bearer gets 401, no provider call", async () => {
     const res = await relay()(post({ token: generateToken() }));
-    await expectOpenAIError(res, 401);
+    await expectOpenAIError(res, 401, "invalid_request_error", "invalid_api_key");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -275,7 +247,7 @@ describe("device-token auth", () => {
     const handler = relay();
     expect((await handler(post())).status).toBe(200);
     await tokenStore.revoke(deviceId);
-    await expectOpenAIError(await handler(post()), 401);
+    await expectOpenAIError(await handler(post()), 401, "invalid_request_error", "invalid_api_key");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const other = await tokenStore.create("typewhisper-desktop");
     expect((await handler(post({ token: other.token }))).status).toBe(200);
@@ -289,7 +261,7 @@ describe("device-token auth", () => {
       revoke: (id) => tokenStore.revoke(id),
     };
     const res = await relay({ tokenStore: broken })(post());
-    await expectOpenAIError(res, 401);
+    await expectOpenAIError(res, 401, "invalid_request_error", "invalid_api_key");
     expect(fetchMock).not.toHaveBeenCalled();
     const logged = errorSpy.mock.calls.flat().join(" ");
     expect(logged).not.toContain(deviceToken);
@@ -302,7 +274,7 @@ describe("rate limiting (own limiter, per token, KTD9)", () => {
     const handler = relay({ rateLimit: { max: 1 } });
     expect((await handler(post())).status).toBe(200);
     const res = await handler(post());
-    await expectOpenAIError(res, 429);
+    await expectOpenAIError(res, 429, "rate_limit_exceeded", "rate_limit_exceeded");
     expect(res.headers.get("retry-after")).toMatch(/^\d+$/);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -349,25 +321,43 @@ describe("request body", () => {
   it("413 in the OpenAI shape before any provider call when the body exceeds gateway.maxBodyBytes", async () => {
     const handler = relay({ maxBodyBytes: 64 });
     const res = await handler(post());
-    await expectOpenAIError(res, 413);
+    await expectOpenAIError(res, 413, "invalid_request_error");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("a body over the cap still spends the token's budget: the limiter runs before buffering", async () => {
+    const handler = relay({ maxBodyBytes: 64, rateLimit: { max: 1 } });
+    await expectOpenAIError(await handler(post()), 413, "invalid_request_error");
+    await expectOpenAIError(await handler(post()), 429, "rate_limit_exceeded", "rate_limit_exceeded");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("an unexpected throw answers 500 in the OpenAI error shape", async () => {
+    const handler = relay({
+      rateLimit: () => {
+        throw new Error("limiter exploded");
+      },
+    });
+    const res = await handler(post());
+    await expectOpenAIError(res, 500, "server_error");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("400 when `file` is missing, no provider call", async () => {
     const res = await relay()(post({ withFile: false }));
-    await expectOpenAIError(res, 400);
+    await expectOpenAIError(res, 400, "invalid_request_error", "missing_required_parameter");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("400 on an unsupported response_format", async () => {
     const res = await relay()(post({ fields: { response_format: "srt" } }));
-    await expectOpenAIError(res, 400);
+    await expectOpenAIError(res, 400, "invalid_request_error");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("400 on a non-multipart body", async () => {
     const res = await relay()(post({ rawBody: JSON.stringify({ hi: 1 }), rawContentType: "application/json" }));
-    await expectOpenAIError(res, 400);
+    await expectOpenAIError(res, 400, "invalid_request_error");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -380,7 +370,7 @@ describe("response formats", () => {
     expect(res.headers.get("content-type")).toContain("text/plain");
     expect(await res.text()).toBe("hello world");
     // `text` is fetched as `json` upstream; the gateway formats it.
-    expect(sentForm().get("response_format")).toBe("json");
+    expect(sentForm(fetchMock).get("response_format")).toBe("json");
   });
 
   it.each([
@@ -444,7 +434,7 @@ describe("input hygiene (KTD9)", () => {
   it("drops `language=en&model=x`; the provider gets no language and no injected model", async () => {
     on(GROQ_KEY_A, ok("hi"));
     await relay()(post({ fields: { language: "en&model=x" } }));
-    const form = sentForm();
+    const form = sentForm(fetchMock);
     expect(form.get("language")).toBeNull();
     expect(form.get("model")).toBe("whisper-large-v3-turbo");
   });
@@ -454,7 +444,7 @@ describe("input hygiene (KTD9)", () => {
       Response.json({ results: { channels: [{ alternatives: [{ transcript: "hi" }] }] } }),
     );
     await relay({ providers: [deepgram] })(post({ fields: { language: "en&model=x" } }));
-    const u = new URL(upstreamCall().url);
+    const u = new URL(upstreamCall(fetchMock).url);
     expect(u.searchParams.has("language")).toBe(false);
     expect(u.searchParams.getAll("model")).toEqual(["nova-3"]);
   });
@@ -464,13 +454,13 @@ describe("vocabulary (R12)", () => {
   it("the operator vocabulary reaches the provider with no client prompt (AE4)", async () => {
     on(GROQ_KEY_A, ok("hi"));
     await relay({ vocabulary: ["Omarchy", "Hyprland"] })(post());
-    expect(sentForm().get("prompt")).toBe("Omarchy, Hyprland");
+    expect(sentForm(fetchMock).get("prompt")).toBe("Omarchy, Hyprland");
   });
 
   it("operator terms come first when a client prompt is present", async () => {
     on(GROQ_KEY_A, ok("hi"));
     await relay({ vocabulary: ["Omarchy"] })(post({ fields: { prompt: "Dictating notes." } }));
-    expect(sentForm().get("prompt")).toBe("Omarchy. Dictating notes.");
+    expect(sentForm(fetchMock).get("prompt")).toBe("Omarchy. Dictating notes.");
   });
 });
 
@@ -501,7 +491,7 @@ describe("provider fallback through the route", () => {
     on(GROQ_KEY_A, status(400));
     on(GROQ_KEY_B, ok("from B"));
     const res = await relay({ providers: [groqA, groqB] })(post());
-    await expectOpenAIError(res, 400);
+    await expectOpenAIError(res, 400, "invalid_request_error");
     expect(keysCalled()).toEqual([GROQ_KEY_A]);
   });
 

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AudioFile, ResolvedEntry } from "../../src/gateway/providers.js";
 import { createRouter, type RouterOptions } from "../../src/gateway/router.js";
+import { hang, makeUpstream, ok, statusWith, type FetchMock, type Responder } from "./fakes.js";
 
 const KEY_A = "gsk_test_KEY_A_0123456789";
 const KEY_B = "gsk_test_KEY_B_0123456789";
@@ -12,34 +13,13 @@ const C: ResolvedEntry = { provider: "openai", key: KEY_C };
 
 const audio: AudioFile = { bytes: new Uint8Array([1, 2, 3]), type: "audio/wav", name: "audio.wav" };
 
-type Responder = (signal: AbortSignal | undefined) => Response | Promise<Response>;
-const ok = (text: string): Responder => () => Response.json({ text });
-const status =
-  (code: number, headers: Record<string, string> = {}): Responder =>
-  () =>
-    Response.json({ error: { message: `upstream detail with key ${KEY_A}` } }, { status: code, headers });
-/** Never answers; rejects with the abort reason like real fetch does. */
-const hang: Responder = (signal) =>
-  new Promise((_resolve, reject) => {
-    signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-  });
+const status = statusWith(KEY_A);
 
-let responders: Map<string, Responder[]>;
-let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
+let fetchMock: FetchMock;
+let on: (key: string, ...rs: Responder[]) => void;
+let keysCalled: () => string[];
 let clock: number;
 let errorSpy: ReturnType<typeof vi.spyOn>;
-
-/** Queue responses per key; the last one repeats. */
-function on(key: string, ...rs: Responder[]): void {
-  responders.set(key, rs);
-}
-
-function keysCalled(): string[] {
-  return fetchMock.mock.calls.map(([, init]) => {
-    const auth = new Headers(init?.headers).get("authorization") ?? "";
-    return auth.replace(/^(Bearer|Token) /, "");
-  });
-}
 
 function router(entries: ResolvedEntry[], options: RouterOptions = {}) {
   return createRouter(entries, { now: () => clock, ...options });
@@ -47,14 +27,7 @@ function router(entries: ResolvedEntry[], options: RouterOptions = {}) {
 
 beforeEach(() => {
   clock = 1_000_000;
-  responders = new Map();
-  fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
-    const key = (new Headers(init?.headers).get("authorization") ?? "").replace(/^(Bearer|Token) /, "");
-    const queue = responders.get(key);
-    if (!queue || queue.length === 0) throw new Error(`no responder for ${key}`);
-    const r = queue.length > 1 ? queue.shift()! : queue[0]!;
-    return r(init?.signal ?? undefined);
-  });
+  ({ fetchMock, on, keysCalled } = makeUpstream());
   vi.stubGlobal("fetch", fetchMock);
   errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -188,6 +161,44 @@ describe("fallback", () => {
     // B's success clears its cooldown; it stays first choice while A cools.
     expect(await r.transcribe(audio, {})).toEqual({ ok: true, text: "from B" });
     expect(keysCalled()).toEqual([KEY_A, KEY_B, KEY_B, KEY_B]);
+  });
+
+  it("tries an entry whose cooldown expired mid-request instead of answering 502", async () => {
+    on(KEY_A, status(429, { "retry-after": "4" }), ok("from A"));
+    on(
+      KEY_B,
+      status(400),
+      () => {
+        clock += 5_000; // this attempt spans A's cooldown expiry
+        return status(500)(undefined);
+      },
+    );
+    const r = router([A, B]);
+    // Request 1: A 429s (cooling 4 s); B 400s — a client error, so B never cools.
+    expect(await r.transcribe(audio, {})).toMatchObject({ ok: false, status: 400 });
+    // Request 2: only B is ready at request start; its attempt advances the clock
+    // past A's expiry, and A is tried inside the same request.
+    expect(await r.transcribe(audio, {})).toEqual({ ok: true, text: "from A" });
+    expect(keysCalled()).toEqual([KEY_A, KEY_B, KEY_B, KEY_A]);
+  });
+
+  it("an attempt clipped by the shared deadline does not cool the entry", async () => {
+    vi.useFakeTimers();
+    on(KEY_A, hang);
+    on(KEY_B, () => new Promise((resolve) => setTimeout(() => resolve(status(500)(undefined)), 14_000)));
+    on(KEY_C, hang);
+    const r = router([A, B, C], { now: () => Date.now(), deadlineMs: 30_000 });
+    const pending = r.transcribe(audio, {});
+    // A hangs its full 15 s budget; B fails at 14 s; C gets the ~1 s left and is clipped.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(await pending).toMatchObject({ ok: false, status: 504 });
+    expect(keysCalled()).toEqual([KEY_A, KEY_B, KEY_C]);
+
+    // C proved nothing in 1 s, so it is not cooling: it serves the next request while
+    // A and B still cool.
+    on(KEY_C, ok("from C"));
+    expect(await r.transcribe(audio, {})).toEqual({ ok: true, text: "from C" });
+    expect(keysCalled()).toEqual([KEY_A, KEY_B, KEY_C, KEY_C]);
   });
 
   it("every entry fails: the client gets 502 upstream_unavailable in the OpenAI shape", async () => {

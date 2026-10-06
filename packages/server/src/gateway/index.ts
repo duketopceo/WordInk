@@ -1,11 +1,11 @@
 // The desktop-facing OpenAI-compatible transcription route (KTD1). Everything here is
 // Workers-safe: the Node-only token backend lives in file-tokens.ts and is never imported.
-import { createMemoryLimiter, errorName, readCapped } from "../internal.js";
+import { createMemoryLimiter, errorName, GATEWAY_LOG_PREFIX, limiterRetrySeconds, readCapped } from "../internal.js";
 import type { RateLimiter, RateLimitOptions } from "../internal.js";
 import { parseTranscriptionForm, type ParseError } from "./multipart.js";
 import type { ResolvedEntry } from "./providers.js";
 import { createRouter } from "./router.js";
-import type { TokenStore } from "./tokens.js";
+import type { TokenInfo, TokenStore } from "./tokens.js";
 
 /** The route path (under `basePath`) the gateway serves when configured. */
 export const GATEWAY_TRANSCRIPTIONS_PATH = "/v1/audio/transcriptions";
@@ -39,16 +39,15 @@ export interface GatewayConfig {
   /** Gateway-wide operator vocabulary merged into every attempt's prompt or keyterms (KTD6, R12). */
   vocabulary?: readonly string[] | undefined;
   /** Per-token limiter settings, or a limiter function. Default {@link DEFAULT_GATEWAY_RATE_LIMIT}. */
-  rateLimit?: RateLimitOptions | RateLimiter;
+  rateLimit?: RateLimitOptions | RateLimiter | undefined;
   /** Upload cap; larger bodies get 413 in the OpenAI shape before any provider call. Default 25 MB. */
-  maxBodyBytes?: number;
+  maxBodyBytes?: number | undefined;
   /** Abort one provider attempt after this many ms and fall through. Default 15 000 (KTD5). */
-  upstreamTimeoutMs?: number;
+  upstreamTimeoutMs?: number | undefined;
   /** Bound on the whole fallback chain; reaching it answers 504. Default 30 000 (KTD5). */
-  deadlineMs?: number;
+  deadlineMs?: number | undefined;
 }
 
-const LOG_PREFIX = "[@wordink/server] gateway:";
 const JSON_HEADERS = { "content-type": "application/json", "cache-control": "no-store" };
 const TEXT_HEADERS = { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" };
 
@@ -85,41 +84,49 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
       });
     }
 
-    // Per-token budget (KTD9); a spent budget is a 429 in the OpenAI shape with Retry-After.
-    const verdict = await limiter(device.id, request);
-    if (verdict !== true) {
-      const retryAfter = typeof verdict === "number" ? verdict : 60;
-      return openaiError(429, "Rate limit reached for this device token.", "rate_limit_exceeded", {
-        code: "rate_limit_exceeded",
-        headers: { "retry-after": String(retryAfter) },
+    try {
+      // Per-token budget (KTD9) before any body buffering: a request already over
+      // quota answers 429 without holding maxBodyBytes of memory first. A spent
+      // budget is a 429 in the OpenAI shape with Retry-After.
+      const verdict = await limiter(device.id, request);
+      if (verdict !== true) {
+        return openaiError(429, "Rate limit reached for this device token.", "rate_limit_exceeded", {
+          code: "rate_limit_exceeded",
+          headers: { "retry-after": String(limiterRetrySeconds(verdict)) },
+        });
+      }
+
+      const body = await readCapped(request, maxBodyBytes);
+      if (body === "too_large") {
+        return openaiError(413, "The request body is too large.", "invalid_request_error");
+      }
+
+      // The request stream is consumed by the cap, so the bytes are re-wrapped for formData (KTD7).
+      const parsed = await parseTranscriptionForm(body, request.headers.get("content-type"));
+      if (!parsed.ok) return formError(parsed.error);
+
+      const result = await router.transcribe(parsed.form.file, {
+        prompt: parsed.form.prompt,
+        language: parsed.form.language,
+        responseFormat: parsed.form.responseFormat,
+        temperature: parsed.form.temperature,
       });
-    }
+      if (!result.ok) {
+        return new Response(JSON.stringify(result.body), { status: result.status, headers: JSON_HEADERS });
+      }
 
-    const body = await readCapped(request, maxBodyBytes);
-    if (body === "too_large") {
-      return openaiError(413, "The request body is too large.", "invalid_request_error");
+      if (parsed.form.responseFormat === "text") {
+        return new Response(result.text, { status: 200, headers: TEXT_HEADERS });
+      }
+      const json =
+        parsed.form.responseFormat === "verbose_json" ? (result.verbose ?? { text: result.text }) : { text: result.text };
+      return new Response(JSON.stringify(json), { status: 200, headers: JSON_HEADERS });
+    } catch (err) {
+      // An unexpected throw (e.g. a reset body stream mid-upload) still answers in
+      // the OpenAI error shape, not the adapter's bare 500.
+      console.error(`${GATEWAY_LOG_PREFIX} request failed unexpectedly.`, errorName(err));
+      return openaiError(500, "The transcription request failed internally.", "server_error");
     }
-
-    // The request stream is consumed by the cap, so the bytes are re-wrapped for formData (KTD7).
-    const parsed = await parseTranscriptionForm(body, request.headers.get("content-type"));
-    if (!parsed.ok) return formError(parsed.error);
-
-    const result = await router.transcribe(parsed.form.file, {
-      prompt: parsed.form.prompt,
-      language: parsed.form.language,
-      responseFormat: parsed.form.responseFormat,
-      temperature: parsed.form.temperature,
-    });
-    if (!result.ok) {
-      return new Response(JSON.stringify(result.body), { status: result.status, headers: JSON_HEADERS });
-    }
-
-    if (parsed.form.responseFormat === "text") {
-      return new Response(result.text, { status: 200, headers: TEXT_HEADERS });
-    }
-    const json =
-      parsed.form.responseFormat === "verbose_json" ? (result.verbose ?? { text: result.text }) : { text: result.text };
-    return new Response(JSON.stringify(json), { status: 200, headers: JSON_HEADERS });
   };
 }
 
@@ -131,11 +138,11 @@ function bearerToken(request: Request): string | null {
 }
 
 /** A store that throws is treated as "no such token": auth fails closed, like `authorize`. */
-async function verify(store: TokenStore, token: string): Promise<{ id: string; label: string } | null> {
+async function verify(store: TokenStore, token: string): Promise<TokenInfo | null> {
   try {
     return await store.verify(token);
   } catch (err) {
-    console.error(`${LOG_PREFIX} token store threw during verify; refusing request.`, errorName(err));
+    console.error(`${GATEWAY_LOG_PREFIX} token store threw during verify; refusing request.`, errorName(err));
     return null;
   }
 }

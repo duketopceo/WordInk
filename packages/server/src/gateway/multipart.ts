@@ -7,7 +7,7 @@ export interface AudioFile {
 }
 
 export type ResponseFormat = "json" | "text" | "verbose_json";
-export const RESPONSE_FORMATS: readonly ResponseFormat[] = ["json", "text", "verbose_json"];
+const RESPONSE_FORMATS: readonly ResponseFormat[] = ["json", "text", "verbose_json"];
 
 /** The OpenAI transcription fields the gateway understands (R1). Anything else is ignored. */
 export interface TranscriptionForm {

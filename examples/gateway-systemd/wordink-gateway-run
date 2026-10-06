@@ -13,8 +13,21 @@ MAP="${XDG_CONFIG_HOME:-$HOME/.config}/wordink/gateway-keys"
 BIN="${WORDINK_GATEWAY_BIN:-wordink-gateway}"
 
 if [ -f "$MAP" ]; then
-  while IFS='=' read -r name ref; do
+  # `|| [ -n "$name" ]` keeps a final line that lacks a trailing newline.
+  while IFS='=' read -r name ref || [ -n "$name" ]; do
     case "$name" in '' | \#*) continue ;; esac
+    case "$name" in
+      # An invalid identifier makes `export` return non-zero; under set -e that would
+      # abort the script before `exec` and restart-loop the whole service.
+      [!A-Za-z_]* | *[!A-Za-z0-9_]*)
+        echo "wordink-gateway-run: '$name' is not a valid environment name; line skipped" >&2
+        continue ;;
+      # Names that steer this runtime or redirect the config/state the exec'd serve reads
+      # are refused rather than populated with a key.
+      NODE_OPTIONS | LD_* | PATH | HOME | SHELL | IFS | ENV | BASH_ENV | CDPATH | XDG_*)
+        echo "wordink-gateway-run: refusing to set $name from the key map; line skipped" >&2
+        continue ;;
+    esac
     service=${ref%%/*}
     account=${ref#*/}
     if value=$(omaseal get "$service" "$account" 2>/dev/null); then

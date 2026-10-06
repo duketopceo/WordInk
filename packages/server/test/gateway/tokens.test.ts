@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { generateToken, hashToken } from "../../src/gateway/tokens.js";
 import { FileTokenStore, defaultTokenPath } from "../../src/gateway/file-tokens.js";
 
@@ -106,6 +106,37 @@ describe("FileTokenStore", () => {
     await expect(store.revoke("some-id")).rejects.toThrow(/unreadable/);
     expect(readFileSync(path, "utf8")).toBe("{not json");
   });
+
+  it("a valid-JSON wrong-shape file is unreadable too", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, '{"tokens":{}}');
+    const store = new FileTokenStore(path);
+    expect(await store.verify(generateToken())).toBeNull();
+    await expect(store.create("y")).rejects.toThrow(/unreadable/);
+  });
+
+  it("deleting the file after a warm cache verifies nothing (ENOENT bypasses the cache)", async () => {
+    const store = new FileTokenStore(path);
+    const { token } = await store.create("x");
+    expect(await store.verify(token)).not.toBeNull();
+    rmSync(path);
+    expect(await store.verify(token)).toBeNull();
+    expect(await store.list()).toEqual([]);
+  });
+
+  it("recovers from a transient read failure instead of latching unreadable", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const store = new FileTokenStore(path);
+    const { token } = await store.create("x"); // the write clears the cache
+    // stat still works (the directory is searchable) but the read itself fails.
+    chmodSync(path, 0o000);
+    expect(await store.verify(token)).toBeNull();
+    chmodSync(path, 0o600);
+    // Same inode/mtime/size, so the file key is unchanged — recovery must not
+    // depend on the file being rewritten.
+    expect(await store.verify(token)).not.toBeNull();
+  });
 });
 
 describe("defaultTokenPath", () => {
@@ -118,8 +149,27 @@ describe("defaultTokenPath", () => {
 });
 
 describe("import graph", () => {
-  it("gateway/tokens.ts has no node: imports (Workers-safe)", () => {
-    const src = readFileSync(join(import.meta.dirname, "../../src/gateway/tokens.ts"), "utf8");
-    expect(src).not.toMatch(/from\s+["']node:|require\(\s*["']node:|import\(\s*["']node:/);
+  // The Cloudflare entry's reachable set: every src/ module except the declared
+  // Node-only ones. A node: import in any of these breaks the Workers bundle (KTD3).
+  const SRC = join(import.meta.dirname, "../../src");
+  const NODE_ONLY = new Set(["node.ts", join("gateway", "file-tokens.ts")]);
+  const SKIP_DIR = `bin${sep}`;
+  const NODE_IMPORT = /from\s+["']node:|require\(\s*["']node:|import\(\s*["']node:/;
+
+  function workersSources(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? workersSources(join(dir, e.name)) : e.name.endsWith(".ts") ? [join(dir, e.name)] : [],
+    );
+  }
+
+  it("no Workers-reachable source imports node:*", () => {
+    const files = workersSources(SRC).filter((f) => {
+      const rel = relative(SRC, f);
+      return !rel.startsWith(SKIP_DIR) && !NODE_ONLY.has(rel);
+    });
+    expect(files.length).toBeGreaterThan(5); // guard against a silently-empty scan
+    for (const file of files) {
+      expect(readFileSync(file, "utf8"), relative(SRC, file)).not.toMatch(NODE_IMPORT);
+    }
   });
 });

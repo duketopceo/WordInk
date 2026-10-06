@@ -5,7 +5,7 @@ This runs `wordink-gateway serve` on `127.0.0.1:8941`. Desktop dictation apps su
 ```sh
 # @wordink/server isn't on npm yet; build the CLI from this repo:
 pnpm --filter @wordink/server build
-ln -sf "$(pwd)/packages/server/dist/bin/wordink-gateway.js" ~/.local/bin/wordink-gateway
+install -Dm755 packages/server/dist/bin/wordink-gateway.js ~/.local/bin/wordink-gateway
 # (once published: npm install -g @wordink/server)
 
 mkdir -p ~/.config/wordink ~/.local/bin ~/.config/systemd/user

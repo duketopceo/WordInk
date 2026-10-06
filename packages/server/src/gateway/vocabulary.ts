@@ -4,7 +4,7 @@ export const PROMPT_MAX_CHARS = 800;
 export const DEEPGRAM_MAX_KEYTERMS = 50;
 
 /** Trimmed, non-empty, case-insensitively de-duplicated terms, first spelling kept. */
-function uniqueTerms(vocabulary: readonly string[]): string[] {
+export function uniqueTerms(vocabulary: readonly string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const raw of vocabulary) {

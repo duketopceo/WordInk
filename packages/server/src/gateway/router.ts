@@ -1,11 +1,11 @@
+import { GATEWAY_LOG_PREFIX } from "../internal.js";
 import { transcribe, type AudioFile, type ResolvedEntry, type TranscribeOptions, type VerboseTranscript } from "./providers.js";
+import { uniqueTerms } from "./vocabulary.js";
 
-export const DEFAULT_GATEWAY_UPSTREAM_TIMEOUT_MS = 15_000;
-export const DEFAULT_GATEWAY_DEADLINE_MS = 30_000;
-export const DEFAULT_COOLDOWN_MS = 30_000;
-export const MAX_COOLDOWN_MS = 300_000;
-
-const LOG_PREFIX = "[@wordink/server] gateway:";
+const DEFAULT_GATEWAY_UPSTREAM_TIMEOUT_MS = 15_000;
+const DEFAULT_GATEWAY_DEADLINE_MS = 30_000;
+const DEFAULT_COOLDOWN_MS = 30_000;
+const MAX_COOLDOWN_MS = 300_000;
 
 /** The OpenAI error shape every gateway failure uses (R7). */
 export interface OpenAIErrorBody {
@@ -39,7 +39,15 @@ export interface GatewayRouter {
  */
 export function createRouter(entries: readonly ResolvedEntry[], options: RouterOptions = {}): GatewayRouter {
   if (entries.length === 0) throw new Error("createRouter needs at least one provider entry");
-  const vocabulary = options.vocabulary ?? [];
+  // A blank key sends `Bearer undefined` upstream, where it reads as a rejected key (401)
+  // rather than the config error it is — catch it here, naming the entry, never the value.
+  entries.forEach((entry, i) => {
+    if (typeof entry.key !== "string" || entry.key.trim() === "") {
+      throw new Error(`createRouter: providers[${i}] (${entry.provider}) has no resolved key`);
+    }
+  });
+  // Deduped once: the operator vocabulary is static for the router's lifetime.
+  const vocabulary = uniqueTerms(options.vocabulary ?? []);
   const attemptMs = options.upstreamTimeoutMs ?? DEFAULT_GATEWAY_UPSTREAM_TIMEOUT_MS;
   const deadlineMs = options.deadlineMs ?? DEFAULT_GATEWAY_DEADLINE_MS;
   const now = options.now ?? Date.now;
@@ -58,15 +66,22 @@ export function createRouter(entries: readonly ResolvedEntry[], options: RouterO
 
   return {
     async transcribe(audio, request) {
-      const started = now();
-      const deadline = started + deadlineMs;
-      for (const i of candidates(started)) {
+      const deadline = now() + deadlineMs;
+      const tried = new Set<number>();
+      for (;;) {
+        // Readiness is re-evaluated between attempts: a cooldown that expires while a
+        // slower attempt is in flight makes its entry a candidate again this request.
+        const i = candidates(now()).find((j) => !tried.has(j));
+        if (i === undefined) break;
+        tried.add(i);
         const entry = entries[i]!;
         const label = `${entry.provider}#${i}`;
         const remaining = deadline - now();
         if (remaining <= 0) return timedOut();
 
-        const result = await attempt(entry, audio, { ...request, vocabulary }, Math.min(attemptMs, remaining));
+        const budget = Math.min(attemptMs, remaining);
+        const attemptStart = now();
+        const result = await attempt(entry, audio, { ...request, vocabulary }, budget);
         if (result.ok) {
           coolUntil.delete(i);
           return result.verbose
@@ -74,17 +89,24 @@ export function createRouter(entries: readonly ResolvedEntry[], options: RouterO
             : { ok: true, text: result.text };
         }
         if (result.kind === "client") {
-          console.error(`${LOG_PREFIX} ${label} rejected the request (HTTP ${result.status ?? "?"}).`);
+          console.error(`${GATEWAY_LOG_PREFIX} ${label} rejected the request (HTTP ${result.status ?? "?"}).`);
           return clientError(result.status ?? 400);
         }
 
-        const cooldown =
-          result.retryAfter !== undefined ? Math.min(result.retryAfter * 1000, MAX_COOLDOWN_MS) : DEFAULT_COOLDOWN_MS;
-        coolUntil.set(i, now() + cooldown);
-        console.error(
-          `${LOG_PREFIX} ${label} failed (${result.status === undefined ? "no response" : `HTTP ${result.status}`}); ` +
-            `cooling down ${Math.round(cooldown / 1000)} s.`,
-        );
+        // An attempt cut short by the shared deadline — not the entry's own budget —
+        // proves nothing about the provider, so it does not earn a cooldown.
+        const clipped = budget < attemptMs && result.status === undefined && now() - attemptStart >= budget;
+        if (clipped) {
+          console.error(`${GATEWAY_LOG_PREFIX} ${label} attempt was cut short by the deadline; not cooling it.`);
+        } else {
+          const cooldown =
+            result.retryAfter !== undefined ? Math.min(result.retryAfter * 1000, MAX_COOLDOWN_MS) : DEFAULT_COOLDOWN_MS;
+          coolUntil.set(i, now() + cooldown);
+          console.error(
+            `${GATEWAY_LOG_PREFIX} ${label} failed (${result.status === undefined ? "no response" : `HTTP ${result.status}`}); ` +
+              `cooling down ${Math.round(cooldown / 1000)} s.`,
+          );
+        }
         if (now() >= deadline) return timedOut();
       }
       return {

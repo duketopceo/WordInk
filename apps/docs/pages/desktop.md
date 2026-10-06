@@ -15,7 +15,7 @@ The gateway is a local service. It listens on `127.0.0.1:8941` by default.
 ```sh
 # @wordink/server isn't on npm yet; build the CLI from the repo:
 pnpm --filter @wordink/server build
-ln -sf "$(pwd)/packages/server/dist/bin/wordink-gateway.js" ~/.local/bin/wordink-gateway
+install -Dm755 packages/server/dist/bin/wordink-gateway.js ~/.local/bin/wordink-gateway
 # (once published: npm install -g @wordink/server)
 
 wordink-gateway check                 # which providers have keys (never prints them)
@@ -38,6 +38,22 @@ The config file is `~/.config/wordink/gateway.json`:
 The config names environment variables, never key values. On Linux, `examples/gateway-systemd` in the repo has a user service and a wrapper that fills those variables from omaseal at start, so keys never touch disk.
 
 The gateway only listens on loopback. To serve other machines, put it behind TLS and set `"allowInsecureRemote": true`. Without TLS, tokens and audio would cross the network in cleartext.
+
+The full `gateway.json` schema:
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `host` | string | `"127.0.0.1"` | Bind address. Only loopback values are accepted unless `allowInsecureRemote` is set. |
+| `port` | number | `8941` | Port to listen on. |
+| `allowInsecureRemote` | boolean | `false` | Permit a non-loopback `host`. Use only behind TLS. |
+| `providers` | array | `[]` | Ordered fallback chain. Each entry: `{"provider": "groq" \| "openai" \| "deepgram", "keyEnv": "ENV_NAME", "model"?: string, "url"?: string}`. `url` overrides are https-only, or http on loopback. |
+| `vocabulary` | string[] | `[]` | Terms hinted to every request (provider prompt or keyterms). |
+| `rateLimit` | object | — | `{"max"?: number, "windowMs"?: number, "dailyMax"?: number}` per device token. |
+| `maxBodyBytes` | number | `26214400` | Request body cap (25 MB). |
+| `upstreamTimeoutMs` | number | `15000` | Per-provider attempt timeout. |
+| `deadlineMs` | number | `30000` | Whole-chain deadline across all providers. |
+
+Provider keys resolve at serve time: a `keyEnv` whose variable is unset (or resolves to a non-string) skips that entry with a warning; an entry with no usable key never serves requests.
 
 ## Voxtype (Linux)
 
@@ -82,10 +98,28 @@ Errors use OpenAI's error shape:
 
 | Status | Meaning |
 |---|---|
+| 400 | Malformed request: missing `file`, unsupported `response_format`, or a non-multipart body |
 | 401 | Unknown or revoked token |
+| 405 | Method other than POST on the route (`Allow: POST` is returned) |
 | 413 | Audio too large (25 MB by default) |
 | 429 | Rate limit for this device |
 | 502 | Every provider failed |
 | 504 | The overall 30 s deadline passed |
 
 Responses never say which provider served a request.
+
+## Watching it
+
+Under the systemd service the gateway logs to the journal:
+
+```sh
+journalctl --user -u wordink-gateway -f
+```
+
+Provider failures appear as `gateway: groq#0 failed (HTTP 429)` — the provider is named in the log, never to the client — followed by which entry served or a 502. A provider in cooldown is skipped silently until it expires.
+
+If dictation stops working:
+
+- `wordink-gateway check` shows which providers have resolvable keys.
+- `journalctl --user -u wordink-gateway` shows why each entry failed. Repeated `HTTP 401` from one entry means its key is wrong or revoked — fix the omaseal entry and restart the service.
+- `502` answers mean every entry failed; `504` means the chain ran out of time.

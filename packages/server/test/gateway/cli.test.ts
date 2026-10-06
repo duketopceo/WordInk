@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { hashToken } from "../../src/gateway/tokens.js";
 
 // The CLI is exercised as a spawned process against a temp HOME/XDG, never by importing
@@ -127,6 +127,43 @@ describe("check", () => {
     const r = await run(["check"]);
     expect(r.code).not.toBe(0);
     expect(r.stderr + r.stdout).toContain("gateway.json");
+  });
+});
+
+describe("config validation", () => {
+  it.each<[string, unknown, RegExp]>([
+    ["a JSON array root", [], /JSON object/i],
+    ["providers not an array", { providers: "x" }, /providers.*array/i],
+    ["an unknown provider", { providers: [{ provider: "azure", keyEnv: "K" }] }, /providers\[0\]\.provider/i],
+    ["an inherited-property provider name", { providers: [{ provider: "constructor", keyEnv: "K" }] }, /providers\[0\]\.provider/i],
+    ["a keyEnv that is not an env name", { providers: [{ provider: "groq", keyEnv: "NO SPACE" }] }, /keyEnv/i],
+    ["a non-http(s) url", { providers: [{ provider: "groq", keyEnv: "K", url: "ftp://x" }] }, /url/i],
+    ["a remote http url", { providers: [{ provider: "groq", keyEnv: "K", url: "http://example.com/x" }] }, /https.*loopback|loopback.*https/i],
+    ["a port out of range", { providers: [], port: 70000 }, /port/i],
+    ["a non-string vocabulary term", { providers: [], vocabulary: ["ok", 1] }, /vocabulary/i],
+    ["a non-positive rateLimit", { providers: [], rateLimit: { max: -1 } }, /positive number/i],
+    ["a non-boolean allowInsecureRemote", { providers: [], allowInsecureRemote: "yes" }, /true or false/i],
+  ])("check rejects %s", async (_name, config, pattern) => {
+    writeConfig(config);
+    const r = await run(["check"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(pattern);
+  });
+
+  it("rejects a non-JSON config body", async () => {
+    mkdirSync(dirname(configPath), { recursive: true });
+    writeFileSync(configPath, "{not json");
+    const r = await run(["check"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/not valid JSON/i);
+  });
+
+  it("rejects extra arguments", async () => {
+    for (const args of [["check", "typo"], ["serve", "--port", "9999"]]) {
+      const r = await run(args);
+      expect(r.code).toBe(1);
+      expect(r.stderr).toMatch(/takes no arguments/i);
+    }
   });
 });
 

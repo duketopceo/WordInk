@@ -19,6 +19,23 @@ export type RateLimiter = (clientId: string, request: Request) => boolean | Prom
 
 export const DEFAULT_RATE_LIMIT: Required<RateLimitOptions> = { windowMs: 60_000, max: 20, dailyMax: 1000 };
 
+export const GATEWAY_LOG_PREFIX = "[@wordink/server] gateway:";
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** `Retry-After` header as whole seconds, `undefined` when absent or not an integer. */
+export function retryAfterSeconds(headers: Headers): number | undefined {
+  const value = headers.get("retry-after");
+  return value !== null && /^\d+$/.test(value) ? Number(value) : undefined;
+}
+
+/** A limiter verdict that isn't `true` becomes a Retry-After hint; custom limiters get 60 s. */
+export function limiterRetrySeconds(verdict: boolean | number): number {
+  return typeof verdict === "number" ? verdict : 60;
+}
+
 /** `err.name` for an Error, otherwise a short description: never the message (it can quote secrets). */
 export function errorName(err: unknown): string {
   return err instanceof Error ? err.name : typeof err;
@@ -53,11 +70,12 @@ export async function readCapped(request: Request, max: number): Promise<Uint8Ar
 }
 
 /**
- * Fixed-window per-client limit plus a daily cap across all clients. Returns `true` to allow or
- * the number of seconds to wait.
+ * Fixed-window per-client limit plus a daily cap across all clients (only when `dailyMax` is
+ * finite). Returns `true` to allow or the number of seconds to wait.
  */
 export function createMemoryLimiter(options: RateLimitOptions | undefined): (clientId: string) => true | number {
   const { windowMs, max, dailyMax } = { ...DEFAULT_RATE_LIMIT, ...options };
+  const trackDaily = Number.isFinite(dailyMax);
   const windows = new Map<string, { start: number; count: number }>();
   let day = "";
   let dayCount = 0;
@@ -74,17 +92,19 @@ export function createMemoryLimiter(options: RateLimitOptions | undefined): (cli
     }
     if (w.count >= max) return Math.max(1, Math.ceil((w.start + windowMs - now) / 1000));
 
-    const today = new Date(now).toISOString().slice(0, 10);
-    if (today !== day) {
-      day = today;
-      dayCount = 0;
-    }
-    if (dayCount >= dailyMax) {
-      const midnight = Date.parse(`${today}T00:00:00.000Z`) + 86_400_000;
-      return Math.max(1, Math.ceil((midnight - now) / 1000));
+    if (trackDaily) {
+      const today = new Date(now).toISOString().slice(0, 10);
+      if (today !== day) {
+        day = today;
+        dayCount = 0;
+      }
+      if (dayCount >= dailyMax) {
+        const midnight = Date.parse(`${today}T00:00:00.000Z`) + 86_400_000;
+        return Math.max(1, Math.ceil((midnight - now) / 1000));
+      }
+      dayCount += 1;
     }
     w.count += 1;
-    dayCount += 1;
     return true;
   };
 }

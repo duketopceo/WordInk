@@ -4,16 +4,16 @@
 // material itself; the systemd wrapper (examples/gateway-systemd) fills them from omaseal.
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { isIP } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createNodeHandler, FileTokenStore, defaultTokenPath } from "../node.js";
-import type { RateLimitOptions } from "../internal.js";
-import { DEFAULT_MODELS, type ProviderEntry, type ProviderName } from "../gateway/providers.js";
+import { isRecord, type RateLimitOptions } from "../internal.js";
+import { DEFAULT_MODELS, type ProviderEntry, type ProviderName, type ResolvedEntry } from "../gateway/providers.js";
 
 const PREFIX = "wordink-gateway:";
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8941;
-const PROVIDER_NAMES: readonly ProviderName[] = ["groq", "openai", "deepgram"];
 const KEY_ENV_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const USAGE = `Usage: wordink-gateway <command>
@@ -47,8 +47,9 @@ interface FileConfig {
 /** Config errors are user-facing: reported on stderr, exit 1. */
 class UsageError extends Error {}
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+/** "Set one of: GROQ_API_KEY, OPENAI_API_KEY" — the env names a config wants populated. */
+function keyEnvHint(providers: readonly ProviderEntry[]): string {
+  return providers.map((e) => e.keyEnv).join(", ") || "(none configured)";
 }
 
 function optionalNumber(config: Record<string, unknown>, name: string): number | undefined {
@@ -64,8 +65,10 @@ function parseEntry(value: unknown, index: number): ProviderEntry {
   const where = `providers[${index}]`;
   if (!isRecord(value)) throw new UsageError(`${where} must be an object like {"provider":"groq","keyEnv":"GROQ_API_KEY"}`);
   const provider = value.provider;
-  if (typeof provider !== "string" || !(PROVIDER_NAMES as readonly string[]).includes(provider)) {
-    throw new UsageError(`${where}.provider must be one of: ${PROVIDER_NAMES.join(", ")}`);
+  // `hasOwn`, not `in`: "constructor"/"toString" would pass an `in` check via the prototype
+  // chain and then resolve to a function as the provider's default model.
+  if (typeof provider !== "string" || !Object.hasOwn(DEFAULT_MODELS, provider)) {
+    throw new UsageError(`${where}.provider must be one of: ${Object.keys(DEFAULT_MODELS).join(", ")}`);
   }
   const keyEnv = value.keyEnv;
   if (typeof keyEnv !== "string" || !KEY_ENV_RE.test(keyEnv)) {
@@ -79,8 +82,20 @@ function parseEntry(value: unknown, index: number): ProviderEntry {
     entry.model = value.model;
   }
   if (value.url !== undefined) {
-    if (typeof value.url !== "string" || !/^https?:\/\//.test(value.url)) {
+    if (typeof value.url !== "string") throw new UsageError(`${where}.url must be an http(s) URL`);
+    let url: URL;
+    try {
+      url = new URL(value.url);
+    } catch {
       throw new UsageError(`${where}.url must be an http(s) URL`);
+    }
+    // The resolved provider key is sent to this URL: https anywhere, cleartext only to
+    // loopback (the local fakes the test suite and a dev's endpoint need).
+    const host = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(host))) {
+      throw new UsageError(
+        `${where}.url must be an https URL, or http to a loopback host — the provider key is sent to it`,
+      );
     }
     entry.url = value.url;
   }
@@ -111,7 +126,7 @@ async function loadConfig(path: string): Promise<FileConfig> {
   }
   const port = optionalNumber(value, "port");
   if (port !== undefined) {
-    if (!Number.isInteger(port) || port > 65535) {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
       throw new UsageError(`"port" must be an integer between 1 and 65535`);
     }
     config.port = port;
@@ -153,19 +168,24 @@ async function loadConfig(path: string): Promise<FileConfig> {
 }
 
 function isLoopback(host: string): boolean {
-  return host === "localhost" || host === "::1" || host === "[::1]" || host.startsWith("127.");
+  // `localhost` is the one name operators expect; anything else must be an IP literal —
+  // a DNS name beginning "127." can resolve off-loopback and must not skip the remote gate.
+  if (host === "localhost" || host === "::1") return true;
+  return isIP(host) === 4 && host.startsWith("127.");
 }
 
 /** Entries with a usable key, in order; the rest are reported so the operator can fix them. */
 function resolveKeys(
   entries: readonly ProviderEntry[],
   env: NodeJS.ProcessEnv,
-): { resolved: (ProviderEntry & { key: string })[]; skipped: ProviderEntry[] } {
-  const resolved: (ProviderEntry & { key: string })[] = [];
+): { resolved: ResolvedEntry[]; skipped: ProviderEntry[] } {
+  const resolved: ResolvedEntry[] = [];
   const skipped: ProviderEntry[] = [];
   for (const entry of entries) {
+    // `typeof` guards inherited members too: env["__proto__"] is truthy on some hosts and
+    // would otherwise be reported "present" and sent upstream as the Authorization value.
     const key = env[entry.keyEnv];
-    if (key) resolved.push({ ...entry, key });
+    if (typeof key === "string" && key.length > 0) resolved.push({ ...entry, key });
     else skipped.push(entry);
   }
   return { resolved, skipped };
@@ -194,14 +214,14 @@ async function cmdCheck(): Promise<number> {
     const key = process.env[entry.keyEnv];
     console.log(
       `  ${i + 1}. ${entry.provider}  model=${entry.model ?? DEFAULT_MODELS[entry.provider]}  ` +
-        `keyEnv=${entry.keyEnv}  key ${key ? "present" : "missing"}`,
+        `keyEnv=${entry.keyEnv}  key ${typeof key === "string" && key.length > 0 ? "present" : "missing"}`,
     );
   });
 
   if (resolved.length === 0) {
     console.error(
       `${PREFIX} no provider entry resolves a key, so serve would refuse to start. ` +
-        `Set one of: ${config.providers.map((e) => e.keyEnv).join(", ") || "(none configured)"}.`,
+        `Set one of: ${keyEnvHint(config.providers)}.`,
     );
     return 1;
   }
@@ -221,7 +241,7 @@ async function cmdServe(): Promise<number> {
   if (resolved.length === 0) {
     console.error(
       `${PREFIX} no provider entry resolved a key; refusing to start. ` +
-        `Set one of: ${config.providers.map((e) => e.keyEnv).join(", ") || "(none configured)"}.`,
+        `Set one of: ${keyEnvHint(config.providers)}.`,
     );
     return 1;
   }
@@ -248,11 +268,11 @@ async function cmdServe(): Promise<number> {
     gateway: {
       tokenStore: new FileTokenStore(),
       providers: resolved,
-      ...(config.vocabulary !== undefined ? { vocabulary: config.vocabulary } : {}),
-      ...(config.rateLimit !== undefined ? { rateLimit: config.rateLimit } : {}),
-      ...(config.maxBodyBytes !== undefined ? { maxBodyBytes: config.maxBodyBytes } : {}),
-      ...(config.upstreamTimeoutMs !== undefined ? { upstreamTimeoutMs: config.upstreamTimeoutMs } : {}),
-      ...(config.deadlineMs !== undefined ? { deadlineMs: config.deadlineMs } : {}),
+      vocabulary: config.vocabulary,
+      rateLimit: config.rateLimit,
+      maxBodyBytes: config.maxBodyBytes,
+      upstreamTimeoutMs: config.upstreamTimeoutMs,
+      deadlineMs: config.deadlineMs,
     },
     // trustProxy stays off: there is no proxy contract for a local service (KTD8).
   });
@@ -320,9 +340,12 @@ async function main(argv: string[]): Promise<number> {
   try {
     switch (command) {
       case "serve":
-        return await cmdServe();
       case "check":
-        return await cmdCheck();
+        if (rest.length > 0) {
+          console.error(`${PREFIX} "${command}" takes no arguments`);
+          return 1;
+        }
+        return command === "serve" ? await cmdServe() : await cmdCheck();
       case "tokens":
         return await cmdTokens(rest);
       case "help":

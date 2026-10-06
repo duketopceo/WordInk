@@ -8,6 +8,7 @@ import {
   type ResolvedEntry,
 } from "../../src/gateway/providers.js";
 import { cleanLanguage, parseTranscriptionForm, type ParseResult } from "../../src/gateway/multipart.js";
+import { sentForm, upstreamCall, type FetchMock } from "./fakes.js";
 
 const GROQ_KEY = "gsk_test_GROQ_SECRET_0123456789";
 const OPENAI_KEY = "sk-test-OPENAI_SECRET_0123456789";
@@ -19,21 +20,10 @@ const deepgram: ResolvedEntry = { provider: "deepgram", key: DEEPGRAM_KEY };
 
 const audio: AudioFile = { bytes: new Uint8Array([1, 2, 3, 4, 5]), type: "audio/wav", name: "audio.wav" };
 
-type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
 let fetchMock: FetchMock;
 
 function call(i = 0): { url: string; init: RequestInit; headers: Headers } {
-  const c = fetchMock.mock.calls[i];
-  if (!c) throw new Error(`no upstream call #${i}`);
-  const [input, init] = c;
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  return { url, init: init ?? {}, headers: new Headers(init?.headers) };
-}
-
-function sentForm(i = 0): FormData {
-  const { init } = call(i);
-  expect(init.body).toBeInstanceOf(FormData);
-  return init.body as FormData;
+  return upstreamCall(fetchMock, i);
 }
 
 beforeEach(() => {
@@ -63,7 +53,7 @@ describe("Groq", () => {
     expect(init.method).toBe("POST");
     expect(headers.get("authorization")).toBe(`Bearer ${GROQ_KEY}`);
 
-    const form = sentForm();
+    const form = sentForm(fetchMock);
     expect(form.get("model")).toBe("whisper-large-v3-turbo");
     expect(form.get("prompt")).toBe("Omarchy. Talking about Linux.");
     expect(form.get("language")).toBe("en");
@@ -77,12 +67,12 @@ describe("Groq", () => {
 
   it("uses the entry's own model when configured, whatever the client asked for (R3)", async () => {
     await transcribe({ ...groq, model: "whisper-large-v3" }, audio, {});
-    expect(sentForm().get("model")).toBe("whisper-large-v3");
+    expect(sentForm(fetchMock).get("model")).toBe("whisper-large-v3");
   });
 
   it("omits prompt and language when there is nothing to send, and drops an invalid language", async () => {
     await transcribe(groq, audio, { language: "en&model=x" });
-    const form = sentForm();
+    const form = sentForm(fetchMock);
     expect(form.has("prompt")).toBe(false);
     expect(form.has("language")).toBe(false);
     expect(form.has("temperature")).toBe(false);
@@ -91,7 +81,7 @@ describe("Groq", () => {
   it("builds a fresh form for every call", async () => {
     await transcribe(groq, audio, {});
     await transcribe(groq, audio, {});
-    expect(sentForm(0)).not.toBe(sentForm(1));
+    expect(sentForm(fetchMock, 0)).not.toBe(sentForm(fetchMock, 1));
   });
 
   it("normalizes verbose_json to text, language, duration and segments only (R7)", async () => {
@@ -108,7 +98,7 @@ describe("Groq", () => {
       }),
     );
     const res = await transcribe(groq, audio, { responseFormat: "verbose_json" });
-    expect(sentForm().get("response_format")).toBe("verbose_json");
+    expect(sentForm(fetchMock).get("response_format")).toBe("verbose_json");
     expect(res).toEqual({
       ok: true,
       text: "hello world",
@@ -129,21 +119,21 @@ describe("OpenAI", () => {
     expect(url).toBe(OPENAI_AUDIO_URL);
     expect(url).toBe("https://api.openai.com/v1/audio/transcriptions");
     expect(headers.get("authorization")).toBe(`Bearer ${OPENAI_KEY}`);
-    expect(sentForm().get("model")).toBe("gpt-4o-transcribe");
-    expect(sentForm().get("response_format")).toBe("json");
+    expect(sentForm(fetchMock).get("model")).toBe("gpt-4o-transcribe");
+    expect(sentForm(fetchMock).get("response_format")).toBe("json");
   });
 
   it("text is requested as json upstream (the gateway formats it)", async () => {
     const res = await transcribe(openai, audio, { responseFormat: "text" });
-    expect(sentForm().get("response_format")).toBe("json");
+    expect(sentForm(fetchMock).get("response_format")).toBe("json");
     expect(res).toEqual({ ok: true, text: "hello world" });
   });
 
   it("verbose_json switches to whisper-1", async () => {
     fetchMock.mockResolvedValueOnce(Response.json({ text: "hi", language: "english", duration: 2, words: [] }));
     const res = await transcribe(openai, audio, { responseFormat: "verbose_json" });
-    expect(sentForm().get("model")).toBe("whisper-1");
-    expect(sentForm().get("response_format")).toBe("verbose_json");
+    expect(sentForm(fetchMock).get("model")).toBe("whisper-1");
+    expect(sentForm(fetchMock).get("response_format")).toBe("verbose_json");
     expect(res).toEqual({ ok: true, text: "hi", verbose: { text: "hi", language: "english", duration: 2 } });
   });
 });
@@ -199,13 +189,17 @@ describe("Deepgram", () => {
     expect(call().headers.get("content-type")).toBe("application/octet-stream");
   });
 
-  it("verbose_json carries duration from metadata and the requested language, nothing provider-specific", async () => {
-    fetchMock.mockResolvedValueOnce(Response.json(dgReply));
+  it("verbose_json carries duration from metadata and the detected language, not the requested one", async () => {
+    const reply = {
+      ...dgReply,
+      results: { channels: [{ detected_language: "nl", alternatives: [{ transcript: "Hello, Omarchy.", confidence: 0.99, words: [] }] }] },
+    };
+    fetchMock.mockResolvedValueOnce(Response.json(reply));
     const res = await transcribe(deepgram, audio, { responseFormat: "verbose_json", language: "en" });
     expect(res).toEqual({
       ok: true,
       text: "Hello, Omarchy.",
-      verbose: { text: "Hello, Omarchy.", language: "en", duration: 3.25 },
+      verbose: { text: "Hello, Omarchy.", language: "nl", duration: 3.25 },
     });
   });
 

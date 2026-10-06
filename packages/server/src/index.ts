@@ -1,7 +1,15 @@
 import { forwardGroq } from "./groq.js";
 import { pickOpenAIClientSecret, requestOpenAIClientSecret } from "./openai.js";
 import { pickDeepgramGrant, requestDeepgramGrant } from "./deepgram.js";
-import { createMemoryLimiter, errorName, readCapped, type RateLimiter, type RateLimitOptions } from "./internal.js";
+import {
+  createMemoryLimiter,
+  errorName,
+  limiterRetrySeconds,
+  readCapped,
+  retryAfterSeconds,
+  type RateLimiter,
+  type RateLimitOptions,
+} from "./internal.js";
 import { createGatewayHandler, GATEWAY_TRANSCRIPTIONS_PATH } from "./gateway/index.js";
 import type { GatewayConfig } from "./gateway/index.js";
 
@@ -167,8 +175,7 @@ export function createRelay(config: RelayConfig): RelayHandler {
 
     const verdict = await limiter(clientIdOf(request), request);
     if (verdict !== true) {
-      const retryAfter = typeof verdict === "number" ? verdict : 60;
-      return reply(429, { error: "rate_limited" }, { "retry-after": String(retryAfter) });
+      return reply(429, { error: "rate_limited" }, { "retry-after": String(limiterRetrySeconds(verdict)) });
     }
 
     let upstream: Response;
@@ -260,6 +267,6 @@ function json(status: number, body: unknown, headers: Record<string, string>): R
 }
 
 function retryAfterOf(upstream: Response): Record<string, string> {
-  const value = upstream.headers.get("retry-after");
-  return value && /^\d+$/.test(value) ? { "retry-after": value } : {};
+  const value = retryAfterSeconds(upstream.headers);
+  return value !== undefined ? { "retry-after": String(value) } : {};
 }

@@ -1,9 +1,11 @@
+import { isRecord, retryAfterSeconds } from "../internal.js";
+import { GROQ_TRANSCRIPTIONS_URL } from "../groq.js";
 import { buildWhisperForm, cleanLanguage, cleanTemperature, type AudioFile, type ResponseFormat } from "./multipart.js";
 import { keyterms, mergePrompt } from "./vocabulary.js";
 
 export type { AudioFile, ResponseFormat } from "./multipart.js";
 
-export const GROQ_AUDIO_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
+export const GROQ_AUDIO_URL = GROQ_TRANSCRIPTIONS_URL;
 export const OPENAI_AUDIO_URL = "https://api.openai.com/v1/audio/transcriptions";
 export const DEEPGRAM_LISTEN_URL = "https://api.deepgram.com/v1/listen";
 
@@ -20,13 +22,7 @@ export interface ProviderEntry {
 }
 
 /** A provider entry with its key resolved from the environment. */
-export interface ResolvedEntry {
-  provider: ProviderName;
-  key: string;
-  model?: string;
-  /** Override the provider's request URL (a compatible endpoint or a local fake). */
-  url?: string;
-}
+export type ResolvedEntry = Omit<ProviderEntry, "keyEnv"> & { key: string };
 
 export const DEFAULT_MODELS: Readonly<Record<ProviderName, string>> = {
   groq: "whisper-large-v3-turbo",
@@ -34,7 +30,7 @@ export const DEFAULT_MODELS: Readonly<Record<ProviderName, string>> = {
   deepgram: "nova-3",
 };
 /** `gpt-4o-transcribe` only does `json`/`text`, so OpenAI `verbose_json` uses this (KTD4). */
-export const OPENAI_VERBOSE_MODEL = "whisper-1";
+const OPENAI_VERBOSE_MODEL = "whisper-1";
 
 export interface TranscribeOptions {
   /** The client's prompt; merged with `vocabulary` for Whisper-style providers. */
@@ -110,34 +106,32 @@ export async function transcribe(
   }
   if (signal) init.signal = signal;
 
-  let res: Response;
+  let res: Response | undefined;
   let body: unknown;
   try {
     res = await fetch(url, init);
     if (!res.ok) {
-      await res.body?.cancel().catch(() => {});
+      // Teardown needn't block fall-through; `failure` only reads status/headers.
+      void res.body?.cancel().catch(() => {});
       return failure(res);
     }
     body = await res.json();
   } catch {
-    return { ok: false, kind: "retryable" };
+    // A received response whose body fails to parse still keeps its status for the log.
+    return { ok: false, kind: "retryable", ...(res ? { status: res.status } : {}) };
   }
 
-  const parsed = entry.provider === "deepgram" ? fromDeepgram(body, language) : fromWhisper(body);
+  const parsed = entry.provider === "deepgram" ? fromDeepgram(body) : fromWhisper(body);
   if (!parsed) return { ok: false, kind: "retryable", status: res.status };
   return verbose ? { ok: true, text: parsed.text, verbose: parsed } : { ok: true, text: parsed.text };
 }
 
 function failure(res: Response): TranscribeResult {
   const kind = CLIENT_ERRORS.has(res.status) ? "client" : "retryable";
-  const header = res.headers.get("retry-after");
-  return header && /^\d+$/.test(header)
-    ? { ok: false, kind, status: res.status, retryAfter: Number(header) }
+  const retryAfter = retryAfterSeconds(res.headers);
+  return retryAfter !== undefined
+    ? { ok: false, kind, status: res.status, retryAfter }
     : { ok: false, kind, status: res.status };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function fromWhisper(body: unknown): VerboseTranscript | null {
@@ -155,14 +149,16 @@ function fromWhisper(body: unknown): VerboseTranscript | null {
   return out;
 }
 
-function fromDeepgram(body: unknown, language: string | undefined): VerboseTranscript | null {
+function fromDeepgram(body: unknown): VerboseTranscript | null {
   if (!isRecord(body) || !isRecord(body.results) || !Array.isArray(body.results.channels)) return null;
   const channel: unknown = body.results.channels[0];
   if (!isRecord(channel) || !Array.isArray(channel.alternatives)) return null;
   const alt: unknown = channel.alternatives[0];
   if (!isRecord(alt) || typeof alt.transcript !== "string") return null;
   const out: VerboseTranscript = { text: alt.transcript };
-  if (language) out.language = language;
+  // Only a provider-detected language is reported — never the requested tag echoed back
+  // (a client could tell Deepgram from a Whisper entry by which one answered, R7).
+  if (typeof channel.detected_language === "string") out.language = channel.detected_language;
   if (isRecord(body.metadata) && typeof body.metadata.duration === "number") out.duration = body.metadata.duration;
   return out;
 }
