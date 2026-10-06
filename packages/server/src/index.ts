@@ -1,10 +1,29 @@
 import { forwardGroq } from "./groq.js";
 import { pickOpenAIClientSecret, requestOpenAIClientSecret } from "./openai.js";
 import { pickDeepgramGrant, requestDeepgramGrant } from "./deepgram.js";
+import { createMemoryLimiter, errorName, readCapped, type RateLimiter, type RateLimitOptions } from "./internal.js";
+import { createGatewayHandler, GATEWAY_TRANSCRIPTIONS_PATH } from "./gateway/index.js";
+import type { GatewayConfig } from "./gateway/index.js";
 
 export { GROQ_TRANSCRIPTIONS_URL } from "./groq.js";
 export { OPENAI_CLIENT_SECRETS_URL, type OpenAIClientSecret } from "./openai.js";
 export { DEEPGRAM_GRANT_URL, type DeepgramGrant } from "./deepgram.js";
+export { DEFAULT_RATE_LIMIT, type RateLimiter, type RateLimitOptions } from "./internal.js";
+export {
+  DEFAULT_GATEWAY_MAX_BODY_BYTES,
+  DEFAULT_GATEWAY_RATE_LIMIT,
+  GATEWAY_TRANSCRIPTIONS_PATH,
+  type GatewayConfig,
+} from "./gateway/index.js";
+export type { ProviderName, ResolvedEntry, VerboseTranscript } from "./gateway/providers.js";
+export {
+  constantTimeEqualHex,
+  generateToken,
+  hashToken,
+  type TokenInfo,
+  type TokenRecord,
+  type TokenStore,
+} from "./gateway/tokens.js";
 
 /** Long-lived provider keys. They stay on the server; a route whose key is missing answers 503. */
 export interface ProviderKeys {
@@ -12,22 +31,6 @@ export interface ProviderKeys {
   openai?: string | undefined;
   deepgram?: string | undefined;
 }
-
-/** Built-in in-memory limiter settings. State is per process / per Worker isolate. */
-export interface RateLimitOptions {
-  /** Fixed window length for the per-client limit. Default 60 000 ms. */
-  windowMs?: number;
-  /** Upstream calls allowed per client per window. Default 20. */
-  max?: number;
-  /** Upstream calls allowed per UTC day across all clients (this instance). Default 1000. */
-  dailyMax?: number;
-}
-
-/**
- * A custom limiter (e.g. backed by KV, Redis or a Durable Object). Return `true` to allow the
- * upstream call, `false` to answer 429. Replaces the built-in limiter entirely.
- */
-export type RateLimiter = (clientId: string, request: Request) => boolean | Promise<boolean>;
 
 export interface RelayConfig {
   /**
@@ -60,6 +63,13 @@ export interface RelayConfig {
   tokenTtlSeconds?: number;
   /** Abort an upstream provider call after this many ms; the relay then answers 502. Default 15 000. */
   upstreamTimeoutMs?: number;
+  /**
+   * Optional desktop gateway: serve `POST {basePath}/v1/audio/transcriptions`, the OpenAI
+   * audio-transcription shape that apps like Voxtype and TypeWhisper already speak (KTD1). The
+   * route authenticates `Bearer` device tokens through `gateway.tokenStore`; the browser `authorize`
+   * and Origin checks do not apply to it. When absent, the path 404s like any other (R11).
+   */
+  gateway?: GatewayConfig | undefined;
 }
 
 export type RelayHandler = (request: Request) => Promise<Response>;
@@ -67,7 +77,6 @@ export type RelayHandler = (request: Request) => Promise<Response>;
 export const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_TOKEN_TTL_SECONDS = 120;
 export const DEFAULT_UPSTREAM_TIMEOUT_MS = 15_000;
-export const DEFAULT_RATE_LIMIT: Required<RateLimitOptions> = { windowMs: 60_000, max: 20, dailyMax: 1000 };
 
 const LOG_PREFIX = "[@wordink/server]";
 const ROUTES = ["/groq/transcriptions", "/openai/token", "/deepgram/token"] as const;
@@ -85,11 +94,20 @@ export function defaultClientId(request: Request): string {
 export function createRelay(config: RelayConfig): RelayHandler {
   const authorize = config.authorize;
   if (typeof authorize !== "function") {
-    console.error(
-      `${LOG_PREFIX} No \`authorize\` hook configured: every request will be refused with 403. ` +
-        "Pass authorize(request) that checks your app's own session (cookie or JWT). " +
-        "CORS/Origin checks are not authentication.",
-    );
+    if (config.gateway) {
+      // A gateway-only deployment is intentional: the gateway route authenticates device tokens
+      // instead, so this is not a misconfiguration (KTD9).
+      console.warn(
+        `${LOG_PREFIX} No \`authorize\` hook configured: the browser relay routes are disabled ` +
+          "(every browser request gets 403). The gateway route is unaffected.",
+      );
+    } else {
+      console.error(
+        `${LOG_PREFIX} No \`authorize\` hook configured: every request will be refused with 403. ` +
+          "Pass authorize(request) that checks your app's own session (cookie or JWT). " +
+          "CORS/Origin checks are not authentication.",
+      );
+    }
   }
 
   const basePath = normalizeBasePath(config.basePath);
@@ -100,6 +118,7 @@ export function createRelay(config: RelayConfig): RelayHandler {
   const clientIdOf = config.clientId ?? defaultClientId;
   const limiter =
     typeof config.rateLimit === "function" ? config.rateLimit : createMemoryLimiter(config.rateLimit);
+  const gateway = config.gateway ? createGatewayHandler(config.gateway) : null;
 
   return async function relay(request: Request): Promise<Response> {
     const origin = request.headers.get("origin");
@@ -108,6 +127,11 @@ export function createRelay(config: RelayConfig): RelayHandler {
       json(status, body, { ...cors, ...extra });
 
     const path = new URL(request.url).pathname;
+    // The gateway route matches before the browser-relay logic: no Origin or `authorize` checks
+    // apply to it, and when no gateway is configured the path falls through to 404 (KTD1, KTD9).
+    if (gateway !== null && path === `${basePath}${GATEWAY_TRANSCRIPTIONS_PATH}`) {
+      return gateway(request);
+    }
     const route = matchRoute(path, basePath);
     if (!route) return reply(404, { error: "not_found" });
 
@@ -238,73 +262,4 @@ function json(status: number, body: unknown, headers: Record<string, string>): R
 function retryAfterOf(upstream: Response): Record<string, string> {
   const value = upstream.headers.get("retry-after");
   return value && /^\d+$/.test(value) ? { "retry-after": value } : {};
-}
-
-function errorName(err: unknown): string {
-  return err instanceof Error ? err.name : typeof err;
-}
-
-/** Read the body up to `max` bytes; anything larger is rejected without buffering it all. */
-async function readCapped(request: Request, max: number): Promise<Uint8Array | "too_large"> {
-  const declared = Number(request.headers.get("content-length"));
-  // Leave the unread body alone: the runtime discards it with the request.
-  if (Number.isFinite(declared) && declared > max) return "too_large";
-  if (!request.body) return new Uint8Array();
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > max) {
-      await reader.cancel();
-      return "too_large";
-    }
-    chunks.push(value);
-  }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return out;
-}
-
-/**
- * Fixed-window per-client limit plus a daily cap across all clients. Returns `true` to allow or
- * the number of seconds to wait.
- */
-function createMemoryLimiter(options: RateLimitOptions | undefined): (clientId: string) => true | number {
-  const { windowMs, max, dailyMax } = { ...DEFAULT_RATE_LIMIT, ...options };
-  const windows = new Map<string, { start: number; count: number }>();
-  let day = "";
-  let dayCount = 0;
-
-  return (clientId) => {
-    const now = Date.now();
-    if (windows.size > 10_000) {
-      for (const [id, w] of windows) if (now - w.start >= windowMs) windows.delete(id);
-    }
-    let w = windows.get(clientId);
-    if (!w || now - w.start >= windowMs) {
-      w = { start: now, count: 0 };
-      windows.set(clientId, w);
-    }
-    if (w.count >= max) return Math.max(1, Math.ceil((w.start + windowMs - now) / 1000));
-
-    const today = new Date(now).toISOString().slice(0, 10);
-    if (today !== day) {
-      day = today;
-      dayCount = 0;
-    }
-    if (dayCount >= dailyMax) {
-      const midnight = Date.parse(`${today}T00:00:00.000Z`) + 86_400_000;
-      return Math.max(1, Math.ceil((midnight - now) / 1000));
-    }
-    w.count += 1;
-    dayCount += 1;
-    return true;
-  };
 }

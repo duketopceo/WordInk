@@ -1,0 +1,541 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createRelay, type GatewayConfig, type RelayConfig } from "../../src/index.js";
+import {
+  constantTimeEqualHex,
+  generateToken,
+  hashToken,
+  type TokenRecord,
+  type TokenStore,
+} from "../../src/gateway/tokens.js";
+import {
+  DEEPGRAM_LISTEN_URL,
+  GROQ_AUDIO_URL,
+  OPENAI_AUDIO_URL,
+  type ResolvedEntry,
+} from "../../src/gateway/providers.js";
+
+const GROQ_KEY_A = "gsk_test_KEY_A_0123456789";
+const GROQ_KEY_B = "gsk_test_KEY_B_0123456789";
+const OPENAI_KEY = "sk-test_OPENAI_SECRET_0123456789";
+const DEEPGRAM_KEY = "dg_test_DEEPGRAM_SECRET_0123456789";
+
+const groqA: ResolvedEntry = { provider: "groq", key: GROQ_KEY_A };
+const groqB: ResolvedEntry = { provider: "groq", key: GROQ_KEY_B };
+const openai: ResolvedEntry = { provider: "openai", key: OPENAI_KEY };
+const deepgram: ResolvedEntry = { provider: "deepgram", key: DEEPGRAM_KEY };
+
+const BASE = "http://127.0.0.1:8941";
+const AUDIO = new Uint8Array([7, 7, 7, 7]);
+
+interface Stored extends TokenRecord {
+  hash: string;
+}
+
+/** In-memory TokenStore for route tests (the file backend is covered by tokens.test.ts). */
+class MemoryTokenStore implements TokenStore {
+  private readonly records = new Map<string, Stored>();
+
+  async create(label: string) {
+    const token = generateToken();
+    const rec: Stored = {
+      id: crypto.randomUUID(),
+      label,
+      hash: await hashToken(token),
+      createdAt: new Date().toISOString(),
+    };
+    this.records.set(rec.id, rec);
+    return { id: rec.id, label, token };
+  }
+
+  async verify(token: string) {
+    const hash = await hashToken(token);
+    let found: Stored | undefined;
+    for (const rec of this.records.values()) {
+      if (constantTimeEqualHex(rec.hash, hash)) found = rec;
+    }
+    return !found || found.revokedAt ? null : { id: found.id, label: found.label };
+  }
+
+  async list(): Promise<TokenRecord[]> {
+    return [...this.records.values()].map((r) => ({
+      id: r.id,
+      label: r.label,
+      createdAt: r.createdAt,
+      ...(r.revokedAt ? { revokedAt: r.revokedAt } : {}),
+    }));
+  }
+
+  async revoke(id: string) {
+    const rec = this.records.get(id);
+    if (!rec || rec.revokedAt) return false;
+    rec.revokedAt = new Date().toISOString();
+    return true;
+  }
+}
+
+type Responder = (signal: AbortSignal | undefined) => Response | Promise<Response>;
+const ok = (text: string): Responder => () => Response.json({ text });
+const status =
+  (code: number): Responder =>
+  () =>
+    Response.json({ error: { message: `provider detail ${GROQ_KEY_A}` } }, { status: code });
+/** Never answers; rejects with the abort reason like real fetch does. */
+const hang: Responder = (signal) =>
+  new Promise((_resolve, reject) => {
+    signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+
+let responders: Map<string, Responder[]>;
+let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
+let errorSpy: ReturnType<typeof vi.spyOn>;
+let warnSpy: ReturnType<typeof vi.spyOn>;
+let tokenStore: MemoryTokenStore;
+let deviceToken: string;
+let deviceId: string;
+
+/** Queue responses per provider key; the last one repeats. */
+function on(key: string, ...rs: Responder[]): void {
+  responders.set(key, rs);
+}
+
+function keysCalled(): string[] {
+  return fetchMock.mock.calls.map(([, init]) => {
+    const auth = new Headers(init?.headers).get("authorization") ?? "";
+    return auth.replace(/^(Bearer|Token) /, "");
+  });
+}
+
+function upstreamCall(i = 0): { url: string; init: RequestInit; headers: Headers } {
+  const c = fetchMock.mock.calls[i];
+  if (!c) throw new Error(`no upstream call #${i}`);
+  const [input, init] = c;
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  return { url, init: init ?? {}, headers: new Headers(init?.headers) };
+}
+
+function sentForm(i = 0): FormData {
+  const { init } = upstreamCall(i);
+  expect(init.body).toBeInstanceOf(FormData);
+  return init.body as FormData;
+}
+
+interface PostOptions {
+  /** Bearer token; `false` sends no Authorization header at all. Defaults to the valid token. */
+  token?: string | false;
+  withFile?: boolean;
+  fields?: Record<string, string>;
+  headers?: Record<string, string>;
+  path?: string;
+  method?: string;
+  /** Replace the multipart body entirely (e.g. a non-multipart body). */
+  rawBody?: NonNullable<RequestInit["body"]>;
+  rawContentType?: string;
+}
+
+/** A Voxtype-shaped request: multipart fields file/model/language/prompt/response_format, Bearer token, no Origin. */
+function post(opts: PostOptions = {}): Request {
+  let body: NonNullable<RequestInit["body"]>;
+  if (opts.rawBody !== undefined) {
+    body = opts.rawBody;
+  } else {
+    const fd = new FormData();
+    if (opts.withFile !== false) fd.append("file", new Blob([AUDIO], { type: "audio/wav" }), "audio.wav");
+    for (const [k, v] of Object.entries({ model: "whisper-1", response_format: "json", ...opts.fields })) {
+      fd.append(k, v);
+    }
+    body = fd;
+  }
+  const headers: Record<string, string> = { ...opts.headers };
+  if (opts.rawContentType) headers["content-type"] = opts.rawContentType;
+  if (opts.token !== false && !("authorization" in headers)) {
+    headers.authorization = `Bearer ${opts.token ?? deviceToken}`;
+  }
+  return new Request(`${BASE}${opts.path ?? "/v1/audio/transcriptions"}`, {
+    method: opts.method ?? "POST",
+    body,
+    headers,
+  });
+}
+
+function relay(gateway: Partial<GatewayConfig> = {}, config: Partial<RelayConfig> = {}) {
+  return createRelay({
+    keys: {},
+    gateway: { tokenStore, providers: [groqA], ...gateway },
+    ...config,
+  });
+}
+
+async function expectOpenAIError(res: Response, status: number, type?: string): Promise<void> {
+  expect(res.status).toBe(status);
+  const body: unknown = await res.json();
+  expect(body).toMatchObject({ error: { message: expect.any(String), type: type ?? expect.any(String) } });
+  expect(Object.keys(body as Record<string, unknown>)).toEqual(["error"]);
+}
+
+beforeEach(async () => {
+  responders = new Map();
+  fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+    const key = (new Headers(init?.headers).get("authorization") ?? "").replace(/^(Bearer|Token) /, "");
+    const queue = responders.get(key);
+    if (!queue || queue.length === 0) throw new Error(`no responder for ${key}`);
+    const r = queue.length > 1 ? queue.shift()! : queue[0]!;
+    return r(init?.signal ?? undefined);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  tokenStore = new MemoryTokenStore();
+  const made = await tokenStore.create("voxtype-laptop");
+  deviceToken = made.token;
+  deviceId = made.id;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe("routing", () => {
+  it("serves a Voxtype-shaped request: 200 {\"text\"} from mocked Groq, provider model used (R2, AE3)", async () => {
+    on(GROQ_KEY_A, ok("hello world"));
+    const res = await relay()(
+      post({ fields: { model: "whisper-1", language: "en", prompt: "Omarchy", response_format: "json" } }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ text: "hello world" });
+
+    const { url, headers } = upstreamCall();
+    expect(url).toBe(GROQ_AUDIO_URL);
+    expect(headers.get("authorization")).toBe(`Bearer ${GROQ_KEY_A}`);
+    const form = sentForm();
+    // The client's `model` is accepted but the entry's own model is called (R3).
+    expect(form.get("model")).toBe("whisper-large-v3-turbo");
+    expect(form.get("language")).toBe("en");
+    expect(form.get("prompt")).toBe("Omarchy");
+    const file = form.get("file") as File;
+    expect(file.name).toBe("audio.wav");
+    expect(new Uint8Array(await file.arrayBuffer())).toEqual(AUDIO);
+  });
+
+  it("honours basePath", async () => {
+    on(GROQ_KEY_A, ok("hi"));
+    const handler = relay({}, { basePath: "/wordink" });
+    const res = await handler(post({ path: "/wordink/v1/audio/transcriptions" }));
+    expect(res.status).toBe(200);
+    expect((await handler(post())).status).toBe(404);
+  });
+
+  it("404s the route when no gateway is configured, in the relay's own shape (R11)", async () => {
+    const handler = createRelay({ keys: { groq: GROQ_KEY_A }, authorize: () => true });
+    const res = await handler(post({ token: false }));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not_found" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("405s non-POST methods on the route", async () => {
+    const res = await relay()(new Request(`${BASE}/v1/audio/transcriptions`, { method: "OPTIONS" }));
+    expect(res.status).toBe(405);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not run the browser Origin check on the gateway route (KTD9)", async () => {
+    on(GROQ_KEY_A, ok("hi"));
+    const handler = relay();
+    const res = await handler(post({ headers: { origin: "https://evil.example" } }));
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("device-token auth", () => {
+  it("missing Bearer gets 401 in the OpenAI shape, no provider call (AE2)", async () => {
+    const res = await relay()(post({ token: false }));
+    await expectOpenAIError(res, 401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("malformed Authorization headers get 401", async () => {
+    const handler = relay();
+    for (const authorization of ["Basic d2RrX3g=", "Bearer", "BEARER", "Token wdk_x", "Bearer  "]) {
+      const res = await handler(post({ token: false, headers: { authorization } }));
+      expect(res.status).toBe(401);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("unknown Bearer gets 401, no provider call", async () => {
+    const res = await relay()(post({ token: generateToken() }));
+    await expectOpenAIError(res, 401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("revoked token gets 401 on its next request, other tokens unaffected (F3)", async () => {
+    on(GROQ_KEY_A, ok("hi"));
+    const handler = relay();
+    expect((await handler(post())).status).toBe(200);
+    await tokenStore.revoke(deviceId);
+    await expectOpenAIError(await handler(post()), 401);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const other = await tokenStore.create("typewhisper-desktop");
+    expect((await handler(post({ token: other.token }))).status).toBe(200);
+  });
+
+  it("a throwing token store refuses the request without leaking the token to the log", async () => {
+    const broken: TokenStore = {
+      verify: () => Promise.reject(new Error("store exploded")),
+      create: (label) => tokenStore.create(label),
+      list: () => tokenStore.list(),
+      revoke: (id) => tokenStore.revoke(id),
+    };
+    const res = await relay({ tokenStore: broken })(post());
+    await expectOpenAIError(res, 401);
+    expect(fetchMock).not.toHaveBeenCalled();
+    const logged = errorSpy.mock.calls.flat().join(" ");
+    expect(logged).not.toContain(deviceToken);
+  });
+});
+
+describe("rate limiting (own limiter, per token, KTD9)", () => {
+  it("429 in the OpenAI shape with Retry-After once the per-token budget is spent", async () => {
+    on(GROQ_KEY_A, ok("hi"));
+    const handler = relay({ rateLimit: { max: 1 } });
+    expect((await handler(post())).status).toBe(200);
+    const res = await handler(post());
+    await expectOpenAIError(res, 429);
+    expect(res.headers.get("retry-after")).toMatch(/^\d+$/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("is keyed by the token id: a second token keeps its own budget", async () => {
+    on(GROQ_KEY_A, ok("hi"));
+    const handler = relay({ rateLimit: { max: 1 } });
+    expect((await handler(post())).status).toBe(200);
+    const other = await tokenStore.create("second-device");
+    expect((await handler(post({ token: other.token }))).status).toBe(200);
+    expect((await handler(post())).status).toBe(429);
+  });
+
+  it("passes the verified token id to a custom limiter", async () => {
+    on(GROQ_KEY_A, ok("hi"));
+    const seen: string[] = [];
+    const handler = relay({
+      rateLimit: (clientId) => {
+        seen.push(clientId);
+        return true;
+      },
+    });
+    await handler(post());
+    expect(seen).toEqual([deviceId]);
+  });
+
+  it("browser-route traffic does not count against the gateway limiter (and vice versa)", async () => {
+    on(GROQ_KEY_A, ok("hi"));
+    on(DEEPGRAM_KEY, () => Response.json({ access_token: "eyJ.test.jwt", expires_in: 120 }));
+    const handler = relay(
+      { rateLimit: { max: 1 } },
+      { keys: { deepgram: DEEPGRAM_KEY }, authorize: () => true },
+    );
+    const browserPost = () => new Request(`${BASE}/deepgram/token`, { method: "POST" });
+
+    expect((await handler(post())).status).toBe(200); // spends the gateway budget
+    expect((await handler(browserPost())).status).toBe(200); // browser limiter untouched
+    expect((await handler(post())).status).toBe(429); // gateway budget spent
+    expect((await handler(browserPost())).status).toBe(200); // browser route still fine
+  });
+});
+
+describe("request body", () => {
+  it("413 in the OpenAI shape before any provider call when the body exceeds gateway.maxBodyBytes", async () => {
+    const handler = relay({ maxBodyBytes: 64 });
+    const res = await handler(post());
+    await expectOpenAIError(res, 413);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("400 when `file` is missing, no provider call", async () => {
+    const res = await relay()(post({ withFile: false }));
+    await expectOpenAIError(res, 400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("400 on an unsupported response_format", async () => {
+    const res = await relay()(post({ fields: { response_format: "srt" } }));
+    await expectOpenAIError(res, 400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("400 on a non-multipart body", async () => {
+    const res = await relay()(post({ rawBody: JSON.stringify({ hi: 1 }), rawContentType: "application/json" }));
+    await expectOpenAIError(res, 400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("response formats", () => {
+  it("response_format=text returns text/plain", async () => {
+    on(GROQ_KEY_A, ok("hello world"));
+    const res = await relay()(post({ fields: { response_format: "text" } }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+    expect(await res.text()).toBe("hello world");
+    // `text` is fetched as `json` upstream; the gateway formats it.
+    expect(sentForm().get("response_format")).toBe("json");
+  });
+
+  it.each([
+    {
+      name: "groq",
+      entry: () => groqA,
+      key: GROQ_KEY_A,
+      reply: {
+        task: "transcribe",
+        text: "hello world",
+        language: "english",
+        duration: 1.5,
+        segments: [{ id: 0, seek: 0, start: 0, end: 1.5, text: " hello world", tokens: [1], avg_logprob: -0.1 }],
+        x_groq: { id: "req_123" },
+      },
+      want: {
+        text: "hello world",
+        language: "english",
+        duration: 1.5,
+        segments: [{ id: 0, start: 0, end: 1.5, text: " hello world" }],
+      },
+      forbidden: ["x_groq", "avg_logprob", "seek", "req_123"],
+    },
+    {
+      name: "openai",
+      entry: () => openai,
+      key: OPENAI_KEY,
+      reply: {
+        text: "hi",
+        language: "english",
+        duration: 2,
+        words: [{ word: "hi", start: 0, end: 2 }],
+        usage: { seconds: 2, type: "duration" },
+      },
+      want: { text: "hi", language: "english", duration: 2 },
+      forbidden: ["words", "usage"],
+    },
+    {
+      name: "deepgram",
+      entry: () => deepgram,
+      key: DEEPGRAM_KEY,
+      reply: {
+        metadata: { request_id: "dg-req-1", duration: 3.25, models: ["nova-3"] },
+        results: { channels: [{ alternatives: [{ transcript: "Hello.", confidence: 0.99, words: [] }] }] },
+      },
+      want: { text: "Hello.", duration: 3.25 },
+      forbidden: ["request_id", "confidence", "results", "metadata"],
+    },
+  ])("verbose_json from $name is normalized to OpenAI fields only (R7)", async ({ entry, key, reply, want, forbidden }) => {
+    on(key, () => Response.json(reply));
+    const res = await relay({ providers: [entry()] })(post({ fields: { response_format: "verbose_json" } }));
+    expect(res.status).toBe(200);
+    const body: unknown = await res.json();
+    expect(body).toEqual(want);
+    const serialized = JSON.stringify(body);
+    for (const bad of forbidden) expect(serialized).not.toContain(bad);
+  });
+});
+
+describe("input hygiene (KTD9)", () => {
+  it("drops `language=en&model=x`; the provider gets no language and no injected model", async () => {
+    on(GROQ_KEY_A, ok("hi"));
+    await relay()(post({ fields: { language: "en&model=x" } }));
+    const form = sentForm();
+    expect(form.get("language")).toBeNull();
+    expect(form.get("model")).toBe("whisper-large-v3-turbo");
+  });
+
+  it("drops an invalid language on the Deepgram query too", async () => {
+    on(DEEPGRAM_KEY, () =>
+      Response.json({ results: { channels: [{ alternatives: [{ transcript: "hi" }] }] } }),
+    );
+    await relay({ providers: [deepgram] })(post({ fields: { language: "en&model=x" } }));
+    const u = new URL(upstreamCall().url);
+    expect(u.searchParams.has("language")).toBe(false);
+    expect(u.searchParams.getAll("model")).toEqual(["nova-3"]);
+  });
+});
+
+describe("vocabulary (R12)", () => {
+  it("the operator vocabulary reaches the provider with no client prompt (AE4)", async () => {
+    on(GROQ_KEY_A, ok("hi"));
+    await relay({ vocabulary: ["Omarchy", "Hyprland"] })(post());
+    expect(sentForm().get("prompt")).toBe("Omarchy, Hyprland");
+  });
+
+  it("operator terms come first when a client prompt is present", async () => {
+    on(GROQ_KEY_A, ok("hi"));
+    await relay({ vocabulary: ["Omarchy"] })(post({ fields: { prompt: "Dictating notes." } }));
+    expect(sentForm().get("prompt")).toBe("Omarchy. Dictating notes.");
+  });
+});
+
+describe("provider fallback through the route", () => {
+  it("Groq-A answers 401 (bad operator key): Groq-B serves (AE1, mocked)", async () => {
+    on(GROQ_KEY_A, status(401));
+    on(GROQ_KEY_B, ok("from B"));
+    const res = await relay({ providers: [groqA, groqB] })(post());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ text: "from B" });
+    expect(keysCalled()).toEqual([GROQ_KEY_A, GROQ_KEY_B]);
+  });
+
+  it("all entries failing answers 502 upstream_unavailable, naming no provider or key (R7)", async () => {
+    on(GROQ_KEY_A, status(429));
+    on(OPENAI_KEY, status(500));
+    const res = await relay({ providers: [groqA, openai] })(post());
+    expect(res.status).toBe(502);
+    const body = await res.text();
+    expect(JSON.parse(body)).toMatchObject({
+      error: { message: expect.any(String), type: "upstream_unavailable" },
+    });
+    expect(body.toLowerCase()).not.toMatch(/groq|openai|deepgram/);
+    for (const key of [GROQ_KEY_A, OPENAI_KEY]) expect(body).not.toContain(key);
+  });
+
+  it("a provider 400 does not fall through; the client error is returned in the OpenAI shape", async () => {
+    on(GROQ_KEY_A, status(400));
+    on(GROQ_KEY_B, ok("from B"));
+    const res = await relay({ providers: [groqA, groqB] })(post());
+    await expectOpenAIError(res, 400);
+    expect(keysCalled()).toEqual([GROQ_KEY_A]);
+  });
+
+  it("504 in the OpenAI shape within deadlineMs when every provider hangs", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    on(GROQ_KEY_A, hang);
+    on(GROQ_KEY_B, hang);
+    const pending = relay({ providers: [groqA, groqB], deadlineMs: 5_000 })(post());
+    // Real event-loop turns let token verify + body parsing reach the first provider call.
+    while (fetchMock.mock.calls.length === 0) await new Promise((r) => setImmediate(r));
+
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const res = await pending;
+    await expectOpenAIError(res, 504, "upstream_timeout");
+    expect(keysCalled()).toEqual([GROQ_KEY_A]); // B never started: the deadline cut the chain
+  });
+});
+
+describe("coexistence with the browser relay (R11)", () => {
+  it("with no authorize hook the gateway still serves, browser routes 403, and the setup log says they are disabled", async () => {
+    on(GROQ_KEY_A, ok("hi"));
+    const handler = relay(); // no authorize
+    expect((await handler(post())).status).toBe(200);
+    const res = await handler(new Request(`${BASE}/deepgram/token`, { method: "POST" }));
+    expect(res.status).toBe(403);
+    const warned = warnSpy.mock.calls.flat().map(String).join(" ");
+    expect(warned).toMatch(/browser relay routes/i);
+    // The missing authorize is not reported as a misconfiguration when a gateway is configured.
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+});

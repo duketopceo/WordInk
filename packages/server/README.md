@@ -136,6 +136,44 @@ The Node adapter takes a second argument, `{ trustProxy }`. By default it replac
 
 The built-in limiter is in memory: per process on Node, per isolate on Workers. For a hard global limit across instances, pass a `rateLimit` function backed by KV, Redis or a Durable Object.
 
+## Desktop gateway
+
+`gateway` adds an OpenAI-compatible batch endpoint for desktop dictation apps — Voxtype's remote mode, TypeWhisper, or anything that accepts a custom OpenAI-audio base URL. When configured, the relay also serves `POST {basePath}/v1/audio/transcriptions`; when it isn't, that path 404s like any other, and the browser routes above are unchanged.
+
+```ts
+import { createRelay } from "@wordink/server";
+import { FileTokenStore } from "@wordink/server/node"; // Node-only backend
+
+const relay = createRelay({
+  keys: {}, // a gateway-only server can leave the browser keys empty
+  gateway: {
+    tokenStore: new FileTokenStore(), // hashed wdk_… device tokens, revocable per device
+    providers: [
+      // tried in order; 429, 5xx, timeout, network error or a rejected key falls through
+      { provider: "groq", key: process.env.GROQ_API_KEY! }, // whisper-large-v3-turbo
+      { provider: "groq", key: process.env.GROQ_API_KEY_2! }, // a second key, for failover
+      { provider: "openai", key: process.env.OPENAI_API_KEY! }, // gpt-4o-transcribe
+      { provider: "deepgram", key: process.env.DEEPGRAM_API_KEY! }, // nova-3
+    ],
+    vocabulary: ["Omarchy", "Hyprland"], // merged into every provider's prompt/keyterms
+  },
+});
+```
+
+Clients post the standard OpenAI multipart fields — `file`, `model`, `prompt`, `language`, `response_format` (`json`, `text`, `verbose_json`), `temperature` — with `Authorization: Bearer wdk_…`. The `model` a client sends is accepted and ignored: each provider entry calls its own model, so apps configured for any provider's model name keep working. The client's `prompt` is merged with `vocabulary` (operator terms first, capped at 800 characters; Deepgram gets up to 50 `keyterm` query params). Responses are normalized to the OpenAI shape (`{"text"}`, plain text, or `verbose_json` reduced to `text`/`language`/`duration`/`segments`), and every error — 401/429/400/413/502/504 — uses the OpenAI `{"error": {message, type}}` shape and never quotes a provider key.
+
+| `gateway.` option | Default | Notes |
+|---|---|---|
+| `tokenStore` | required | `TokenStore` implementation; `FileTokenStore` keeps SHA-256 hashes at `$XDG_STATE_HOME/wordink/gateway-tokens.json` (mode 0600, re-read on change so a CLI revoke lands on the next request). |
+| `providers` | required | Ordered `{ provider, key, model? }` entries; `model` defaults per provider (`whisper-large-v3-turbo`, `gpt-4o-transcribe`, `nova-3`). |
+| `vocabulary` | `[]` | Operator terms merged into every request. |
+| `rateLimit` | `60/min per token, no daily cap` | A separate limiter instance from the browser relay's; 429s carry `Retry-After`. |
+| `maxBodyBytes` | `25 MB` | Larger uploads get 413 before any provider call. |
+| `upstreamTimeoutMs` | `15000` | Per-attempt timeout; the next entry is tried. |
+| `deadlineMs` | `30000` | Whole-chain bound; on expiry the client gets 504. |
+
+The gateway route needs no `authorize` hook and skips the browser Origin check — a `Bearer` device token is the credential. With `gateway` set and no `authorize`, the browser routes fail closed as usual and the startup log says so. The `wordink-gateway` CLI (`serve`, `tokens create|list|revoke`, `check`) wraps all of this with config-file key resolution; see `examples/gateway-systemd/`.
+
 ## Security notes
 
 - **Origin and CORS are not authentication.** `allowedOrigins` controls which web pages a browser lets call the relay and read its responses. Any script outside a browser can send any `Origin` header. `authorize` is what protects your keys and quota.
