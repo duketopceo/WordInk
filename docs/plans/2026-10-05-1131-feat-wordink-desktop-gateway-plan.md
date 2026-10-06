@@ -23,7 +23,7 @@ execution: code
 - **Execution profile:** Standard. U1 and U3 can run in parallel, then U2, then U4, then U5, U6 and U7.
 - **Finish and ship:** One PR stacked on #26 (branch `feat/p2-gateway`). U7 switches the owner's own Voxtype to the gateway, so it is reversible and its rollback is documented.
 - **Open blockers:** None. Only Groq keys exist in omaseal (`groq/default`, `Groq-Hermes-API`), so the live fallback check uses two Groq keys. OpenAI and Deepgram entries are exercised with mocks until the owner adds keys.
-- **Product Contract preservation:** changed R5 (fall-through now lists 5xx and provider 401/403, matching AE1) and R13 (remote and Cloudflare deployment deferred; review found no consistent token or rate-limit path there). Outstanding Questions resolved in KTD3, KTD4, KTD5 and KTD9.
+- **Product Contract preservation:** changed R5 (fall-through now lists 5xx and provider 401/403, matching AE1) and R13 (remote and Cloudflare deployment deferred; review found no consistent token or rate-limit path there). Outstanding Questions resolved in KTD3, KTD4 and KTD5.
 
 ## Product Contract
 
@@ -130,7 +130,7 @@ None remain. The former planning questions are resolved in KTD3 (token store), K
 ### Key Technical Decisions
 
 - KTD1. **One server, one new route.** `createRelay` gains an optional `gateway` config. When it is set, `POST {basePath}/v1/audio/transcriptions` is served, and when it is absent the route 404s as today. The relay's existing routes, fail-closed `authorize` and origin check are untouched (R11). The gateway route authenticates with device tokens instead of `authorize`, because desktop clients send no cookies and no Origin. Governs R1, R8, R11.
-- KTD2. **Provider entries are (provider, key) pairs in an ordered list.** For example `[{provider:"groq", keyEnv:"GROQ_API_KEY"}, {provider:"groq", keyEnv:"GROQ_API_KEY_2"}, {provider:"openai", keyEnv:"OPENAI_API_KEY"}]`. Fallback can then cross keys of the same provider (separate rate limits) as well as providers. The config names environment variables only. The service wrapper (KTD8) fills them from omaseal (`groq/default`, `Groq-Hermes-API`, …), so key material is never written to config files. Governs R4, R8.
+- KTD2. **Provider entries are (provider, key) pairs in an ordered list.** For example `[{provider:"groq", keyEnv:"GROQ_API_KEY"}, {provider:"groq", keyEnv:"GROQ_API_KEY_2"}, {provider:"openai", keyEnv:"OPENAI_API_KEY"}]`. Fallback can then cross keys of the same provider as well as providers. Note that two keys on one Groq organization share that org's rate limit, so a same-provider pair buys bad-key (401/403) failover, and 429 headroom only across organizations or providers. U7's two-Groq-key check therefore demonstrates request-time 401 failover; 429 and provider-outage fall-through remain mock-verified until a second provider's key exists. The config names environment variables only. The service wrapper (KTD8) fills them from omaseal (`groq/default`, `Groq-Hermes-API`, …), so key material is never written to config files. Governs R4, R8.
 - KTD3. **Token store is an interface. v1 ships the file backend.** The `TokenStore` interface, token generation and hashing live in shared code (`gateway/tokens.ts`). The Node-only `FileTokenStore` (`gateway/file-tokens.ts`) uses a JSON file at `$XDG_STATE_HOME/wordink/gateway-tokens.json` (mode 0600), re-read when its mtime changes so a CLI revoke takes effect on the next request. It is imported only by `node.ts` and the bin, so the Workers bundle never sees `node:fs`. A remote backend is deferred. Tokens are `wdk_` plus 32 random bytes (base64url), stored as SHA-256 hex with an id, label, creation time and revocation time. Lookup by hash uses a constant-time compare. Governs R9, R10.
 - KTD4. **Model mapping is per provider entry.** Each entry carries the model it calls: Groq `whisper-large-v3-turbo`, OpenAI `gpt-4o-transcribe`, Deepgram `nova-3`. The client's `model` is accepted and ignored for routing (R3). An OpenAI `verbose_json` request uses `whisper-1`, since `gpt-4o-transcribe` supports only `json` and `text`.
 - KTD5. **Fallback policy.** These fall through to the next entry:
@@ -293,7 +293,7 @@ apps/docs/pages/desktop.md  (+ apps/docs/desktop.html stub, nav entry)
 **Dependencies:** U4.
 **Files:** `packages/server/src/bin/wordink-gateway.ts`, `packages/server/package.json` (`bin`), `packages/server/test/gateway/cli.test.ts`.
 **Approach:**
-1. `serve` reads `$XDG_CONFIG_HOME/wordink/gateway.json` (providers with key env-var names, models, vocabulary, port and host) and resolves keys from the env vars named per entry. It refuses to start if no entry has a key. It binds `127.0.0.1` by default, and refuses a non-loopback `host` unless `allowInsecureRemote: true` is set, with a warning that tokens and audio would cross the network in cleartext. `trustProxy` stays off.
+1. `serve` reads `$XDG_CONFIG_HOME/wordink/gateway.json` (providers with key env-var names, models, vocabulary, port and host) and resolves keys from the env vars named per entry. An entry whose `keyEnv` resolves to nothing is warned about and skipped; `serve` refuses to start only when no entry resolves a key. It binds `127.0.0.1` by default, and refuses a non-loopback `host` unless `allowInsecureRemote: true` is set, with a warning that tokens and audio would cross the network in cleartext. `trustProxy` stays off.
 2. `tokens` subcommands operate on the file store.
 3. `check` prints the resolved provider list with keys shown only as present or missing.
 **Test scenarios:**
@@ -322,20 +322,22 @@ apps/docs/pages/desktop.md  (+ apps/docs/desktop.html stub, nav entry)
 **Goal:** The owner's own Voxtype dictates through the gateway, with Groq-key-to-Groq-key fallback live.
 **Requirements:** R2, R5, R13, R14, Success Criteria.
 **Dependencies:** U6.
-**Files:** none in the repo. Machine changes:
+**Files:** none in the repo (the README and unit shipped by U6 get corrected as part of this unit). Machine changes:
 - `~/.config/wordink/gateway.json`
+- `~/.config/wordink/gateway-keys`: the env-name→omaseal-ref map `wordink-gateway-run` reads (`GROQ_API_KEY=groq/default`, `GROQ_API_KEY_2=Groq-Hermes-API`)
 - `~/.config/systemd/user/wordink-gateway.service`
 - `~/bin/voxtype-daemon`: inject the device token from omaseal `wordink/voxtype` instead of the Groq key, and point `remote_endpoint` at the gateway
-- omaseal entry `wordink/voxtype`
+- omaseal entries `wordink/voxtype` (device token) and `wordink/bad-key` (a deliberately invalid key for the outage check)
 
 **Approach:**
 1. Back up the current `voxtype-daemon` and config.
-2. Install and start the service, then create a device token and store it in omaseal.
-3. Switch the wrapper and restart Voxtype.
+2. Install the binary without npm (nothing is published yet): `pnpm --filter @wordink/server build`, then link `packages/server/dist/bin/wordink-gateway.js` into `~/.local/bin` (on the user service's PATH; `WORDINK_GATEWAY_BIN` is the override for other layouts). Add `Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin` to `wordink-gateway.service` — a user service gets a minimal PATH — and update the README (and the docs page) with this pre-publish install path. Write `gateway.json` and `gateway-keys`, then start the service, create a device token and store it in omaseal.
+3. Move the vocabulary out of Voxtype: copy the terms from its `initial_prompt` into `gateway.json`'s `vocabulary` and remove `initial_prompt` from the Voxtype runtime config, so the client sends no `prompt` and AE4 is exercised live. Then switch the wrapper and restart Voxtype.
 4. Verify with `voxtype transcribe` on the fixture.
-5. Simulate a Groq outage: point entry A at an invalid key env var, and confirm entry B serves it (AE1, live with two Groq keys).
-6. Measure the added latency: gateway vs direct, median of 10 runs each.
-7. Document the rollback (restore the backup and restart Voxtype).
+5. Simulate a Groq outage with a present-but-invalid key value — point `GROQ_API_KEY`'s `gateway-keys` line at `wordink/bad-key` — so Groq answers 401 at request time and entry B serves it (AE1, live with two Groq keys). (An unset `keyEnv` would instead be skipped at startup by U5's warn-and-skip, producing no fall-through to observe.)
+6. Check the 504 path promised in Risks & Dependencies: set `gateway.deadlineMs` low enough that every provider attempt exceeds it, run `voxtype transcribe`, confirm Voxtype surfaces the gateway's 504 cleanly rather than hanging, then restore the default.
+7. Measure the added latency: gateway vs direct, median of 10 runs each.
+8. Document the rollback (restore the backup and restart Voxtype).
 
 **Test expectation:** none in the repo. This is live machine verification.
 **Verification:**
@@ -343,6 +345,8 @@ apps/docs/pages/desktop.md  (+ apps/docs/desktop.html stub, nav entry)
 - Fallback is observed in the gateway log.
 - The added median latency is under 100 ms.
 - The Groq key is gone from the Voxtype runtime config.
+- A word from the gateway vocabulary is spelled correctly with the client sending no `prompt` (AE4 live).
+- With `deadlineMs` forced below every provider's latency, Voxtype surfaces the gateway's 504 cleanly rather than hanging or crashing.
 
 ## Verification Contract
 
