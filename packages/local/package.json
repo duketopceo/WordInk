@@ -1,6 +1,6 @@
 {
   "name": "@wordink/local",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Offline WordInk speech engine: Moonshine via transformers.js in a Web Worker (WebGPU, WASM fallback).",
   "license": "MIT",
   "homepage": "https://duketopceo.github.io/WordInk/",
