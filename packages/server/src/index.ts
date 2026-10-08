@@ -10,7 +10,7 @@ import {
   type RateLimiter,
   type RateLimitOptions,
 } from "./internal.js";
-import { createGatewayHandler, GATEWAY_TRANSCRIPTIONS_PATH } from "./gateway/index.js";
+import { createGatewayHandler, GATEWAY_MODELS_PATH, GATEWAY_TRANSCRIPTIONS_PATH } from "./gateway/index.js";
 import type { GatewayConfig } from "./gateway/index.js";
 
 export { GROQ_TRANSCRIPTIONS_URL } from "./groq.js";
@@ -20,6 +20,7 @@ export { DEFAULT_RATE_LIMIT, type RateLimiter, type RateLimitOptions } from "./i
 export {
   DEFAULT_GATEWAY_MAX_BODY_BYTES,
   DEFAULT_GATEWAY_RATE_LIMIT,
+  GATEWAY_MODELS_PATH,
   GATEWAY_TRANSCRIPTIONS_PATH,
   type GatewayConfig,
 } from "./gateway/index.js";
@@ -135,9 +136,12 @@ export function createRelay(config: RelayConfig): RelayHandler {
       json(status, body, { ...cors, ...extra });
 
     const path = new URL(request.url).pathname;
-    // The gateway route matches before the browser-relay logic: no Origin or `authorize` checks
-    // apply to it, and when no gateway is configured the path falls through to 404 (KTD1, KTD9).
-    if (gateway !== null && path === `${basePath}${GATEWAY_TRANSCRIPTIONS_PATH}`) {
+    // The gateway routes match before the browser-relay logic: no Origin or `authorize` checks
+    // apply to them, and when no gateway is configured the paths fall through to 404 (KTD1, KTD9).
+    if (
+      gateway !== null &&
+      (path === `${basePath}${GATEWAY_TRANSCRIPTIONS_PATH}` || path === `${basePath}${GATEWAY_MODELS_PATH}`)
+    ) {
       return gateway(request);
     }
     const route = matchRoute(path, basePath);

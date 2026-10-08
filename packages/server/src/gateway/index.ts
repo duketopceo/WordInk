@@ -3,12 +3,19 @@
 import { createMemoryLimiter, errorName, GATEWAY_LOG_PREFIX, limiterRetrySeconds, readCapped } from "../internal.js";
 import type { RateLimiter, RateLimitOptions } from "../internal.js";
 import { parseTranscriptionForm, type ParseError } from "./multipart.js";
-import type { ResolvedEntry } from "./providers.js";
+import { DEFAULT_MODELS, type ResolvedEntry } from "./providers.js";
 import { createRouter } from "./router.js";
 import type { TokenInfo, TokenStore } from "./tokens.js";
 
 /** The route path (under `basePath`) the gateway serves when configured. */
 export const GATEWAY_TRANSCRIPTIONS_PATH = "/v1/audio/transcriptions";
+
+/**
+ * `GET {basePath}/v1/models` — the OpenAI models-list shape desktop clients query when they
+ * offer model discovery (TypeWhisper's OpenAI Compatible engine does). It reports each
+ * configured provider's effective model id, never provider names, URLs, or keys (R7 posture).
+ */
+export const GATEWAY_MODELS_PATH = "/v1/models";
 
 /** `gateway.maxBodyBytes` default: Groq's upload limit (KTD7). */
 export const DEFAULT_GATEWAY_MAX_BODY_BYTES = 25 * 1024 * 1024;
@@ -69,13 +76,10 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
       : createMemoryLimiter({ ...DEFAULT_GATEWAY_RATE_LIMIT, ...config.rateLimit });
   const maxBodyBytes = config.maxBodyBytes ?? DEFAULT_GATEWAY_MAX_BODY_BYTES;
 
-  return async function gateway(request: Request): Promise<Response> {
-    if (request.method !== "POST") {
-      return openaiError(405, "Only POST requests are supported.", "invalid_request_error", {
-        headers: { allow: "POST" },
-      });
-    }
-
+  // Shared device gate: Bearer token check, then the per-token budget (KTD9). A spent
+  // budget is a 429 in the OpenAI shape with Retry-After — on transcriptions this runs
+  // before any body buffering so an over-quota request never holds maxBodyBytes of memory.
+  const authorizeDevice = async (request: Request): Promise<TokenInfo | Response> => {
     const token = bearerToken(request);
     const device = token === null ? null : await verify(config.tokenStore, token);
     if (device === null) {
@@ -83,18 +87,42 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
         code: "invalid_api_key",
       });
     }
+    const verdict = await limiter(device.id, request);
+    if (verdict !== true) {
+      return openaiError(429, "Rate limit reached for this device token.", "rate_limit_exceeded", {
+        code: "rate_limit_exceeded",
+        headers: { "retry-after": String(limiterRetrySeconds(verdict)) },
+      });
+    }
+    return device;
+  };
 
-    try {
-      // Per-token budget (KTD9) before any body buffering: a request already over
-      // quota answers 429 without holding maxBodyBytes of memory first. A spent
-      // budget is a 429 in the OpenAI shape with Retry-After.
-      const verdict = await limiter(device.id, request);
-      if (verdict !== true) {
-        return openaiError(429, "Rate limit reached for this device token.", "rate_limit_exceeded", {
-          code: "rate_limit_exceeded",
-          headers: { "retry-after": String(limiterRetrySeconds(verdict)) },
+  return async function gateway(request: Request): Promise<Response> {
+    const path = new URL(request.url).pathname;
+    if (path.endsWith(GATEWAY_MODELS_PATH)) {
+      if (request.method !== "GET") {
+        return openaiError(405, "Only GET requests are supported.", "invalid_request_error", {
+          headers: { allow: "GET" },
         });
       }
+      try {
+        const device = await authorizeDevice(request);
+        if (device instanceof Response) return device;
+        return new Response(modelsList(config.providers), { headers: JSON_HEADERS });
+      } catch (err) {
+        console.error(`${GATEWAY_LOG_PREFIX} models request failed unexpectedly.`, errorName(err));
+        return openaiError(500, "The models request failed internally.", "server_error");
+      }
+    }
+    if (request.method !== "POST") {
+      return openaiError(405, "Only POST requests are supported.", "invalid_request_error", {
+        headers: { allow: "POST" },
+      });
+    }
+
+    try {
+      const device = await authorizeDevice(request);
+      if (device instanceof Response) return device;
 
       const body = await readCapped(request, maxBodyBytes);
       if (body === "too_large") {
@@ -158,6 +186,19 @@ function formError(error: ParseError): Response {
     default:
       return openaiError(400, "The request body is not valid multipart form data.", "invalid_request_error");
   }
+}
+
+/** The OpenAI `GET /v1/models` body: each configured provider's effective model, de-duplicated. */
+function modelsList(providers: readonly ResolvedEntry[]): string {
+  const seen = new Set<string>();
+  const data: { id: string; object: string; created: number; owned_by: string }[] = [];
+  for (const entry of providers) {
+    const id = entry.model ?? DEFAULT_MODELS[entry.provider];
+    if (seen.has(id)) continue;
+    seen.add(id);
+    data.push({ id, object: "model", created: 0, owned_by: "wordink" });
+  }
+  return JSON.stringify({ object: "list", data });
 }
 
 function openaiError(

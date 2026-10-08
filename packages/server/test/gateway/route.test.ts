@@ -132,6 +132,13 @@ function post(opts: PostOptions = {}): Request {
   });
 }
 
+/** A device-client GET (model discovery): Bearer token, no Origin, no body. */
+function get(path: string, token: string | false = deviceToken): Request {
+  const headers: Record<string, string> = {};
+  if (token !== false) headers.authorization = `Bearer ${token}`;
+  return new Request(`${BASE}${path}`, { headers });
+}
+
 function relay(gateway: Partial<GatewayConfig> = {}, config: Partial<RelayConfig> = {}) {
   return createRelay({
     keys: {},
@@ -513,6 +520,72 @@ describe("provider fallback through the route", () => {
     const res = await pending;
     await expectOpenAIError(res, 504, "upstream_timeout");
     expect(keysCalled()).toEqual([GROQ_KEY_A]); // B never started: the deadline cut the chain
+  });
+});
+
+describe("GET /v1/models", () => {
+  it("lists each configured provider's effective model in the OpenAI list shape (R2)", async () => {
+    const res = await relay({
+      providers: [groqA, { provider: "openai", key: OPENAI_KEY, model: "custom-deploy" }, deepgram],
+    })(get("/v1/models"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = await res.json();
+    expect(body).toEqual({
+      object: "list",
+      data: [
+        { id: "whisper-large-v3-turbo", object: "model", created: 0, owned_by: "wordink" },
+        { id: "custom-deploy", object: "model", created: 0, owned_by: "wordink" },
+        { id: "nova-3", object: "model", created: 0, owned_by: "wordink" },
+      ],
+    });
+    // No provider names, URLs or keys escape in the response (R7 posture carries over).
+    const raw = JSON.stringify(body);
+    for (const leak of ["groq", "openai", "deepgram", GROQ_KEY_A, OPENAI_KEY, DEEPGRAM_KEY, GROQ_AUDIO_URL]) {
+      expect(raw).not.toContain(leak);
+    }
+  });
+
+  it("de-duplicates entries that resolve to the same model", async () => {
+    const res = await relay({ providers: [groqA, groqB, openai] })(get("/v1/models"));
+    const body = (await res.json()) as { data: { id: string }[] };
+    expect(body.data.map((m) => m.id)).toEqual(["whisper-large-v3-turbo", "gpt-4o-transcribe"]);
+  });
+
+  it("is behind the same device-token gate: missing, garbage and revoked tokens all 401", async () => {
+    await expectOpenAIError(await relay()(get("/v1/models", false)), 401, "invalid_request_error", "invalid_api_key");
+    await expectOpenAIError(await relay()(get("/v1/models", "wdk_garbage")), 401, "invalid_request_error", "invalid_api_key");
+    await tokenStore.revoke(deviceId);
+    await expectOpenAIError(await relay()(get("/v1/models")), 401, "invalid_request_error", "invalid_api_key");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-GET methods in the OpenAI shape with allow: GET", async () => {
+    for (const method of ["POST", "PUT", "DELETE"]) {
+      const res = await relay()(
+        new Request(`${BASE}/v1/models`, { method, headers: { authorization: `Bearer ${deviceToken}` } }),
+      );
+      expect(res.status).toBe(405);
+      expect(res.headers.get("allow")).toBe("GET");
+      await expectOpenAIError(res, 405, "invalid_request_error");
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shares the per-token rate limiter with transcriptions", async () => {
+    const handler = relay({ rateLimit: { windowMs: 60_000, max: 1, dailyMax: Number.POSITIVE_INFINITY } });
+    expect((await handler(get("/v1/models"))).status).toBe(200);
+    const res = await handler(get("/v1/models"));
+    await expectOpenAIError(res, 429, "rate_limit_exceeded", "rate_limit_exceeded");
+    expect(res.headers.get("retry-after")).toEqual(expect.any(String));
+  });
+
+  it("honours basePath and 404s when no gateway is configured", async () => {
+    const mounted = relay({}, { basePath: "/wordink" });
+    expect((await mounted(get("/wordink/v1/models"))).status).toBe(200);
+    expect((await mounted(get("/v1/models"))).status).toBe(404);
+    const plain = createRelay({ keys: {} });
+    expect((await plain(get("/v1/models"))).status).toBe(404);
   });
 });
 
