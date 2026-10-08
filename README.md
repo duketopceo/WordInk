@@ -1,175 +1,85 @@
-# 🖋️ WordInk
+# WordInk
 
-**Sub-Second Voice Dictation, Embeddable SDK, and Grounded GUI Voice Driver**  
-*Powered by Groq Whisper Turbo (`whisper-large-v3-turbo`) on LPUs (~300ms latency).*
+**Dictation as a component.** WordInk is an open-source, provider-agnostic dictation engine that turns speech into finished text. It ships as a drop-in SDK for any web app first, and later as a standalone dictation app for Linux, Omarchy, Windows and macOS.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Groq Whisper Turbo](https://img.shields.io/badge/Model-Whisper%20Large%20v3%20Turbo-orange.svg)](https://console.groq.com)
-[![Status](https://img.shields.io/badge/Status-Active-brightgreen.svg)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-WordInk turns spoken thoughts into immediate text at the speed of thought. Built as a fast, privacy-first open alternative to proprietary tools like Wispr Flow and Superwhisper, WordInk functions simultaneously as a silent system dictation daemon, an embeddable Python SDK, and a high-bandwidth voice frontend for Computer-Using Agents (CUAs).
+> **Status: pre-release.** The Phase 1 Web SDK is built and on its way to its first npm release. See [ROADMAP.md](ROADMAP.md) and the [Phase 1 plan](docs/plans/2026-10-04-1757-feat-wordink-web-sdk-plan.md). The original Windows dictation app still works and lives in [`legacy/`](legacy/).
 
----
+**Docs and live demo: <https://duketopceo.github.io/WordInk/>**
 
-## ⚡ Why WordInk?
+## Quickstart
 
-- ⚡ **Sub-Second Latency (~300ms)**: Direct raw streaming to Groq's Whisper Turbo LPU without unnecessary LLM hops.
-- 📋 **Instant Native Paste**: Injects full paragraphs all at once using clipboard injection, with automatic fallback to Unicode bracketed typing in terminals (Ghostty, Cascadia, Windows Terminal).
-- 🎛️ **Interactive Setup Wizard**: Beautiful browser-based onboarding with live key detection visualizer (`[F]`, `[U]`, `[Insert]`, `[Numpad 8]`), microphone VU meter, and Groq API verification.
-- 📊 **Local Telemetry & Savings**: Tracks total words dictated, average latency, and monthly savings stored in local SQLite without external phoning home.
-- 🧰 **First-Class Embeddable SDK**: Add sub-second voice transcription to any desktop app, agent pipeline, or CLI with a simple `from wordink import WordInkEngine`.
-- 🤖 **Computer-Using Agent (CUA) Ready**: Designed to pair with Grounded GUI agents using temperature-scaled probabilistic centering.
+Plain HTML, no build step:
 
----
+```html
+<textarea id="message"></textarea>
+<wordink-mic for="message" endpoint="/api/wordink"></wordink-mic>
 
-## 🚀 Quick Start
+<script
+  type="module"
+  src="https://cdn.jsdelivr.net/npm/@wordink/web@VERSION/dist/wordink-web.cdn.js"
+  integrity="sha384-…"
+  crossorigin="anonymous"
+></script>
+```
 
-### 1. Installation
+The [HTML quickstart](https://duketopceo.github.io/WordInk/quickstart-html.html) has the pinned version and its integrity hash. `endpoint` is your [`@wordink/server`](packages/server) relay, which holds the provider key.
 
-Clone your fork and install dependencies via `uv`:
+React:
+
+```tsx
+import { WordInkMic } from "@wordink/react";
+
+<textarea id="message" />
+<WordInkMic htmlFor="message" endpoint="/api/wordink" />
+```
+
+- **Drop-in:** one element or one React hook, inserted at the cursor with native undo.
+- **Bring your own key:** Groq (default), OpenAI or Deepgram through your own small relay (`@wordink/server`), so long-lived keys never reach the browser. Or use a local model (`@wordink/local`) that works offline.
+- **No WordInk servers, no telemetry.** MIT licensed.
+
+| Package | |
+|---|---|
+| [`@wordink/web`](packages/web) | The `<wordink-mic>` element (ES module and single-file CDN build) |
+| [`@wordink/react`](packages/react) | `useDictation` and `<WordInkMic>` |
+| [`@wordink/core`](packages/core) | The engine: Rust core as WebAssembly plus a TypeScript browser host |
+| [`@wordink/local`](packages/local) | Offline speech recognition in the browser (Moonshine) |
+| [`@wordink/server`](packages/server) | Fail-closed credential relay for Cloudflare Workers and Node |
+
+## Repository layout
+
+| Path | What |
+|---|---|
+| `crates/wordink-core` | Rust sans-I/O dictation core (sessions, audio pipeline, provider protocols) |
+| `crates/wordink-wasm` | WebAssembly bindings for the core |
+| `packages/*` | npm packages: `@wordink/core`, `web`, `react`, `local`, `server` |
+| `apps/docs` | The docs site and live demo (deployed to GitHub Pages) |
+| `examples/*` | Plain HTML, React and relay examples |
+| `legacy/` | The original Python/Windows dictation app (groq_flow lineage) |
+| `docs/plans/` | Product and implementation plans |
+
+## Develop
 
 ```bash
-git clone https://github.com/duketopceo/WordInk.git
-cd WordInk
+cargo test --workspace                       # Rust core
+pnpm install && pnpm typecheck && pnpm test  # TypeScript packages
+pnpm --filter @wordink/docs dev               # docs site on localhost (offers a dev-key field)
+```
 
-# Install dependencies and editable package
+## Releases and docs
+
+Changesets drives releases: add one with `pnpm changeset`, and `.github/workflows/release.yml` opens a version PR, then publishes to npm on merge through npm trusted publishing (OIDC, with provenance; no npm token is stored). The one-time npm setup is described at the top of that workflow. `.github/workflows/docs.yml` deploys `apps/docs` to GitHub Pages; it needs Settings > Pages > Source set to "GitHub Actions" once.
+
+## The legacy Windows app
+
+```bash
+cd legacy
 uv sync
-uv pip install -e .
+uv run wordink --onboard   # setup wizard at http://localhost:18981
+uv run wordink             # tray daemon
 ```
 
-### 2. Interactive Onboarding Wizard
+## Credits
 
-Launch the visual onboarding wizard to test your microphone, verify your Groq API key, and configure your hotkey:
-
-```bash
-uv run wordink --onboard
-# Or:
-# python -m wordink.onboarding.server
-```
-
-The wizard opens at `http://localhost:18981` in your browser:
-1. **API Key**: Enter your Groq API key (free tier includes ~2 hours daily).
-2. **Model Selection**: Select `whisper-large-v3-turbo` (sub-second response).
-3. **Microphone**: Live VU audio meter to test your mic before saving.
-4. **Keyboard Visualizer**: Press any key on your keyboard to test physical scan codes and select your hotkey (<kbd>Alt</kbd> + <kbd>D</kbd> recommended).
-5. **Launch**: Saves configuration to `.env` and initializes silent background operation.
-
-### 3. Running WordInk
-
-```bash
-# Run in system tray
-uv run wordink
-
-# Or run silent in background on Windows boot
-wscript.exe start_silent.vbs
-```
-
----
-
-## 📦 Using the Embeddable SDK
-
-WordInk can be embedded into any Python application, CLI, or agent runtime:
-
-```python
-from wordink import WordInkEngine, transcribe
-
-# 1. Direct one-liner transcription
-text = transcribe("path/to/meeting.wav")
-print("Transcribed:", text)
-
-# 2. Live event-driven voice listener
-def handle_text(text: str):
-    print(f"User dictated: {text}")
-
-engine = WordInkEngine(
-    on_transcript=handle_text,
-    auto_paste=True  # Automatically injects text at active cursor
-)
-
-# Start / stop listening
-engine.start_recording()
-# ... speak ...
-engine.stop_recording()
-```
-
----
-
-## 🧠 Architecture: WordInk & Computer-Using Agents (CUAs)
-
-### The Grounded Icon Problem & Probabilistic Centering
-
-When Computer-Using Agents (CUAs) attempt to interact with desktop user interfaces based on natural language instructions (e.g., *"Click the monitor icon in the menu bar"*), Vision-Language Models (VLMs) and Decision APIs output spatial probability heatmaps over screen coordinates $(x, y)$.
-
-Direct greedy argmax coordinate prediction often causes **coordinate drift**—landing on adjacent padding, border edges, or missing sub-16px icons.
-
-WordInk bridges high-bandwidth voice commands to CUA drivers using **temperature-scaled probabilistic centering**:
-
-```
-[Voice Input: "Click monitor icon"]
-               │
-               ▼  (~300ms)
-    ┌─────────────────────┐
-    │ WordInk Voice Engine│
-    └─────────────────────┘
-               │  Intent Text
-               ▼
-    ┌─────────────────────┐
-    │  CUA Decision API   │
-    │  Spatial Heatmap    │
-    └─────────────────────┘
-               │
-               ▼  Power Scaling: P'(x,y) = P(x,y)^α / Σ P^α
-    ┌─────────────────────┐
-    │Probabilistic Center │  ==> Computes center of mass E[X, Y]
-    └─────────────────────┘
-               │
-               ▼  Sub-pixel exact click
-        [ Monitor Icon ]
-```
-
-1. **Power Scaling ($P^\alpha$)**: Raising raw coordinate heatmaps to an exponent $\alpha > 1$ sharpens the distribution peak around the target icon while dropping ambient background noise to zero.
-2. **Probabilistic Centering**: Calculating the expected center of mass:
-   $$\mathbb{E}[X] = \sum_x x \cdot P'(x), \quad \mathbb{E}[Y] = \sum_y y \cdot P'(y)$$
-   reliably drives the OS mouse cursor into the geometric center of the targeted UI component.
-
----
-
-## ⚙️ Configuration Reference (`.env`)
-
-```ini
-# Groq API Configuration
-GROQ_API_KEY=gsk_your_key_here
-
-# Dictation Hotkey (Alt+D recommended)
-HOTKEY=alt+d
-
-# Whisper Model (whisper-large-v3-turbo for ~300ms latency)
-WHISPER_MODEL=whisper-large-v3-turbo
-
-# Noise Reduction (disabled by default for maximum speed & short utterances)
-ENABLE_NOISE_REDUCTION=false
-
-# Secondary LLM Cleanup (disabled by default to maintain sub-second speed)
-ENABLE_AI_CLEANUP=false
-
-# Debug Output
-DEBUG=false
-```
-
----
-
-## 🪟 Windows Startup Setup
-
-To have WordInk launch silently on system boot without any console window:
-
-1. Press <kbd>Win</kbd> + <kbd>R</kbd> and type `shell:startup`.
-2. Create a shortcut to `start_silent.vbs` located in this repository directory.
-3. WordInk will run quietly in your Windows system tray on boot.
-
----
-
-## 📄 License
-
-This project is licensed under the [MIT License](LICENSE).  
-Original work copyright (c) Parth Jain. Modifications and enhancements copyright (c) Duketop CEO.
+WordInk began as a fork of [groq_flow](https://github.com/ParthJain18/groq_flow) by Parth Jain (MIT). See [LICENSE](LICENSE).

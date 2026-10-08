@@ -5,9 +5,73 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+permissions:
+  contents: read
 jobs:
-  verify:
+  rust:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo build -p wordink-wasm --target wasm32-unknown-unknown --release
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - &wasm-toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      # Must match the exact wasm-bindgen version pinned in crates/wordink-wasm/Cargo.toml.
+      - &wasm-bindgen
+        uses: taiki-e/install-action@v2
+        with: { tool: wasm-bindgen@0.2.129 }
+      - &binaryen
+        name: Install binaryen (wasm-opt)
+        run: |
+          curl -sSfL https://github.com/WebAssembly/binaryen/releases/download/version_130/binaryen-version_130-x86_64-linux.tar.gz | tar xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_130/bin" >> "$GITHUB_PATH"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm typecheck
+      # Includes the core wasm gzip size check (KTD1, 150 KB).
+      - run: pnpm test
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - *wasm-toolchain
+      - uses: Swatinem/rust-cache@v2
+      - *wasm-bindgen
+      - *binaryen
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @wordink/core exec playwright install --with-deps chromium firefox webkit
+      # Firefox's media graph needs an audio server: without one its fake microphone is silent and
+      # every dictation ends in NoSpeech. A PulseAudio null sink gives it one.
+      - name: Start a PulseAudio null sink
+        run: |
+          sudo apt-get install -y --no-install-recommends pulseaudio
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink
+      - run: pnpm test:e2e
+  legacy:
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: legacy }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -1,0 +1,11 @@
+{
+  "host": "127.0.0.1",
+  "port": 8941,
+  "providers": [
+    { "provider": "groq", "keyEnv": "GROQ_API_KEY" },
+    { "provider": "groq", "keyEnv": "GROQ_API_KEY_2" },
+    { "provider": "openai", "keyEnv": "OPENAI_API_KEY" },
+    { "provider": "deepgram", "keyEnv": "DEEPGRAM_API_KEY" }
+  ],
+  "vocabulary": ["WordInk", "Omarchy", "Hyprland", "Voxtype", "Tailscale"]
+}

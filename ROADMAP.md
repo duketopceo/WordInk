@@ -1,27 +1,44 @@
 # WordInk Roadmap
 
-**WordInk is dictation as a component.** It's one open-source, provider-agnostic core that turns speech into finished text. It ships as a drop-in SDK for any app, and as a standalone dictation app for Linux, Omarchy, Windows and macOS.
+**WordInk is dictation as a component.** It's one open-source, provider-agnostic core that turns speech into finished text. It ships as a drop-in SDK for any app, and it reaches the desktop by integrating with the dictation apps people already use (Phase 2).
 
 - **Open source (MIT), bring your own key.** Use Groq, OpenAI or Deepgram with your own key, or a local model. No WordInk account, no WordInk servers.
-- **SDK first.** The SDK is the product. The desktop app is its flagship consumer.
+- **SDK first.** The SDK is the product. The desktop dictation apps people already use are its flagship consumers.
 - **Wayland is first-class.** The desktop app treats Linux/Hyprland as a primary platform, not an afterthought.
 
-Detailed plan for the current phase: [`docs/plans/2026-10-04-1757-feat-wordink-web-sdk-plan.md`](docs/plans/2026-10-04-1757-feat-wordink-web-sdk-plan.md).
+Detailed plans: [`docs/plans/2026-10-04-1757-feat-wordink-web-sdk-plan.md`](docs/plans/2026-10-04-1757-feat-wordink-web-sdk-plan.md) (Phase 1), [`docs/plans/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md`](docs/plans/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md) (Phase 2 gateway), [`docs/plans/2026-10-06-1603-feat-phase-1-closeout-plan.md`](docs/plans/2026-10-06-1603-feat-phase-1-closeout-plan.md) (closeout).
 
 ## Phases
 
 | Phase | What ships | Status |
 |---|---|---|
-| **0. Foundation** | Repo cleanup: archive the legacy Python app under `legacy/`, monorepo tooling, CI, positioning | Next |
-| **1. Core + Web SDK** | `@wordink/core` (provider-agnostic engine), `<wordink-mic>` web component, `useWordInk` React hook, Groq/OpenAI/Deepgram + local engine, reference credential server, docs site with live demo | Planned |
-| **2. WordInk Desktop: Linux** | System-wide hold-to-talk dictation on Wayland (Hyprland/Omarchy first, then GNOME/KDE) and X11. Portal global shortcuts, virtual-keyboard injection with clipboard fallback, tray, optional LLM cleanup. AUR and Omarchy packages | Planned |
-| **3. WordInk Desktop: Windows + macOS** | The same app on Windows (replacing today's Python daemon) and macOS (accessibility-permission flow, signed builds) | Planned |
+| **0. Foundation** | Repo cleanup: archive the legacy Python app under `legacy/`, monorepo tooling, CI, positioning | Done (PRs #16–#17) |
+| **1. Core + Web SDK** | `@wordink/core` (provider-agnostic engine), `<wordink-mic>` web component, `useDictation` React hook, Groq/OpenAI/Deepgram + local engine, reference credential server, docs site with live demo | Built (PRs #18–#27); closeout in progress — npm publish and Pages pending |
+| **2. Desktop** | Integrate with existing apps: `wordink-gateway`, an OpenAI-compatible transcription endpoint with provider fallback and per-device tokens. Voxtype on Linux verified; TypeWhisper plugin next | Decided: Option A — gateway shipped (PR #27) |
+| **3. WordInk Desktop: Windows + macOS** | Was contingent on Phase 2 picking a standalone app | Dropped — Phase 2 chose integration |
 | **4. More SDKs** | Python SDK for agents and CLIs; then mobile (React Native / native) based on demand | Exploring |
+
+### Phase 2 decision (Oct 2026)
+
+A comparison after Phase 1 changed the picture:
+
+- **TypeWhisper** (GPLv3; macOS, Windows, iOS; no Linux) already ships system-wide dictation with more engines than planned here, LLM cleanup presets, per-app/URL profiles, an HTTP API, a CLI and a plugin SDK with a marketplace.
+- **Voxtype** (MIT; Linux only) already covers Wayland/Hyprland well: 7 local engines, GPU acceleration, remote Whisper, and a meeting mode.
+
+A standalone WordInk Desktop would be a fourth app chasing two good, free, open-source ones. Neither of them is an embeddable SDK, and that is still WordInk's gap.
+
+| Option | What it means | Trade-off |
+|---|---|---|
+| **A. Integrate (recommended)** | WordInk becomes a provider/relay that desktop apps point at. A TypeWhisper plugin (plugin SDK / HTTP API), and Voxtype's remote mode against `@wordink/server` (OpenAI-compatible transcription endpoint). | Small surface, rides existing user bases. WordInk stops being a desktop brand. |
+| **B. Standalone Linux app** | The original Phase 2: a native host for the Rust core with portal shortcuts and virtual-keyboard injection. | Full control, but it competes head-on with Voxtype on its home turf. |
+| **C. Skip desktop** | Put everything into the SDK: Python bindings, mobile, more providers, the live-API hardening below. | Tightest focus. It drops the desktop story entirely. |
+
+**Decided: Option A.** The gateway shipped on `feat/p2-gateway` (PR #27), and Voxtype on omarchy-max already dictates through it with provider fallback. Phase 1 closeout is in flight under [`docs/plans/2026-10-06-1603-feat-phase-1-closeout-plan.md`](docs/plans/2026-10-06-1603-feat-phase-1-closeout-plan.md): the stacked PR chain, npm publish with trusted publishing, GitHub Pages, and the PR #26 residuals. Still deferred (no provider keys on this machine): live-API checks for OpenAI (GA session shape, `gpt-live-transcribe`, `ek_` auth) and Deepgram (`token` vs `bearer`), plus the manual cross-browser blur/permission handcheck.
 
 ### Phase 1 milestones (Core + Web SDK)
 
 1. **Core engine:** the provider interface, audio capture, session state machine, Groq adapter.
-2. **Web component + React hook:** `<wordink-mic>`, `useWordInk`, text insertion with native undo, themeable.
+2. **Web component + React hook:** `<wordink-mic>`, `useDictation`, text insertion with native undo, themeable.
 3. **Providers + keys:** OpenAI and Deepgram adapters, streaming partials, reference credential server.
 4. **Local engine:** in-browser model, works offline after first load.
 5. **Docs + launch:** docs site, live demo, npm publish, launch post.
@@ -36,6 +53,7 @@ Pricing comes mostly from aggregator sites. Treat it as approximate.
 |---|---|---|---|---|---|---|
 | Wispr Flow | No | Yes | Yes | Cloud + LLM cleanup | Free tier; ~$12-15/mo | No |
 | Superwhisper | No | Yes | Yes | Local or cloud | ~$8.49/mo or $249.99 lifetime | No |
+| TypeWhisper | No | Yes | Yes (+ iOS) | Local (WhisperKit, Parakeet, Qwen3, Granite, SpeechAnalyzer) + cloud (Groq, OpenAI, Deepgram, AssemblyAI, Cloudflare); HTTP API, CLI, plugin SDK | Free; Team €19/mo, Enterprise €99/mo | GPLv3 |
 | Aqua Voice | No | Yes | Yes | Cloud (own model) | ~$8/mo | No |
 | Willow Voice | No | Yes | Yes | Cloud | ~$12-15/mo | No |
 | Typeless | No | Yes | Yes | Cloud | ~$12/mo | No |
@@ -67,5 +85,5 @@ Pricing comes mostly from aggregator sites. Treat it as approximate.
 ### Where WordInk fits
 
 - **No open, vendor-neutral drop-in dictation component exists.** That's Phase 1.
-- **Cross-platform apps with good Wayland support are rare.** Linux-first tools are Linux-only, and cross-platform tools have weak Wayland support. That's Phase 2.
-- **The open-source desktop field is crowded** (Handy, OpenWhispr), so the app competes on Wayland quality, SDK parity and BYOK freedom, not on features alone.
+- **Cross-platform apps with good Wayland support are rare.** Linux-first tools are Linux-only, and cross-platform tools have weak Wayland support. That's why Phase 2 integrates with them instead of building another app.
+- **The open-source desktop field is crowded** (Handy, OpenWhispr, Voxtype), so WordInk reaches the desktop through those apps rather than competing with them — the gateway centralizes provider keys, fallback and vocabulary for any OpenAI-compatible client.

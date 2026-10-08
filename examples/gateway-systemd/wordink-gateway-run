@@ -1,0 +1,42 @@
+#!/bin/sh
+# wordink-gateway-run: start `wordink-gateway serve` with provider keys pulled from omaseal into its
+# environment, so no key ever lands on disk (the same pattern as a voxtype-daemon wrapper).
+#
+# Key map, one `ENV_NAME=service/account` per line (names only, never key values):
+#   ${XDG_CONFIG_HOME:-$HOME/.config}/wordink/gateway-keys
+# e.g.
+#   GROQ_API_KEY=groq/default
+#   GROQ_API_KEY_2=Groq-Hermes-API
+set -eu
+
+MAP="${XDG_CONFIG_HOME:-$HOME/.config}/wordink/gateway-keys"
+BIN="${WORDINK_GATEWAY_BIN:-wordink-gateway}"
+
+if [ -f "$MAP" ]; then
+  # `|| [ -n "$name" ]` keeps a final line that lacks a trailing newline.
+  while IFS='=' read -r name ref || [ -n "$name" ]; do
+    case "$name" in '' | \#*) continue ;; esac
+    case "$name" in
+      # An invalid identifier makes `export` return non-zero; under set -e that would
+      # abort the script before `exec` and restart-loop the whole service.
+      [!A-Za-z_]* | *[!A-Za-z0-9_]*)
+        echo "wordink-gateway-run: '$name' is not a valid environment name; line skipped" >&2
+        continue ;;
+      # Names that steer this runtime or redirect the config/state the exec'd serve reads
+      # are refused rather than populated with a key.
+      NODE_OPTIONS | LD_* | PATH | HOME | SHELL | IFS | ENV | BASH_ENV | CDPATH | XDG_*)
+        echo "wordink-gateway-run: refusing to set $name from the key map; line skipped" >&2
+        continue ;;
+    esac
+    service=${ref%%/*}
+    account=${ref#*/}
+    if value=$(omaseal get "$service" "$account" 2>/dev/null); then
+      value=$(printf '%s' "$value" | tr -d '[:space:]')
+      export "$name=$value"
+    else
+      echo "wordink-gateway-run: omaseal has no $service/$account for $name; that provider is skipped" >&2
+    fi
+  done < "$MAP"
+fi
+
+exec "$BIN" serve "$@"
