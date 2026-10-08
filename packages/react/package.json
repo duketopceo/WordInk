@@ -1,6 +1,6 @@
 {
   "name": "@wordink/react",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "React bindings for WordInk dictation: the useDictation hook and a typed <WordInkMic> wrapper for <wordink-mic>.",
   "license": "MIT",
   "homepage": "https://duketopceo.github.io/WordInk/",
