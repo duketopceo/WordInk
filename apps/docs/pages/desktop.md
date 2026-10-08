@@ -1,6 +1,6 @@
 # Desktop apps
 
-WordInk doesn't ship its own desktop dictation app. It gives the ones you already use a better backend instead. `@wordink/server` includes a **gateway**: a standard OpenAI-compatible `POST /v1/audio/transcriptions` endpoint that any desktop dictation app can point at.
+WordInk doesn't ship its own desktop dictation app. It gives the ones you already use a better backend instead. `@wordink/server` includes a **gateway**: a standard OpenAI-compatible `POST /v1/audio/transcriptions` endpoint (plus `GET /v1/models` for model pickers) that any desktop dictation app can point at.
 
 What the gateway adds over calling a provider directly:
 
@@ -67,15 +67,26 @@ remote_api_key = "wdk_…"   # your device token, or set VOXTYPE_WHISPER_API_KEY
 
 Move your `initial_prompt` words into the gateway's `vocabulary` so every app shares them. The gateway caps the combined prompt at 800 characters, with gateway vocabulary first.
 
+## TypeWhisper (macOS, Windows, iOS)
+
+TypeWhisper's bundled **OpenAI Compatible** engine talks to the gateway directly — no WordInk plugin is needed or planned.
+
+In Settings, add an **OpenAI Compatible** transcription engine:
+
+- **Base URL:** `http://127.0.0.1:8941` — with **no `/v1`** at the end. TypeWhisper appends `/v1/audio/transcriptions` itself; a `/v1` in the base URL produces 404s. For a gateway on another machine, use its LAN or Tailscale address — which needs `host` and `allowInsecureRemote` set on the gateway, behind TLS only.
+- **API key:** your device token.
+- **Model:** pick from the discovered list — the gateway answers `GET /v1/models` with the models it will actually call — or type a name manually. The gateway picks the provider per request; the model name is just a label for the profile. Leave the transport on Auto (these model names all resolve to batch); do not enter `gpt-live-transcribe` or `gpt-realtime-whisper`, which would force a realtime WebSocket transport the gateway does not serve.
+- **Translate mode:** unsupported. The gateway only implements `/v1/audio/transcriptions` — there is no `/v1/audio/translations`, and Deepgram has no translations endpoint to fall back to.
+
+Compatibility was verified against the TypeWhisper plugin source (macOS and Windows share it; iOS gained the same custom-endpoint profile shape in 0.3.0). Live dictation on TypeWhisper hardware is still on the operator checklist — this workspace has no macOS, Windows, or iOS device.
+
 ## Other apps
 
 Any app with an "OpenAI-compatible" or "custom endpoint" transcription setting works:
 
-- **Base URL:** `http://127.0.0.1:8941/v1`, or `http://127.0.0.1:8941` if the app adds `/v1` itself.
+- **Base URL:** `http://127.0.0.1:8941/v1`, or `http://127.0.0.1:8941` if the app adds `/v1` itself (TypeWhisper does — see above).
 - **API key:** your device token.
-- **Model:** any value. The gateway picks the model per provider.
-
-A dedicated TypeWhisper plugin is planned.
+- **Model:** any value, or pick from `GET /v1/models`. The gateway picks the model per provider.
 
 ## Tokens
 
@@ -88,7 +99,9 @@ Tokens are stored hashed in `~/.local/state/wordink/gateway-tokens.json` (mode 0
 
 ## Responses
 
-The gateway answers in OpenAI's shapes:
+Two endpoints share the device-token gate and per-token rate limit: `POST /v1/audio/transcriptions` and `GET /v1/models` (the OpenAI list shape — each configured provider's effective model, de-duplicated, so apps with model discovery can populate their picker).
+
+Transcription answers use OpenAI's shapes:
 
 - `json` returns `{"text": "…"}`. This is the default.
 - `text` returns plain text.

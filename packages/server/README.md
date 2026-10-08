@@ -138,7 +138,7 @@ The built-in limiter is in memory: per process on Node, per isolate on Workers. 
 
 ## Desktop gateway
 
-`gateway` adds an OpenAI-compatible batch endpoint for desktop dictation apps — Voxtype's remote mode, TypeWhisper, or anything that accepts a custom OpenAI-audio base URL. When configured, the relay also serves `POST {basePath}/v1/audio/transcriptions`; when it isn't, that path 404s like any other, and the browser routes above are unchanged.
+`gateway` adds an OpenAI-compatible batch endpoint for desktop dictation apps — Voxtype's remote mode, TypeWhisper's bundled OpenAI Compatible engine, or anything that accepts a custom OpenAI-audio base URL. When configured, the relay also serves `POST {basePath}/v1/audio/transcriptions` and `GET {basePath}/v1/models` (the OpenAI list shape: each provider entry's effective model, so clients with model discovery populate their picker); when it isn't, those paths 404 like any other, and the browser routes above are unchanged.
 
 ```ts
 import { createRelay } from "@wordink/server";
