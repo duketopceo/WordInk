@@ -1,6 +1,6 @@
 {
   "name": "@wordink/server",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Fail-closed credential relay for WordInk: forwards Groq audio and mints short-lived OpenAI and Deepgram credentials so provider keys never reach the browser.",
   "license": "MIT",
   "homepage": "https://duketopceo.github.io/WordInk/",
