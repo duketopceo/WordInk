@@ -1,0 +1,15 @@
+[Unit]
+Description=WordInk gateway: OpenAI-compatible transcription with provider fallback (127.0.0.1:8941)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+ExecStart=%h/.local/bin/wordink-gateway-run
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

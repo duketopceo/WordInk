@@ -1,0 +1,9 @@
+{"type":"session.created","event_id":"event_A1","session":{"type":"transcription","object":"realtime.transcription_session","id":"sess_001","audio":{"input":{"format":{"type":"audio/pcm","rate":24000},"noise_reduction":null,"transcription":{"model":"gpt-live-transcribe","language":null,"prompt":""},"turn_detection":{"type":"server_vad","threshold":0.5,"prefix_padding_ms":300,"silence_duration_ms":500}}},"include":null}}
+{"type":"session.updated","event_id":"event_A2","session":{"type":"transcription","object":"realtime.transcription_session","id":"sess_001","audio":{"input":{"format":{"type":"audio/pcm","rate":24000},"noise_reduction":null,"transcription":{"model":"gpt-live-transcribe","language":null,"prompt":"WordInk, Omarchy"},"turn_detection":null}},"include":null}}
+{"type":"input_audio_buffer.committed","event_id":"event_A3","previous_item_id":null,"item_id":"item_001"}
+{"type":"conversation.item.added","event_id":"event_A4","previous_item_id":null,"item":{"id":"item_001","object":"realtime.item","type":"message","status":"completed","role":"user","content":[{"type":"input_audio","transcript":null}]}}
+{"type":"conversation.item.input_audio_transcription.delta","event_id":"event_A5","item_id":"item_001","content_index":0,"delta":"Hello"}
+{"type":"conversation.item.input_audio_transcription.delta","event_id":"event_A6","item_id":"item_001","content_index":0,"delta":" world,"}
+{"type":"conversation.item.input_audio_transcription.delta","event_id":"event_A7","item_id":"item_001","content_index":0,"delta":" how are \"you\"?"}
+{"type":"conversation.item.input_audio_transcription.delta","event_id":"event_A8","item_id":"item_001","content_index":0,"delta":" Café."}
+{"type":"conversation.item.input_audio_transcription.completed","event_id":"event_A9","item_id":"item_001","content_index":0,"transcript":"Hello world, how are \"you\"? Café."}

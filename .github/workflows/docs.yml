@@ -1,0 +1,53 @@
+# Docs: build apps/docs and deploy it to GitHub Pages at https://duketopceo.github.io/WordInk/.
+#
+# One-time setup: in the repository's Settings > Pages, set Source to "GitHub Actions".
+# Until then the deploy job fails; the build job still checks that the site builds.
+name: Docs
+on:
+  push: { branches: [master] }
+  workflow_dispatch:
+concurrency:
+  group: pages
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The docs bundle @wordink/web and @wordink/core, so the core wasm is built first, with the
+      # same toolchain as CI.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      # Must match the exact wasm-bindgen version pinned in crates/wordink-wasm/Cargo.toml.
+      - uses: taiki-e/install-action@v2
+        with: { tool: wasm-bindgen@0.2.129 }
+      - name: Install binaryen (wasm-opt)
+        run: |
+          curl -sSfL https://github.com/WebAssembly/binaryen/releases/download/version_130/binaryen-version_130-x86_64-linux.tar.gz | tar xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_130/bin" >> "$GITHUB_PATH"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # Builds the packages (the CDN bundle's SRI hash is computed from it), then the site.
+      - run: pnpm --filter "@wordink/docs^..." build
+      - run: pnpm --filter @wordink/docs exec vite build --base=/WordInk/
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: apps/docs/dist }
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

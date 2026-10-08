@@ -12,7 +12,8 @@ venv/
 
 # Environment and config
 .env
-config.json
+/config.json
+/legacy/config.json
 
 # Application data
 *.log
@@ -20,3 +21,13 @@ config.json
 recordings/
 .DS_Store
 Thumbs.db
+
+# Rust
+target/
+
+# Node
+node_modules/
+*.tsbuildinfo
+.turbo/
+packages/*/dist/
+apps/*/dist/

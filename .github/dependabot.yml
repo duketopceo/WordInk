@@ -1,8 +1,23 @@
 version: 2
 updates:
   - package-ecosystem: pip
-    directory: /
+    directory: /legacy
     schedule: { interval: weekly }
     groups:
       python-deps:
         patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      rust-deps:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      npm-deps:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }

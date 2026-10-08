@@ -1,0 +1,12 @@
+{
+  "name": "@wordink/example-server-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx wrangler dev",
+    "deploy": "npx wrangler deploy"
+  },
+  "dependencies": {
+    "@wordink/server": "workspace:*"
+  }
+}

@@ -1,0 +1,95 @@
+# Release: Changesets version PRs and npm publishing with trusted publishing (OIDC) and provenance.
+#
+# On every push to master:
+#   1. `version` runs changesets/action. While .changeset/*.md files are pending it opens (or
+#      updates) the "Version Packages" PR, which bumps versions and writes each CHANGELOG.md.
+#   2. `publish` runs only when nothing is pending, i.e. after that PR is merged. It builds the
+#      packages (including the core wasm) and runs `changeset publish`, which publishes every
+#      package whose version is not yet on npm and tags it. Re-running it is harmless: versions
+#      already on the registry are skipped.
+#
+# No npm token is stored anywhere. npm exchanges this workflow's GitHub OIDC token for a
+# short-lived publish credential and attaches a provenance attestation. That needs a one-time
+# setup on npmjs.com by the owner of the @wordink scope:
+#   - Create the `wordink` npm organization, so the `@wordink` scope exists (KTD9). If the scope
+#     can't be had, rename the packages to the unscoped fallbacks `wordink-core`, `wordink-web`,
+#     `wordink-react`, `wordink-local` and `wordink-server` (and update the docs and READMEs).
+#   - Trusted publishing is configured per package, and npm only offers it for packages that
+#     already exist. For each of @wordink/core, web, react, local and server: either publish a
+#     first version by hand (`npm publish --access public` from a local build), or create it
+#     with npm's placeholder flow; then open the package's Settings > Trusted publishing and add
+#     a GitHub Actions publisher: owner `duketopceo`, repository `WordInk`, workflow
+#     `release.yml`, no environment.
+#   - Then set each package's Publishing access to "Require two-factor authentication and
+#     disallow tokens", so only this workflow can publish.
+name: Release
+on:
+  push: { branches: [master] }
+concurrency:
+  group: release
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      hasChangesets: ${{ steps.changesets.outputs.hasChangesets }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # No `publish` input: this job only opens the version PR. Publishing is the job below,
+      # so the OIDC permission never reaches this step.
+      - id: changesets
+        uses: changesets/action@v1
+        with:
+          title: "chore: version packages"
+          commit: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    needs: version
+    if: needs.version.outputs.hasChangesets == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the release tags
+      id-token: write # npm trusted publishing (OIDC) and provenance
+    steps:
+      - uses: actions/checkout@v4
+      # The same wasm toolchain as CI (.github/workflows/ci.yml): the core package ships the
+      # wasm-bindgen output, built with wasm-opt.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      # Must match the exact wasm-bindgen version pinned in crates/wordink-wasm/Cargo.toml.
+      - uses: taiki-e/install-action@v2
+        with: { tool: wasm-bindgen@0.2.129 }
+      - name: Install binaryen (wasm-opt)
+        run: |
+          curl -sSfL https://github.com/WebAssembly/binaryen/releases/download/version_130/binaryen-version_130-x86_64-linux.tar.gz | tar xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_130/bin" >> "$GITHUB_PATH"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or later (pnpm hands the actual publish to npm).
+      - run: npm install -g npm@^11.5.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - name: Publish to npm
+        run: pnpm exec changeset publish
+        env:
+          NPM_CONFIG_PROVENANCE: "true"
+      - name: Push release tags
+        run: git push origin --tags

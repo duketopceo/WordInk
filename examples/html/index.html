@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WordInk: plain HTML</title>
+    <!--
+      No build step: one module script. From npm via a CDN this is
+      <script type="module" src="https://cdn.jsdelivr.net/npm/@wordink/web/dist/wordink-web.cdn.js"></script>
+      Here it loads the local build (run `pnpm build` first). The core wasm is fetched from beside the script.
+    -->
+    <script type="module" src="../../packages/web/dist/wordink-web.cdn.js"></script>
+    <style>
+      body { font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }
+      textarea { box-sizing: border-box; width: 100%; font: inherit; padding: 0.5rem; }
+      .row { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.5rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Dictate into a textarea</h1>
+    <label for="message">Message</label>
+    <textarea id="message" rows="5" placeholder="Hold the mic and speak…"></textarea>
+    <div class="row">
+      <!-- endpoint: your @wordink/server relay (it keeps the provider key off the page). -->
+      <wordink-mic for="message" provider="groq" endpoint="/api/wordink" shortcut="Alt+D"></wordink-mic>
+      <span>Hold the button, or hold <kbd>Alt</kbd>+<kbd>D</kbd>, while you speak.</span>
+    </div>
+  </body>
+</html>

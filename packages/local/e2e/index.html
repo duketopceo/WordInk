@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WordInk local e2e</title>
+  </head>
+  <body>
+    <script type="module">
+      import { createLocalProvider, DEFAULT_REVISION, DEFAULT_SHA256, MODEL_ID } from "/e2e/.build/index.js";
+
+      // By default model files come through the server's caching Hub proxy (the self-hosting path),
+      // checked against the pinned checksums; the onnxruntime-web runtime is served locally too.
+      //   ?hub     the package defaults: model straight from huggingface.co at the pinned revision
+      //   ?badsum  a wrong expected checksum for the encoder
+      const params = new URLSearchParams(location.search);
+      const options = { wasmPaths: "/ort/" };
+      if (!params.has("hub")) options.modelBaseUrl = `/hf/${MODEL_ID}/resolve/${DEFAULT_REVISION}/`;
+      if (params.has("badsum")) {
+        options.sha256 = { ...DEFAULT_SHA256, "onnx/encoder_model_quantized.onnx": "0".repeat(64) };
+      }
+      const provider = createLocalProvider(options);
+      const events = { progress: [], ready: [], error: [] };
+      provider.on("progress", (p) => events.progress.push(p));
+      provider.on("ready", (r) => events.ready.push(r));
+      provider.on("error", (e) => events.error.push(e.message));
+
+      /** Mono PCM16 samples of a RIFF/WAVE file. */
+      async function wavSamples(url) {
+        const buf = await (await fetch(url)).arrayBuffer();
+        const view = new DataView(buf);
+        let at = 12;
+        while (at < view.byteLength) {
+          const id = String.fromCharCode(...new Uint8Array(buf, at, 4));
+          const size = view.getUint32(at + 4, true);
+          if (id === "data") return new Int16Array(buf.slice(at + 8, at + 8 + size));
+          at += 8 + size + (size & 1);
+        }
+        throw new Error("no data chunk");
+      }
+
+      const fixture = wavSamples("/test/fixtures/hello-world.wav");
+
+      /** One batch utterance through the HostProvider contract, as @wordink/core drives it. */
+      async function dictate() {
+        const pcm = await fixture;
+        const result = new Promise((resolve) => {
+          const off = provider.onResult((r) => {
+            off();
+            resolve(r);
+          });
+        });
+        await provider.start(16000);
+        await provider.pushAudio(pcm);
+        await provider.finish();
+        return result;
+      }
+
+      window.local = {
+        events,
+        load: () => provider.load(),
+        dictate,
+        hasGpu: () => Boolean(navigator.gpu),
+      };
+    </script>
+  </body>
+</html>
