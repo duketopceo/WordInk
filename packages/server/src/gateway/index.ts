@@ -194,7 +194,7 @@ function modelsList(providers: readonly ResolvedEntry[]): string {
   const data: { id: string; object: string; created: number; owned_by: string }[] = [];
   for (const entry of providers) {
     const id = entry.model ?? DEFAULT_MODELS[entry.provider];
-    if (seen.has(id)) continue;
+    if (!id || seen.has(id)) continue;
     seen.add(id);
     data.push({ id, object: "model", created: 0, owned_by: "wordink" });
   }

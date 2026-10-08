@@ -75,7 +75,7 @@ In Settings, add an **OpenAI Compatible** transcription engine:
 
 - **Base URL:** `http://127.0.0.1:8941` — with **no `/v1`** at the end. TypeWhisper appends `/v1/audio/transcriptions` itself; a `/v1` in the base URL produces 404s. For a gateway on another machine, use its LAN or Tailscale address — which needs `host` and `allowInsecureRemote` set on the gateway, behind TLS only.
 - **API key:** your device token.
-- **Model:** pick from the discovered list — the gateway answers `GET /v1/models` with the models it will actually call — or type a name manually. The gateway picks the provider per request; the model name is just a label for the profile. Leave the transport on Auto (these model names all resolve to batch); do not enter `gpt-live-transcribe` or `gpt-realtime-whisper`, which would force a realtime WebSocket transport the gateway does not serve.
+- **Model:** pick from the discovered list — the gateway answers `GET /v1/models` with each provider entry's configured model — or type a name manually. The gateway picks the provider per request; the model name is just a label for the profile. Leave the transport on Auto (these model names all resolve to batch); do not enter `gpt-live-transcribe` or `gpt-realtime-whisper`, which would force a realtime WebSocket transport the gateway does not serve.
 - **Translate mode:** unsupported. The gateway only implements `/v1/audio/transcriptions` — there is no `/v1/audio/translations`, and Deepgram has no translations endpoint to fall back to.
 
 Compatibility was verified against the TypeWhisper plugin source (macOS and Windows share it; iOS gained the same custom-endpoint profile shape in 0.3.0). Live dictation on TypeWhisper hardware is still on the operator checklist — this workspace has no macOS, Windows, or iOS device.
@@ -113,7 +113,7 @@ Errors use OpenAI's error shape:
 |---|---|
 | 400 | Malformed request: missing `file`, unsupported `response_format`, or a non-multipart body |
 | 401 | Unknown or revoked token |
-| 405 | Method other than POST on the route (`Allow: POST` is returned) |
+| 405 | Wrong method on a route (`Allow: POST` for transcriptions, `Allow: GET` for `/v1/models`) |
 | 413 | Audio too large (25 MB by default) |
 | 429 | Rate limit for this device |
 | 502 | Every provider failed |

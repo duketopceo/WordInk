@@ -573,8 +573,11 @@ describe("GET /v1/models", () => {
   });
 
   it("shares the per-token rate limiter with transcriptions", async () => {
+    on(GROQ_KEY_A, ok("hi"));
     const handler = relay({ rateLimit: { windowMs: 60_000, max: 1, dailyMax: Number.POSITIVE_INFINITY } });
-    expect((await handler(get("/v1/models"))).status).toBe(200);
+    // A transcription spends the token's whole budget; the next models call 429s — the
+    // same limiter instance, not a per-route one.
+    expect((await handler(post())).status).toBe(200);
     const res = await handler(get("/v1/models"));
     await expectOpenAIError(res, 429, "rate_limit_exceeded", "rate_limit_exceeded");
     expect(res.headers.get("retry-after")).toEqual(expect.any(String));

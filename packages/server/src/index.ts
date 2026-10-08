@@ -74,9 +74,10 @@ export interface RelayConfig {
   upstreamTimeoutMs?: number;
   /**
    * Optional desktop gateway: serve `POST {basePath}/v1/audio/transcriptions`, the OpenAI
-   * audio-transcription shape that apps like Voxtype and TypeWhisper already speak (KTD1). The
-   * route authenticates `Bearer` device tokens through `gateway.tokenStore`; the browser `authorize`
-   * and Origin checks do not apply to it. When absent, the path 404s like any other (R11).
+   * audio-transcription shape that apps like Voxtype and TypeWhisper already speak (KTD1), plus
+   * `GET {basePath}/v1/models` for model discovery. The routes authenticate `Bearer` device
+   * tokens through `gateway.tokenStore`; the browser `authorize` and Origin checks do not apply
+   * to them. When absent, the paths 404 like any other (R11).
    */
   gateway?: GatewayConfig | undefined;
 }
