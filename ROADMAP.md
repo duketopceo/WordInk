@@ -13,10 +13,10 @@ Detailed plans: [`docs/plans/2026-10-04-1757-feat-wordink-web-sdk-plan.md`](docs
 | Phase | What ships | Status |
 |---|---|---|
 | **0. Foundation** | Repo cleanup: archive the legacy Python app under `legacy/`, monorepo tooling, CI, positioning | Done (PRs #16–#17) |
-| **1. Core + Web SDK** | `@wordink/core` (provider-agnostic engine), `<wordink-mic>` web component, `useDictation` React hook, Groq/OpenAI/Deepgram + local engine, reference credential server, docs site with live demo | Built (PRs #18–#27); closeout in progress — npm publish and Pages pending |
-| **2. Desktop** | Integrate with existing apps: `wordink-gateway`, an OpenAI-compatible transcription endpoint with provider fallback and per-device tokens. Voxtype on Linux verified; TypeWhisper plugin next | Decided: Option A — gateway shipped (PR #27) |
+| **1. Core + Web SDK** | `@wordink/core` (provider-agnostic engine), `<wordink-mic>` web component, `useDictation` React hook, Groq/OpenAI/Deepgram + local engine, reference credential server, docs site with live demo | Done — merged to master; docs live on Pages; npm publish gated on org setup |
+| **2. Desktop** | Integrate with existing apps: `wordink-gateway`, an OpenAI-compatible transcription endpoint with provider fallback and per-device tokens. Voxtype on Linux verified; TypeWhisper via its bundled OpenAI-compatible engine + `GET /v1/models` | Done — gateway + docs + `/v1/models` shipped |
 | **3. WordInk Desktop: Windows + macOS** | Was contingent on Phase 2 picking a standalone app | Dropped — Phase 2 chose integration |
-| **4. More SDKs** | Python SDK for agents and CLIs; then mobile (React Native / native) based on demand | Exploring |
+| **4. More SDKs** | Python tooling for agents and CLIs: `wordink` CLI + `wordink-mcp` MCP server over the gateway (`sdks/python`); then mobile (React Native / native) based on demand | Built |
 
 ### Phase 2 decision (Oct 2026)
 
