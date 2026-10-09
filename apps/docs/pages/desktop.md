@@ -78,7 +78,7 @@ In Settings, add an **OpenAI Compatible** transcription engine:
 - **Model:** pick from the discovered list — the gateway answers `GET /v1/models` with each provider entry's configured model — or type a name manually. The gateway picks the provider per request; the model name is just a label for the profile. Leave the transport on Auto (these model names all resolve to batch); do not enter `gpt-live-transcribe` or `gpt-realtime-whisper`, which would force a realtime WebSocket transport the gateway does not serve.
 - **Translate mode:** unsupported. The gateway only implements `/v1/audio/transcriptions` — there is no `/v1/audio/translations`, and Deepgram has no translations endpoint to fall back to.
 
-Compatibility was verified against the TypeWhisper plugin source (macOS and Windows share it; iOS gained the same custom-endpoint profile shape in 0.3.0). Live dictation on TypeWhisper hardware is still on the operator checklist — this workspace has no macOS, Windows, or iOS device.
+Live-verified on Windows: TypeWhisper 1.0.9 (Windows 11 ARM, `openai-compatible` plugin 1.0.6) transcribed through the gateway end to end — `POST /v1/transcribe` returned `{"text":"Hello, world","engine":"openai-compatible","model":"whisper-large-v3-turbo"}` via the gateway's provider fallback. Compatibility for macOS and iOS rests on the shared plugin source (iOS gained the same custom-endpoint profile shape in 0.3.0); dictation on Apple hardware is still on the operator checklist.
 
 ## Other apps
 
