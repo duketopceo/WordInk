@@ -15,6 +15,7 @@ server = MCPServer("wordink")
 
 
 @server.tool(
+    name="transcribe",
     description=(
         "Transcribe a local audio file via the wordink-gateway "
         "(OpenAI-compatible; provider fallback and shared vocabulary apply "
@@ -42,7 +43,7 @@ async def transcribe_tool(
         return f"wordink: {exc}"
 
 
-@server.tool(description="List the transcription models the gateway serves.")
+@server.tool(name="list_models", description="List the transcription models the gateway serves.")
 async def list_models_tool() -> str:
     try:
         models = await asyncio.to_thread(list_models)
