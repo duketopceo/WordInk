@@ -94,12 +94,12 @@ The state is reflected as `data-state` on the element (`idle`, `requesting-mic`,
 
 | Property | Default |
 |---|---|
-| `--wordink-accent` | `#4f46e5` |
+| `--wordink-accent` | `#0a6b73` |
 | `--wordink-size` | `2.5rem` (button) |
 | `--wordink-bg`, `--wordink-icon` | `#fff`, accent |
 | `--wordink-active-bg`, `--wordink-active-icon` | accent, `#fff` (while listening) |
 | `--wordink-border`, `--wordink-radius` | accent-tinted 1px, `999px` |
-| `--wordink-error` | `#dc2626` |
+| `--wordink-error` | `#b42318` |
 | `--wordink-meter-width`, `--wordink-meter-height` | `3em`, `0.35em` |
 | `--wordink-meter-track`, `--wordink-meter-fill` | tinted text color, accent |
 | `--wordink-font`, `--wordink-text`, `--wordink-status-size` | inherit, inherit, `0.875em` |

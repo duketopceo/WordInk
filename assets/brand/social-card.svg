@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-label="WordInk: dictation as a component">
+  <title>WordInk social card (proposal)</title>
+  <rect width="1280" height="640" fill="#0B0E12"/>
+  <g transform="translate(96 120) scale(2.6)">  <rect x="5" y="11" width="4" height="10" rx="2" fill="#E8ECEF"/>
+  <rect x="23" y="11" width="4" height="10" rx="2" fill="#E8ECEF"/>
+  <path d="M14 6a2 2 0 0 1 4 0v14l-2 8-2-8z" fill="#4FD1C5" stroke="#4FD1C5" stroke-linejoin="round" stroke-width="0.5"/></g>
+  <g transform="translate(96 330) scale(4)">  <g fill="none" stroke="#E8ECEF" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 4L8.5 28L14 12L19.5 28L26 4"/>
+    <ellipse cx="38" cy="20" rx="7.5" ry="8"/>
+    <path d="M52 28V12M52 19C52 14 56 12 61 12"/>
+    <circle cx="72" cy="20" r="8"/><path d="M80 4V28"/>
+    <path d="M92 4V28M87.5 4H96.5M87.5 28H96.5"/>
+    <path d="M102 28V12M102 19C102 14 106 12 110 12C115 12 117 15 117 19V28"/>
+    <path d="M127 4V28M139 12L127 22M131.5 19L140 28"/>
+  </g></g>
+  <g fill="none" stroke="#4FD1C5" stroke-width="6" stroke-linecap="round"><path d="M96 450h120"/></g>
+</svg>

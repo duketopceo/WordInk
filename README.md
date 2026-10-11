@@ -1,16 +1,25 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/lockup-dark.svg">
+    <img src="assets/brand/lockup.svg" alt="WordInk" height="48">
+  </picture>
+</p>
+
 # WordInk
 
-**Dictation as a component.** WordInk is an open-source, provider-agnostic dictation engine that turns speech into finished text. It ships as a drop-in SDK for any web app first, and later as a standalone dictation app for Linux, Omarchy, Windows and macOS.
+**Dictation as a component.** An open-source, provider-agnostic engine that turns speech into finished text: a drop-in `<wordink-mic>` for any web app, and an OpenAI-compatible gateway so desktop dictation apps can use your keys and fallback rules.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **Status: pre-release.** The Phase 1 Web SDK is built and on its way to its first npm release. See [ROADMAP.md](ROADMAP.md) and the [Phase 1 plan](docs/plans/2026-10-04-1757-feat-wordink-web-sdk-plan.md). The original Windows dictation app still works and lives in [`legacy/`](legacy/).
+> **Status: pre-release.** The Web SDK, relay, gateway and Python tooling are merged to `master` and the docs site is live. Nothing is published to npm yet. See [ROADMAP.md](ROADMAP.md) and the [program plan](docs/plans/2026-10-10-001-docs-wordink-program-plan.md). The original Windows dictation app lives in [`legacy/`](legacy/).
+
+> Logo and brand assets in [`assets/brand/`](assets/brand/) are a proposal pending owner sign-off; see [DESIGN.md](DESIGN.md).
 
 **Docs and live demo: <https://duketopceo.github.io/WordInk/>**
 
 ## Quickstart
 
-Plain HTML, no build step:
+The packages are not on npm yet (see Status), so the CDN URL below becomes valid after the first release. Plain HTML, no build step:
 
 ```html
 <textarea id="message"></textarea>
@@ -47,6 +56,23 @@ import { WordInkMic } from "@wordink/react";
 | [`@wordink/local`](packages/local) | Offline speech recognition in the browser (Moonshine) |
 | [`@wordink/server`](packages/server) | Fail-closed credential relay for Cloudflare Workers and Node |
 
+## How it works
+
+```mermaid
+flowchart LR
+  A["Browser: wordink-mic"] -->|audio| B["@wordink/server relay (holds the key)"]
+  A -.->|offline| L["@wordink/local (Moonshine)"]
+  B --> P["Groq / OpenAI / Deepgram"]
+  D["Desktop app (e.g. Voxtype)"] -->|POST /v1/audio/transcriptions| G["wordink-gateway: tokens, fallback, vocabulary"]
+  G --> P
+```
+
+The Rust core (`crates/wordink-core`) does no I/O: it takes events and emits effects, and a host (the TypeScript browser host today) performs the I/O. The core compiles to WebAssembly at about 35 KB gzip (budget 150 KB). The gateway is a second, separate trust boundary: browsers authenticate to the relay with cookies and an Origin check, devices authenticate to the gateway with revocable bearer tokens.
+
+![The docs demo: a text area and the push-to-talk `<wordink-mic>` button, idle](docs/screenshots/demo.png)
+
+The docs demo in its idle state (static capture; a recording of dictation is still to do). The live demo is at the docs link above.
+
 ## Repository layout
 
 | Path | What |
@@ -57,7 +83,9 @@ import { WordInkMic } from "@wordink/react";
 | `apps/docs` | The docs site and live demo (deployed to GitHub Pages) |
 | `examples/*` | Plain HTML, React and relay examples |
 | `legacy/` | The original Python/Windows dictation app (groq_flow lineage) |
-| `docs/plans/` | Product and implementation plans |
+| `docs/plans/`, `docs/research/` | Plans, the program roadmap and landscape research |
+| `sdks/python` | `wordink` CLI and `wordink-mcp` server |
+| `assets/brand/` | Logo, wordmark and glyph proposals |
 
 ## Develop
 
@@ -79,6 +107,18 @@ uv sync
 uv run wordink --onboard   # setup wizard at http://localhost:18981
 uv run wordink             # tray daemon
 ```
+
+## Python and agents
+
+`sdks/python` provides a `wordink` CLI (`transcribe`, `dictate`) and a `wordink-mcp` MCP server (`transcribe`, `list_models`) over the gateway. See [sdks/python/README.md](sdks/python/README.md).
+
+## Contributing
+
+Work on a branch, one PR per roadmap unit; `master` requires a PR and one review and is squash-only. Add a changeset (`pnpm changeset`) for any change to a published package. Read [AGENTS.md](AGENTS.md) for the architecture invariants (no I/O in the core, keys never in the browser, no telemetry).
+
+## License
+
+MIT, see [LICENSE](LICENSE).
 
 ## Credits
 

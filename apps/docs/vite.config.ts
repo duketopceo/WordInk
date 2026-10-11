@@ -36,6 +36,9 @@ function expandIncludes(md: string, r: Release): string {
   });
 }
 
+/** The proposal mark (assets/brand/logo.svg): bars follow the text colour, the nib the accent. */
+const MARK = `<svg class="mark" viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><rect x="5" y="11" width="4" height="10" rx="2"/><rect x="23" y="11" width="4" height="10" rx="2"/><path class="nib" d="M14 6a2 2 0 0 1 4 0v14l-2 8-2-8z" stroke-linejoin="round" stroke-width="0.5"/></svg>`;
+
 function layout(slug: string, body: string, rel: Release): string {
   const page = PAGES.find((p) => p.slug === slug);
   if (!page) throw new Error(`No docs page "${slug}" in site.ts`);
@@ -53,12 +56,15 @@ function layout(slug: string, body: string, rel: Release): string {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${page.title}</title>
     <meta name="description" content="WordInk: open-source, provider-agnostic push-to-talk dictation for any web app." />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <meta name="theme-color" content="#0b0e12" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f8f9fa" media="(prefers-color-scheme: light)" />
     <link rel="stylesheet" href="/src/style.css" />
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
     <header class="top">
-      <a class="brand" href="./">WordInk</a>
+      <a class="brand" href="./">${MARK}<span>WordInk</span></a>
       <a class="gh" href="${REPO_URL}">GitHub</a>
     </header>
     <div class="shell">

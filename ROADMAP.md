@@ -1,5 +1,13 @@
 # WordInk Roadmap
 
+**Program plan (start here):** [`docs/plans/2026-10-10-001-docs-wordink-program-plan.md`](docs/plans/2026-10-10-001-docs-wordink-program-plan.md) — Now / Next / Later units with status, difficulty, feasibility and simpler alternatives, the Phase 2 desktop options (owner decision), and the `WF-WRITE` workflow-permission review. Research: [`docs/research/2026-10-10-landscape.md`](docs/research/2026-10-10-landscape.md). Design: [`DESIGN.md`](DESIGN.md).
+
+**Now:** U1 green `master` CI (e2e demo test failing), U2 npm go-live (operator), U3 reconcile issues and docs, U4 Argus reviewer PR (owner decision). **Next:** U5 live OpenAI/Deepgram checks, U6 browser handcheck, U7 Python SDK CI, U8 retire `legacy/`, U9 desktop direction (owner decision). **Later:** U10 cleanup presets, U11 stronger local engine, U12 mobile, U13 standalone desktop.
+
+**Phase 2 note:** this file records Option A (integrate) as decided and shipped. The program plan lists the remaining desktop options with difficulty and feasibility and leaves any further choice to the owner.
+
+**`WF-WRITE`:** `release.yml` (`version` and `publish` jobs) and `docs.yml` (`deploy`) request write scopes they need. The only optional write scope is `contents: write` in `argus-mention.yml`, which is in open PR #35, not on `master`. Details in the program plan.
+
 **WordInk is dictation as a component.** It's one open-source, provider-agnostic core that turns speech into finished text. It ships as a drop-in SDK for any app, and it reaches the desktop by integrating with the dictation apps people already use (Phase 2).
 
 - **Open source (MIT), bring your own key.** Use Groq, OpenAI or Deepgram with your own key, or a local model. No WordInk account, no WordInk servers.

@@ -4,7 +4,7 @@
  */
 export const STYLES = `
 :host {
-  --_accent: var(--wordink-accent, #4f46e5);
+  --_accent: var(--wordink-accent, #0a6b73);
   --_size: var(--wordink-size, 2.5rem);
   display: inline-flex;
   align-items: center;
@@ -39,7 +39,7 @@ export const STYLES = `
   color: var(--wordink-active-icon, #fff);
 }
 :host([data-state="transcribing"]) [part="button"] { opacity: 0.7; cursor: progress; }
-:host([data-state="error"]) [part="button"] { border-color: var(--wordink-error, #dc2626); color: var(--wordink-error, #dc2626); }
+:host([data-state="error"]) [part="button"] { border-color: var(--wordink-error, #b42318); color: var(--wordink-error, #b42318); }
 [part="meter"] {
   display: block;
   inline-size: var(--wordink-meter-width, 3em);
@@ -61,7 +61,7 @@ export const STYLES = `
 :host([data-state="listening"]) [part="meter"] { visibility: visible; }
 [part="status"] { font-size: var(--wordink-status-size, 0.875em); }
 [part="status"]:empty { display: none; }
-:host([data-state="error"]) [part="status"] { color: var(--wordink-error, #dc2626); }
+:host([data-state="error"]) [part="status"] { color: var(--wordink-error, #b42318); }
 `;
 
 /** A microphone icon (inherits `currentColor`). */
