@@ -69,7 +69,9 @@ flowchart LR
 
 The Rust core (`crates/wordink-core`) does no I/O: it takes events and emits effects, and a host (the TypeScript browser host today) performs the I/O. The core compiles to WebAssembly at about 35 KB gzip (budget 150 KB). The gateway is a second, separate trust boundary: browsers authenticate to the relay with cookies and an Origin check, devices authenticate to the gateway with revocable bearer tokens.
 
-**Screenshot:** TODO. The live demo is at the docs link above; a recorded capture of `<wordink-mic>` in the demo has not been added.
+![The docs demo: a text area and the push-to-talk `<wordink-mic>` button, idle](docs/screenshots/demo.png)
+
+The docs demo in its idle state (static capture; a recording of dictation is still to do). The live demo is at the docs link above.
 
 ## Repository layout
 
