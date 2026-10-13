@@ -1,0 +1,5 @@
+---
+"@wordink/server": minor
+---
+
+The gateway gains a runtime vocabulary API — `GET|POST|DELETE {basePath}/v1/vocabulary` — so agents and operators can add, respell and remove shared ASR hint terms without editing `gateway.json` or restarting. Device tokens grow a scope (`device`|`admin`; admin is a superset that also transcribes): `tokens create --admin <label>` mints the admin token the vocabulary routes require, while a plain `tokens create` keeps minting device tokens. Runtime terms persist with provenance in `$XDG_STATE_HOME/wordink/vocabulary.json` (atomic 0600 file, tombstones for deletes) and join the config `vocabulary` on the next transcription — config terms first, runtime terms in insertion order, with a runtime case-variant acting as a spelling override that stays config-pinned. `VocabularyStore`/`VocabularyStoreError` and `FileVocabularyStore` are exported for embedders (`@wordink/server` and `@wordink/server/node` respectively); `GatewayConfig.vocabularyStore` opts the routes in.

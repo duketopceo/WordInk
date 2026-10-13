@@ -91,11 +91,58 @@ Any app with an "OpenAI-compatible" or "custom endpoint" transcription setting w
 ## Tokens
 
 ```sh
-wordink-gateway tokens list           # id, label, created, revoked (never the token)
+wordink-gateway tokens list           # id, scope, label, created, revoked (never the token)
 wordink-gateway tokens revoke <id>    # takes effect on the device's next request
 ```
 
 Tokens are stored hashed in `~/.local/state/wordink/gateway-tokens.json` (mode 0600).
+
+**Admin tokens.** `wordink-gateway tokens create --admin agent` mints an admin token — a superset credential that transcribes like any device token and additionally reaches the vocabulary routes below. Keep it for agents and operators; a plain `tokens create` device token earns a clean `403` there. `check` and `serve` warn when no live admin token exists.
+
+## Runtime vocabulary
+
+The `vocabulary` array in `gateway.json` is operator-owned and needs a restart to change. The gateway also keeps a **runtime vocabulary** — terms agents add on the fly, persisted to `~/.local/state/wordink/vocabulary.json` (mode 0600) with who-added-it provenance. The two merge per request: config terms first, then runtime terms in insertion order, so a new term reaches the provider on the very next transcription — no restart.
+
+That is the agent correction loop: dictate → the transcript misspells a name → the agent adds the right spelling → the next dictation gets it right, from every app.
+
+```
+GET    /v1/vocabulary   # the effective list: config + runtime, with source/pinned/effective
+POST   /v1/vocabulary   # {"terms": ["Kurultai"]} — add or respell terms
+DELETE /v1/vocabulary   # {"term": "Kurultai"} — remove a runtime term
+```
+
+All three require an **admin token** (`Authorization: Bearer wdk_…`). Every response carries capacity metadata — `prompt_chars` (the packed prompt head against the 800-char budget) and `keyterm_count` (of the 50-keyterm Deepgram slice) — and each term reports `effective: {prompt, keyterm}` so a stored term that fits neither budget is never silently inert.
+
+POST outcomes, per term (matching is always case-folded):
+
+| Outcome | Meaning |
+|---|---|
+| `added` | New runtime term stored. |
+| `already_present` | Exact duplicate of a runtime term — nothing written. |
+| `updated` | Case-variant of a runtime term — the stored spelling was respelled. |
+| `pinned` | Already a config term — nothing stored. |
+| `config_shadowed` | Case-variant of a config term — a runtime *spelling override* was stored. The new casing wins, but the term stays config-owned (undeletable). |
+
+POST also accepts `"remove": ["term", …]` (deletions in the same call — the proxy-safe path for clients that can't send DELETE bodies) and `"dryRun": true` (reports outcomes and post-change capacity without persisting). A batch that would exceed the 200-term runtime cap fails wholly with `409 vocabulary_full`.
+
+DELETE removes runtime terms only: a config term answers `409 term_pinned` (edit `gateway.json`); deleting a runtime spelling override reverts to the config spelling (`reverted_to` in the response).
+
+| Error | When |
+|---|---|
+| `400` | Malformed body: bad JSON, non-array `terms`, empty terms, a term over 200 chars, control characters, more than 200 items |
+| `401 invalid_api_key` | Missing, unknown or revoked token |
+| `403 insufficient_permissions` | A valid device token — vocabulary routes need admin |
+| `404 term_not_found` | DELETE on a term that isn't there |
+| `405` | Wrong method (`Allow: GET, POST, DELETE`) |
+| `409 term_pinned` | DELETE on a config-owned term |
+| `409 vocabulary_full` | The batch would exceed 200 runtime terms — nothing persisted |
+| `413` | Body over 64 KB |
+| `429 rate_limit_exceeded` | Per-token rate limit, shared with transcriptions |
+| `500 server_error` | `vocabulary.json` unreadable — transcriptions keep working on config terms |
+
+Python helpers ship the same surface: `wordink vocab list|add|remove` (resolving `WORDINK_ADMIN_TOKEN`, falling back to `WORDINK_DEVICE_TOKEN`) and the `vocab_*` tools in `wordink-mcp`.
+
+Never add secrets, passwords or sensitive dictated content as terms — every term is sent verbatim to the transcription providers on every call.
 
 ## Responses
 

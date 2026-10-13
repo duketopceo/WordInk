@@ -24,9 +24,12 @@ cd sdks/python && uv sync
 | Flag | Env | Default |
 |---|---|---|
 | `--gateway` | `WORDINK_GATEWAY_URL` | `http://127.0.0.1:8941` |
-| `--token` | `WORDINK_DEVICE_TOKEN` | required — mint with `wordink-gateway token new` |
+| `--token` | `WORDINK_DEVICE_TOKEN` (dictation) / `WORDINK_ADMIN_TOKEN` (vocab) | required — mint with `wordink-gateway tokens create [--admin] <label>` |
 
-The token is read from env/flag only and never logged.
+The token is read from env/flag only and never logged. Dictation calls resolve
+`--token` > `WORDINK_DEVICE_TOKEN` > `WORDINK_ADMIN_TOKEN`; vocabulary calls
+resolve `--token` > `WORDINK_ADMIN_TOKEN` > `WORDINK_DEVICE_TOKEN` (a device
+token earns a clean `403` — the vocabulary routes need admin scope).
 
 ## CLI
 
@@ -36,6 +39,11 @@ wordink transcribe a.wav --language en --prompt "Kurultai, Omarchy"
 wordink dictate                           # mic → Enter/Ctrl-C → transcript
 wordink dictate --seconds 10 | wl-copy    # fixed-length capture to clipboard
 wordink models                            # what the gateway serves
+
+wordink vocab list                        # effective vocabulary (config + runtime), JSON
+wordink vocab add Kurultai Omarchy        # add terms; outcomes per term
+wordink vocab add X --dry-run             # report outcomes without persisting
+wordink vocab remove Kurultai             # remove a runtime term
 ```
 
 ## MCP
@@ -58,7 +66,13 @@ must be set in the host's environment:
 ```
 
 Tools: `transcribe(file_path, language?, prompt?)` → transcript text;
-`list_models()` → the gateway's model ids.
+`list_models()` → the gateway's model ids;
+`vocab_list()` / `vocab_add(terms, dry_run?)` / `vocab_remove(term)` → the
+vocabulary API's JSON responses. The vocab tools need `WORDINK_ADMIN_TOKEN`
+(either env var satisfies the server gate; a device token 403s on vocab calls).
+Use `transcribe(prompt=…)` for one-off corrections and `vocab_add` only for
+terms that recur across sessions — never add secrets or sensitive dictated
+content; terms are sent verbatim to providers on every call.
 
 ## Develop
 

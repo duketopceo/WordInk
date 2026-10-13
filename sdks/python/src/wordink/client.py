@@ -20,21 +20,113 @@ class WordInkError(Exception):
 
 
 def resolve_config(
-    gateway: str | None = None, token: str | None = None
+    gateway: str | None = None, token: str | None = None, *, admin: bool = False
 ) -> tuple[str, str]:
-    """Flag > env > built-in default for the URL; token has no default."""
+    """Flag > env > built-in default for the URL; token has no default.
+
+    Dictation resolves --token > WORDINK_DEVICE_TOKEN > WORDINK_ADMIN_TOKEN;
+    vocabulary calls resolve --token > WORDINK_ADMIN_TOKEN > WORDINK_DEVICE_TOKEN
+    (a device token still works — the gateway answers a clean 403).
+    """
     url = (
         gateway
         or os.environ.get("WORDINK_GATEWAY_URL")
         or DEFAULT_GATEWAY_URL
     ).rstrip("/")
-    tok = token or os.environ.get("WORDINK_DEVICE_TOKEN")
+    scope = "admin" if admin else "device"
+    primary = f"WORDINK_{scope.upper()}_TOKEN"
+    fallback = "WORDINK_DEVICE_TOKEN" if admin else "WORDINK_ADMIN_TOKEN"
+    tok = token or os.environ.get(primary) or os.environ.get(fallback)
     if not tok:
+        flag = " --admin" if admin else ""
         raise WordInkError(
-            "no device token: pass --token or set WORDINK_DEVICE_TOKEN "
-            "(mint one with `wordink-gateway token new`)"
+            f"no {scope} token: pass --token or set {primary} "
+            f"(mint one with `wordink-gateway tokens create{flag} <label>`)"
         )
     return url, tok
+
+
+def _request_json(
+    method: str,
+    path: str,
+    *,
+    json_body: dict | None = None,
+    gateway: str | None = None,
+    token: str | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> dict:
+    """One JSON round-trip against the gateway's admin surfaces (vocabulary)."""
+    url, tok = resolve_config(gateway, token, admin=True)
+    try:
+        with httpx.Client(transport=transport, timeout=30) as http:
+            resp = http.request(
+                method,
+                f"{url}{path}",
+                headers={"Authorization": f"Bearer {tok}"},
+                json=json_body,
+            )
+    except httpx.HTTPError as exc:
+        raise WordInkError(f"request failed: {exc}") from exc
+    if resp.status_code != 200:
+        try:
+            detail = resp.json().get("error", {}).get("message", resp.text)
+        except ValueError:
+            detail = resp.text
+        raise WordInkError(f"{resp.status_code}: {detail}")
+    return resp.json()
+
+
+def vocab_list(
+    *,
+    gateway: str | None = None,
+    token: str | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> dict:
+    """The effective vocabulary: config-pinned terms plus runtime additions.
+
+    Each item carries `source` ("config"|"runtime"), `pinned`, optional
+    `runtimeOverride`, `effective: {prompt, keyterm}` (which merge budgets the
+    term actually reaches) and runtime provenance (`addedBy`, `addedAt`).
+    """
+    return _request_json("GET", "/v1/vocabulary", gateway=gateway, token=token, transport=transport)
+
+
+def vocab_add(
+    terms: list[str],
+    *,
+    remove: list[str] | None = None,
+    dry_run: bool = False,
+    gateway: str | None = None,
+    token: str | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> dict:
+    """Add terms to the runtime vocabulary (or stage deletions via `remove`).
+
+    Returns per-term outcomes: added / already_present / updated (respelled a
+    runtime term) / pinned (already a config term) / config_shadowed (a runtime
+    spelling override on a config term). `dry_run` reports without persisting.
+    """
+    body: dict = {"terms": list(terms)}
+    if remove:
+        body["remove"] = list(remove)
+    if dry_run:
+        body["dryRun"] = True
+    return _request_json("POST", "/v1/vocabulary", json_body=body, gateway=gateway, token=token, transport=transport)
+
+
+def vocab_remove(
+    term: str,
+    *,
+    gateway: str | None = None,
+    token: str | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> dict:
+    """Remove a runtime vocabulary term (case-folded match).
+
+    A `term_pinned` 409 means the term is config-owned in gateway.json; deleting
+    a runtime spelling override reverts to the config spelling (`reverted_to`).
+    """
+    return _request_json("DELETE", "/v1/vocabulary", json_body={"term": term}, gateway=gateway, token=token, transport=transport)
 
 
 def transcribe(

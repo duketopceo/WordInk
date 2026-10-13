@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import sys
 import wave
 from pathlib import Path
 
-from .client import WordInkError, list_models, transcribe
+from .client import WordInkError, list_models, transcribe, vocab_add, vocab_list, vocab_remove
 
 SAMPLE_RATE = 16000
 MIMETYPES = {
@@ -81,12 +82,38 @@ def build_parser() -> argparse.ArgumentParser:
 
     m = sub.add_parser("models", help="list models the gateway serves")
     m.set_defaults(models=True)
+
+    v = sub.add_parser(
+        "vocab",
+        help="manage the gateway's runtime vocabulary (admin token: --token or WORDINK_ADMIN_TOKEN)",
+    )
+    vsub = v.add_subparsers(dest="vocab_cmd", required=True)
+    vsub.add_parser("list", help="list the effective vocabulary (config + runtime)")
+    va = vsub.add_parser("add", help="add terms to the runtime vocabulary")
+    va.add_argument("terms", nargs="+")
+    va.add_argument("--dry-run", action="store_true", help="report outcomes without persisting")
+    vr = vsub.add_parser("remove", help="remove a runtime vocabulary term")
+    vr.add_argument("term")
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.cmd == "vocab":
+            if args.vocab_cmd == "list":
+                resp = vocab_list(gateway=args.gateway, token=args.token)
+            elif args.vocab_cmd == "add":
+                resp = vocab_add(
+                    args.terms,
+                    dry_run=args.dry_run,
+                    gateway=args.gateway,
+                    token=args.token,
+                )
+            else:
+                resp = vocab_remove(args.term, gateway=args.gateway, token=args.token)
+            print(json.dumps(resp, indent=2))
+            return 0
         if args.cmd == "models":
             for m in list_models(gateway=args.gateway, token=args.token):
                 print(m)

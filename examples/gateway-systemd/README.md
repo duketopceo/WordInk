@@ -17,6 +17,7 @@ cp wordink-gateway.service ~/.config/systemd/user/
 wordink-gateway check                     # which providers have keys (never prints them)
 systemctl --user daemon-reload && systemctl --user enable --now wordink-gateway
 wordink-gateway tokens create laptop      # prints the device token once
+wordink-gateway tokens create --admin wisp  # admin token for /v1/vocabulary (optional)
 ```
 
 The service sets a minimal `Environment=PATH=…` that includes `~/.local/bin`; if `wordink-gateway` lives elsewhere, set `WORDINK_GATEWAY_BIN` in a service drop-in.
