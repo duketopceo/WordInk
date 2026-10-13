@@ -194,6 +194,24 @@ describe("tokens", () => {
     expect(again.code).not.toBe(0);
   });
 
+  it("create --admin mints an admin token; the flag never lands inside the label", async () => {
+    const device = await run(["tokens", "create", "laptop"]);
+    expect(device.stdout).toContain("scope=device");
+    const admin = await run(["tokens", "create", "--admin", "agent"]);
+    expect(admin.code).toBe(0);
+    expect(admin.stdout).toContain("scope=admin");
+    const listed = await run(["tokens", "list"]);
+    expect(listed.stdout).toMatch(/device\s+laptop/);
+    expect(listed.stdout).toMatch(/admin\s+agent/);
+
+    const bare = await run(["tokens", "create", "--admin"]);
+    expect(bare.code).toBe(1);
+    const spaced = await run(["tokens", "create", "--admin", "my", "laptop"]);
+    expect(spaced.code).toBe(0);
+    expect(spaced.stdout).toContain('label="my laptop"');
+    expect(spaced.stdout).not.toContain("--admin");
+  });
+
   it("revoke of an unknown id exits non-zero", async () => {
     const r = await run(["tokens", "revoke", "no-such-id"]);
     expect(r.code).not.toBe(0);

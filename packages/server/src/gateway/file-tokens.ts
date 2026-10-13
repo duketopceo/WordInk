@@ -9,6 +9,7 @@ import {
   hashToken,
   type TokenInfo,
   type TokenRecord,
+  type TokenScope,
   type TokenStore,
 } from "./tokens.js";
 
@@ -123,7 +124,7 @@ export class FileTokenStore implements TokenStore {
       if (constantTimeEqualHex(t.hash, hash)) found = t;
     }
     if (!found || found.revokedAt) return null;
-    return { id: found.id, label: found.label };
+    return { id: found.id, label: found.label, scope: found.scope ?? "device" };
   }
 
   /**
@@ -147,24 +148,26 @@ export class FileTokenStore implements TokenStore {
     }
   }
 
-  async create(label: string): Promise<TokenInfo & { token: string }> {
+  async create(label: string, scope: TokenScope = "device"): Promise<TokenInfo & { token: string }> {
     const token = generateToken();
     const entry: StoredToken = {
       id: randomUUID(),
       label,
       hash: await hashToken(token),
       createdAt: new Date().toISOString(),
+      scope,
     };
     await this.mutate((tokens) => [...tokens, entry]);
-    return { id: entry.id, label, token };
+    return { id: entry.id, label, scope, token };
   }
 
   async list(): Promise<TokenRecord[]> {
-    return (await this.load()).map(({ id, label, createdAt, revokedAt }) => ({
+    return (await this.load()).map(({ id, label, createdAt, revokedAt, scope }) => ({
       id,
       label,
       createdAt,
       ...(revokedAt ? { revokedAt } : {}),
+      scope: scope ?? "device",
     }));
   }
 

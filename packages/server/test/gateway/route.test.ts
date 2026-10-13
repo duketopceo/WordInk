@@ -5,6 +5,7 @@ import {
   generateToken,
   hashToken,
   type TokenRecord,
+  type TokenScope,
   type TokenStore,
 } from "../../src/gateway/tokens.js";
 import {
@@ -45,16 +46,17 @@ interface Stored extends TokenRecord {
 class MemoryTokenStore implements TokenStore {
   private readonly records = new Map<string, Stored>();
 
-  async create(label: string) {
+  async create(label: string, scope: TokenScope = "device") {
     const token = generateToken();
     const rec: Stored = {
       id: crypto.randomUUID(),
       label,
       hash: await hashToken(token),
       createdAt: new Date().toISOString(),
+      scope,
     };
     this.records.set(rec.id, rec);
-    return { id: rec.id, label, token };
+    return { id: rec.id, label, scope, token };
   }
 
   async verify(token: string) {
@@ -63,7 +65,7 @@ class MemoryTokenStore implements TokenStore {
     for (const rec of this.records.values()) {
       if (constantTimeEqualHex(rec.hash, hash)) found = rec;
     }
-    return !found || found.revokedAt ? null : { id: found.id, label: found.label };
+    return !found || found.revokedAt ? null : { id: found.id, label: found.label, scope: found.scope ?? "device" };
   }
 
   async list(): Promise<TokenRecord[]> {
@@ -72,6 +74,7 @@ class MemoryTokenStore implements TokenStore {
       label: r.label,
       createdAt: r.createdAt,
       ...(r.revokedAt ? { revokedAt: r.revokedAt } : {}),
+      scope: r.scope ?? "device",
     }));
   }
 

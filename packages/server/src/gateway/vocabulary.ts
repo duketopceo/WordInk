@@ -58,3 +58,30 @@ export function mergePrompt(vocabulary: readonly string[], clientPrompt: string 
 export function keyterms(vocabulary: readonly string[]): string[] {
   return uniqueTerms(vocabulary).slice(0, DEEPGRAM_MAX_KEYTERMS);
 }
+
+/**
+ * The capacity picture the vocabulary API reports (KTD14): which union-order terms actually
+ * pack into the prompt head (`mergePrompt`'s first-fit-break against PROMPT_MAX_CHARS, no
+ * client prompt) and which land in the keyterm slice. `promptChars` is the emitted head's
+ * length, so a term that is stored but inert reports `{prompt:false, keyterm:false}`.
+ */
+export function vocabularyPacking(terms: readonly string[]): {
+  promptChars: number;
+  prompt: boolean[];
+  keyterm: boolean[];
+} {
+  const prompt: boolean[] = [];
+  let head = "";
+  let packing = true; // first-fit-break: once a term does not fit, none after it do
+  for (const term of terms) {
+    const next = head ? `${head}, ${term}` : term;
+    if (packing && next.length <= PROMPT_MAX_CHARS) {
+      head = next;
+      prompt.push(true);
+    } else {
+      packing = false;
+      prompt.push(false);
+    }
+  }
+  return { promptChars: head.length, prompt, keyterm: terms.map((_, i) => i < DEEPGRAM_MAX_KEYTERMS) };
+}
