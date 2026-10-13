@@ -98,10 +98,10 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
       : createMemoryLimiter({ ...DEFAULT_GATEWAY_RATE_LIMIT, ...config.rateLimit });
   const maxBodyBytes = config.maxBodyBytes ?? DEFAULT_GATEWAY_MAX_BODY_BYTES;
 
-  // Shared device gate: Bearer token check, then the per-token budget (KTD9). A spent
+  // Shared gates: Bearer token check, then the per-token budget (KTD9). A spent
   // budget is a 429 in the OpenAI shape with Retry-After — on transcriptions this runs
   // before any body buffering so an over-quota request never holds maxBodyBytes of memory.
-  const authorizeDevice = async (request: Request): Promise<TokenInfo | Response> => {
+  const verifyBearer = async (request: Request): Promise<TokenInfo | Response> => {
     const token = bearerToken(request);
     const device = token === null ? null : await verify(config.tokenStore, token);
     if (device === null) {
@@ -109,6 +109,10 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
         code: "invalid_api_key",
       });
     }
+    return device;
+  };
+
+  const chargeBudget = async (device: TokenInfo, request: Request): Promise<Response | null> => {
     const verdict = await limiter(device.id, request);
     if (verdict !== true) {
       return openaiError(429, "Rate limit reached for this device token.", "rate_limit_exceeded", {
@@ -116,7 +120,13 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
         headers: { "retry-after": String(limiterRetrySeconds(verdict)) },
       });
     }
-    return device;
+    return null;
+  };
+
+  const authorizeDevice = async (request: Request): Promise<TokenInfo | Response> => {
+    const device = await verifyBearer(request);
+    if (device instanceof Response) return device;
+    return (await chargeBudget(device, request)) ?? device;
   };
 
   // The live union resolved once per transcribe() call (KTD10): runtime terms join the
@@ -144,26 +154,14 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
    * never burn transcription budget (R3).
    */
   const authorizeAdmin = async (request: Request): Promise<TokenInfo | Response> => {
-    const token = bearerToken(request);
-    const device = token === null ? null : await verify(config.tokenStore, token);
-    if (device === null) {
-      return openaiError(401, "A valid WordInk device token is required.", "invalid_request_error", {
-        code: "invalid_api_key",
-      });
-    }
+    const device = await verifyBearer(request);
+    if (device instanceof Response) return device;
     if (device.scope !== "admin") {
       return openaiError(403, "This operation requires an admin token (`tokens create --admin`).", "invalid_request_error", {
         code: "insufficient_permissions",
       });
     }
-    const verdict = await limiter(device.id, request);
-    if (verdict !== true) {
-      return openaiError(429, "Rate limit reached for this device token.", "rate_limit_exceeded", {
-        code: "rate_limit_exceeded",
-        headers: { "retry-after": String(limiterRetrySeconds(verdict)) },
-      });
-    }
-    return device;
+    return (await chargeBudget(device, request)) ?? device;
   };
 
   const store = config.vocabularyStore;
@@ -188,8 +186,24 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
     return { packed, prompt_chars: packed.promptChars, keyterm_count: packed.keyterm.filter(Boolean).length };
   };
 
-  const vocabGet = async (): Promise<Response> => {
-    const union = effectiveUnion(configTerms, await store!.list());
+  /** A capped JSON object body, or the OpenAI-shaped error to answer with (R8). */
+  const jsonBody = async (request: Request): Promise<unknown | Response> => {
+    const body = await readCapped(request, VOCAB_MAX_BODY_BYTES);
+    if (body === "too_large") return openaiError(413, "The request body is too large.", "invalid_request_error");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(new TextDecoder().decode(body));
+    } catch {
+      return openaiError(400, "The request body is not valid JSON.", "invalid_request_error");
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return openaiError(400, "The request body must be a JSON object.", "invalid_request_error");
+    }
+    return parsed;
+  };
+
+  const vocabGet = async (store: VocabularyStore): Promise<Response> => {
+    const union = effectiveUnion(configTerms, await store.list());
     const { packed, prompt_chars, keyterm_count } = capacityOf(union);
     const data = union.map((entry, i) => ({
       term: entry.term,
@@ -221,18 +235,9 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
     return cfg === undefined ? { outcome: "removed" } : { outcome: "removed", revertedTo: cfg };
   };
 
-  const vocabPost = async (request: Request, device: TokenInfo): Promise<Response> => {
-    const body = await readCapped(request, VOCAB_MAX_BODY_BYTES);
-    if (body === "too_large") return openaiError(413, "The request body is too large.", "invalid_request_error");
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(new TextDecoder().decode(body));
-    } catch {
-      return openaiError(400, "The request body is not valid JSON.", "invalid_request_error");
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return openaiError(400, "The request body must be a JSON object.", "invalid_request_error");
-    }
+  const vocabPost = async (request: Request, device: TokenInfo, store: VocabularyStore): Promise<Response> => {
+    const parsed = await jsonBody(request);
+    if (parsed instanceof Response) return parsed;
     const { terms, remove, dryRun } = parsed as { terms?: unknown; remove?: unknown; dryRun?: unknown };
     if ((terms !== undefined && !Array.isArray(terms)) || (remove !== undefined && !Array.isArray(remove))) {
       return openaiError(400, '`terms` and `remove` must be arrays of terms.', "invalid_request_error");
@@ -253,7 +258,7 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
     }
 
     const dry = dryRun === true;
-    const runtime = await store!.list();
+    const runtime = await store.list();
     const byFold = foldMap(runtime);
     const configByFold = foldConfig(configTerms);
 
@@ -285,46 +290,34 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
     });
 
     const postCount = runtime.length + netNew;
-    if (postCount > MAX_TERMS) {
-      if (!dry) {
-        return openaiError(409, `The runtime vocabulary holds at most ${MAX_TERMS} terms; remove some first.`, "invalid_request_error", {
-          code: "vocabulary_full",
-        });
-      }
+    if (postCount > MAX_TERMS && !dry) {
+      // Atomic: the cap check precedes every write, so an over-cap batch persists nothing.
+      return openaiError(409, `The runtime vocabulary holds at most ${MAX_TERMS} terms; remove some first.`, "invalid_request_error", {
+        code: "vocabulary_full",
+      });
     }
     if (!dry && toStore.size > 0) {
-      try {
-        await store!.add([...toStore.values()], { label: device.label, tokenId: device.id });
-      } catch (err) {
-        const mapped = storeError(err);
-        if (mapped) return mapped;
-        throw err;
-      }
+      await store.add([...toStore.values()], { label: device.label, tokenId: device.id });
     }
 
     // Removes resolve against post-add state: fresh list on a real write, overlay on a dry run.
-    const postByFold = dry ? new Map(byFold) : foldMap(await store!.list());
+    const postByFold = dry ? new Map(byFold) : foldMap(await store.list());
     if (dry) for (const [folded, term] of toStore) postByFold.set(folded, { term, addedBy: device.label, addedAt: "" });
     const removeRows: { term: string; outcome: string; reverted_to?: string }[] = [];
     for (const term of removes as string[]) {
       const folded = term.toLowerCase();
       const r = resolveRemove(folded, postByFold, configByFold);
-      if (r.outcome === "removed" && !dry) {
-        try {
-          const echo = await store!.remove(term, { label: device.label, tokenId: device.id });
-          if (echo === null) {
-            removeRows.push({ term, outcome: "not_found" });
-            continue;
-          }
-          removeRows.push({ term: echo, outcome: "removed", ...(r.revertedTo ? { reverted_to: r.revertedTo } : {}) });
-          continue;
-        } catch (err) {
-          const mapped = storeError(err);
-          if (mapped) return mapped;
-          throw err;
-        }
+      if (r.outcome !== "removed" || dry) {
+        removeRows.push({ term, outcome: r.outcome, ...(r.revertedTo ? { reverted_to: r.revertedTo } : {}) });
+        continue;
       }
-      removeRows.push({ term, outcome: r.outcome, ...(r.revertedTo ? { reverted_to: r.revertedTo } : {}) });
+      const echo = await store.remove(term, { label: device.label, tokenId: device.id });
+      // A batch-internal folded dupe already removed it — report the miss honestly.
+      removeRows.push(
+        echo === null
+          ? { term, outcome: "not_found" }
+          : { term: echo, outcome: "removed", ...(r.revertedTo ? { reverted_to: r.revertedTo } : {}) },
+      );
     }
 
     // Capacity reports the post-change union (or the dry-run hypothetical one): a term that
@@ -354,23 +347,14 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
     );
   };
 
-  const vocabDelete = async (request: Request, device: TokenInfo): Promise<Response> => {
-    const body = await readCapped(request, VOCAB_MAX_BODY_BYTES);
-    if (body === "too_large") return openaiError(413, "The request body is too large.", "invalid_request_error");
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(new TextDecoder().decode(body));
-    } catch {
-      return openaiError(400, "The request body is not valid JSON.", "invalid_request_error");
-    }
-    const term =
-      typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-        ? cleanTerm((parsed as { term?: unknown }).term)
-        : null;
+  const vocabDelete = async (request: Request, device: TokenInfo, store: VocabularyStore): Promise<Response> => {
+    const parsed = await jsonBody(request);
+    if (parsed instanceof Response) return parsed;
+    const term = cleanTerm((parsed as { term?: unknown }).term);
     if (term === null) {
       return openaiError(400, "`term` must be a non-empty, control-char-free string of at most 200 characters.", "invalid_request_error");
     }
-    const runtime = await store!.list();
+    const runtime = await store.list();
     const r = resolveRemove(term.toLowerCase(), foldMap(runtime), foldConfig(configTerms));
     if (r.outcome === "not_found") {
       return openaiError(404, `No vocabulary term matches ${JSON.stringify(term)}.`, "invalid_request_error", { code: "term_not_found" });
@@ -378,11 +362,11 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
     if (r.outcome === "term_pinned") {
       return openaiError(409, `${JSON.stringify(term)} is config-pinned; edit gateway.json to change it.`, "invalid_request_error", { code: "term_pinned" });
     }
-    const echo = await store!.remove(term, { label: device.label, tokenId: device.id });
+    const echo = await store.remove(term, { label: device.label, tokenId: device.id });
     if (echo === null) {
       return openaiError(404, `No vocabulary term matches ${JSON.stringify(term)}.`, "invalid_request_error", { code: "term_not_found" });
     }
-    const union = effectiveUnion(configTerms, await store!.list());
+    const union = effectiveUnion(configTerms, await store.list());
     const { prompt_chars, keyterm_count } = capacityOf(union);
     return new Response(
       JSON.stringify({
@@ -405,9 +389,9 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
     const device = await authorizeAdmin(request);
     if (device instanceof Response) return device;
     try {
-      if (request.method === "GET") return await vocabGet();
-      if (request.method === "POST") return await vocabPost(request, device);
-      return await vocabDelete(request, device);
+      if (request.method === "GET") return await vocabGet(store);
+      if (request.method === "POST") return await vocabPost(request, device, store);
+      return await vocabDelete(request, device, store);
     } catch (err) {
       const mapped = storeError(err);
       if (mapped) return mapped;
