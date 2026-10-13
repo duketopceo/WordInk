@@ -51,7 +51,10 @@ export const MAX_TERMS = 200;
 /** Vocabulary request bodies are JSON — 64 KB is far beyond a 200-term cap's needs (R8). */
 export const VOCAB_MAX_BODY_BYTES = 64 * 1024;
 
-const CONTROL_CHARS = /[\x00-\x1f\x7f]/;
+// C0/C1 controls and Unicode format characters (zero-width, bidi marks, BOM): a term echoes
+// verbatim in GET output, the CLI's printed JSON and every provider prompt, so invisible or
+// deceptively-rendered characters can never be stored.
+const CONTROL_CHARS = /[\p{Cc}\p{Cf}]/u;
 
 /**
  * The canonical stored form of a term — trimmed, non-empty, control-char-free, at most

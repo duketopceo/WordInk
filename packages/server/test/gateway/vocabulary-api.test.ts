@@ -2,115 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRelay, type GatewayConfig } from "../../src/index.js";
 import { GATEWAY_VOCABULARY_PATH } from "../../src/gateway/index.js";
 import {
-  constantTimeEqualHex,
-  generateToken,
-  hashToken,
-  type TokenRecord,
-  type TokenScope,
-  type TokenStore,
-} from "../../src/gateway/tokens.js";
-import {
   MAX_TERMS,
   VOCAB_MAX_BODY_BYTES,
   VocabularyStoreError,
-  cleanTerm,
-  type VocabularyStore,
-  type VocabularyTerm,
 } from "../../src/gateway/vocabulary-store.js";
 import { GROQ_AUDIO_URL } from "../../src/gateway/providers.js";
-import { makeUpstream, ok, sentForm, type FetchMock } from "./fakes.js";
+import { makeUpstream, ok, sentForm, MemoryTokenStore, MemoryVocabularyStore, type FetchMock } from "./fakes.js";
 
 const BASE = "https://relay.test";
 const GROQ_KEY_A = "gsk_test_KEY_A_0123456789";
 const groqA = { provider: "groq" as const, key: GROQ_KEY_A };
 const AUDIO = new Uint8Array([82, 73, 70, 70, 1, 2, 3, 4]);
 
-interface Stored {
-  id: string;
-  label: string;
-  hash: string;
-  createdAt: string;
-  revokedAt?: string;
-  scope?: TokenScope;
-}
-
-class MemoryTokenStore implements TokenStore {
-  private readonly records = new Map<string, Stored>();
-
-  async create(label: string, scope: TokenScope = "device") {
-    const token = generateToken();
-    const rec: Stored = {
-      id: crypto.randomUUID(),
-      label,
-      hash: await hashToken(token),
-      createdAt: new Date().toISOString(),
-      scope,
-    };
-    this.records.set(rec.id, rec);
-    return { id: rec.id, label, scope, token };
-  }
-
-  async verify(token: string) {
-    const hash = await hashToken(token);
-    let found: Stored | undefined;
-    for (const rec of this.records.values()) {
-      if (constantTimeEqualHex(rec.hash, hash)) found = rec;
-    }
-    return !found || found.revokedAt ? null : { id: found.id, label: found.label, scope: found.scope ?? "device" };
-  }
-
-  async list(): Promise<TokenRecord[]> {
-    return [...this.records.values()].map((r) => ({
-      id: r.id,
-      label: r.label,
-      createdAt: r.createdAt,
-      ...(r.revokedAt ? { revokedAt: r.revokedAt } : {}),
-      scope: r.scope ?? "device",
-    }));
-  }
-
-  async revoke(id: string) {
-    const rec = this.records.get(id);
-    if (!rec || rec.revokedAt) return false;
-    rec.revokedAt = new Date().toISOString();
-    return true;
-  }
-}
-
-/** In-memory VocabularyStore mirroring FileVocabularyStore's folded semantics. */
-class MemoryVocabularyStore implements VocabularyStore {
-  readonly records: VocabularyTerm[] = [];
-  failWith: VocabularyStoreError | null = null;
-
-  async list(): Promise<VocabularyTerm[]> {
-    if (this.failWith) throw this.failWith;
-    return this.records.map((r) => ({ ...r }));
-  }
-
-  async add(terms: readonly string[], addedBy: { label: string; tokenId?: string | undefined }): Promise<void> {
-    if (this.failWith) throw this.failWith;
-    for (const term of terms) {
-      const folded = term.toLowerCase();
-      const i = this.records.findIndex((r) => r.term.toLowerCase() === folded);
-      const rec: VocabularyTerm = {
-        term,
-        addedBy: addedBy.label,
-        ...(addedBy.tokenId ? { addedByTokenId: addedBy.tokenId } : {}),
-        addedAt: new Date().toISOString(),
-      };
-      if (i >= 0) this.records[i] = rec;
-      else this.records.push(rec);
-    }
-    if (this.records.length > MAX_TERMS) throw new VocabularyStoreError("vocabulary_full", "full");
-  }
-
-  async remove(term: string): Promise<string | null> {
-    if (this.failWith) throw this.failWith;
-    const i = this.records.findIndex((r) => r.term.toLowerCase() === term.toLowerCase());
-    if (i < 0) return null;
-    return this.records.splice(i, 1)[0]!.term;
-  }
-}
 
 let fetchMock: FetchMock;
 let on: ReturnType<typeof makeUpstream>["on"];
@@ -469,5 +372,160 @@ describe("live transcription wiring (R8, R10)", () => {
     const handler = createRelay({ keys: {}, gateway: { tokenStore, providers: [groqA], vocabulary: ["Omarchy"] } });
     expect((await handler(transcribeReq())).status).toBe(200);
     expect(sentForm(fetchMock).get("prompt")).toBe("Omarchy");
+  });
+});
+
+describe("POST remove matrix and batch accounting (review fixes)", () => {
+  it("POST remove reports each outcome: removed / reverted_to / term_pinned / not_found", async () => {
+    await relay({ vocabulary: ["Config"] })(vocabReq("POST", { terms: ["runtime", "CONFIG"] }));
+    const res = await relay({ vocabulary: ["Config"] })(
+      vocabReq("POST", { remove: ["runtime", "config", "missing"] }),
+    );
+    const body = (await res.json()) as { data: Record<string, unknown>[] };
+    expect(body.data).toEqual([
+      { term: "runtime", outcome: "removed" },
+      { term: "CONFIG", outcome: "removed", reverted_to: "Config" }, // the override went; config stays
+      { term: "missing", outcome: "not_found" },
+    ]);
+    expect(vocab.records).toHaveLength(0);
+    // A config term with no override is pinned, not deletable.
+    const pinned = (await (await relay({ vocabulary: ["Config"] })(vocabReq("POST", { remove: ["Config"] }))).json()) as {
+      data: Record<string, unknown>[];
+    };
+    expect(pinned.data).toEqual([{ term: "Config", outcome: "term_pinned" }]);
+  });
+
+  it("dryRun reports remove outcomes — stored spelling echoed, nothing persisted", async () => {
+    await post(["Kurultai"]);
+    const res = await relay()(vocabReq("POST", { remove: ["kurultai", "ghost"], dryRun: true }));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      dry_run: true,
+      post_change_terms: 0,
+      data: [
+        { term: "Kurultai", outcome: "removed" },
+        { term: "ghost", outcome: "not_found" },
+      ],
+    });
+    expect(vocab.records).toHaveLength(1); // untouched
+  });
+
+  it("post-change accounting reflects removes: counts and effective flags track the union", async () => {
+    await post(["gone", "kept"]);
+    const res = await relay()(vocabReq("POST", { remove: ["gone"] }));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ post_change_terms: 1, keyterm_count: 1 });
+    expect(body.prompt_chars).toBe("kept".length); // "gone" left the union
+  });
+
+  it("a folded-duplicate remove resolves sequentially: the second is an honest not_found", async () => {
+    await post(["dup"]);
+    const res = await relay()(vocabReq("POST", { remove: ["dup", "DUP"] }));
+    const body = (await res.json()) as { data: Record<string, unknown>[] };
+    expect(body.data).toEqual([
+      { term: "dup", outcome: "removed" },
+      { term: "DUP", outcome: "not_found" },
+    ]);
+  });
+
+  it("add+remove in one request applies both; the removed term leaves the union", async () => {
+    await post(["old"]);
+    const res = await relay()(vocabReq("POST", { terms: ["fresh"], remove: ["old"] }));
+    const body = (await res.json()) as { data: Record<string, unknown>[]; post_change_terms: number };
+    expect(body.data).toEqual([
+      { term: "fresh", outcome: "added", effective: { prompt: true, keyterm: true } },
+      { term: "old", outcome: "removed" },
+    ]);
+    expect(body.post_change_terms).toBe(1);
+    expect(vocab.records.map((r) => r.term)).toEqual(["fresh"]);
+  });
+
+  it("a rotation batch at the cap succeeds when removes free the slots adds need", async () => {
+    vocab.records.push(
+      ...Array.from({ length: MAX_TERMS }, (_, i) => ({ term: `old-${i}`, addedBy: "a", addedAt: "t" })),
+    );
+    const res = await relay()(vocabReq("POST", { terms: ["fresh"], remove: ["old-0"] }));
+    expect(res.status).toBe(200); // 200 net terms: no false vocabulary_full
+    expect(vocab.records).toHaveLength(MAX_TERMS);
+  });
+
+  it("folded-duplicate adds count once: post_change_terms sees the record, not the rows", async () => {
+    const res = await post(["kurultai", "KURULTAI"]);
+    const body = (await res.json()) as { data: { outcome: string }[]; post_change_terms: number };
+    expect(body.data.map((d) => d.outcome)).toEqual(["added", "updated"]);
+    expect(body.post_change_terms).toBe(1); // not 2 — the double-count bug
+    expect(vocab.records).toHaveLength(1);
+  });
+
+  it("config-shadowed folded duplicates count once toward the cap too", async () => {
+    const res = await relay({ vocabulary: ["Kurultai"] })(vocabReq("POST", { terms: ["KURULTAI", "kurultai"] }));
+    const body = (await res.json()) as { data: { outcome: string }[]; post_change_terms: number };
+    expect(body.data.map((d) => d.outcome)).toEqual(["config_shadowed", "config_shadowed"]);
+    expect(body.post_change_terms).toBe(1);
+    expect(vocab.records.map((r) => r.term)).toEqual(["kurultai"]); // last spelling won
+  });
+
+  it("dryRun reports capacity_exceeded instead of 409ing on an over-cap hypothetical", async () => {
+    vocab.records.push(
+      ...Array.from({ length: MAX_TERMS }, (_, i) => ({ term: `old-${i}`, addedBy: "a", addedAt: "t" })),
+    );
+    const res = await post(["one-more"], { dryRun: true });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ dry_run: true, capacity_exceeded: true, post_change_terms: MAX_TERMS + 1 });
+    expect(vocab.records).toHaveLength(MAX_TERMS);
+  });
+
+  it("respelling an override back to the config spelling reverts — no zombie record", async () => {
+    await relay({ vocabulary: ["Kurultai"] })(vocabReq("POST", { terms: ["KURULTAI"] }));
+    const res = await relay({ vocabulary: ["Kurultai"] })(vocabReq("POST", { terms: ["Kurultai"] }));
+    const body = (await res.json()) as { data: Record<string, unknown>[] };
+    expect(body.data).toEqual([
+      { term: "Kurultai", outcome: "reverted", reverted_to: "Kurultai", effective: { prompt: true, keyterm: true } },
+    ]);
+    expect(vocab.records).toHaveLength(0); // the override is gone, not invisible
+    // And there is no zombie for DELETE to trip on — the config term is simply pinned.
+    await expectOpenAIError(
+      await relay({ vocabulary: ["Kurultai"] })(vocabReq("DELETE", { term: "kurultai" })),
+      409,
+      "term_pinned",
+    );
+  });
+});
+
+describe("request-shape and internal errors", () => {
+  it("an unparseable JSON body 400s, not a 500", async () => {
+    const res = await relay()(
+      new Request(`${BASE}${GATEWAY_VOCABULARY_PATH}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+        body: "{not json",
+      }),
+    );
+    await expectOpenAIError(res, 400);
+  });
+
+  it("an unexpected store failure answers the generic 500, not the raw error", async () => {
+    vocab.failWith = new Error("disk exploded");
+    const res = await relay()(vocabReq("GET", undefined));
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string; type: string } };
+    expect(body.error.type).toBe("server_error");
+    expect(body.error.message).not.toContain("disk exploded"); // internals stay server-side
+    expect(errorSpy).toHaveBeenCalled();
+  });
+
+  it("the method check precedes auth: an unauthenticated PUT is 405, not 401", async () => {
+    const res = await relay()(vocabReq("PUT", { terms: ["x"] }, false));
+    expect(res.status).toBe(405);
+  });
+});
+
+describe("GET reporting fields", () => {
+  it("reports runtime_terms and max_terms alongside the budgets", async () => {
+    vocab.records.push({ term: "wisp", addedBy: "a", addedAt: "t" });
+    const res = await relay({ vocabulary: ["Omarchy"] })(vocabReq("GET", undefined));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ runtime_terms: 1, max_terms: MAX_TERMS });
   });
 });

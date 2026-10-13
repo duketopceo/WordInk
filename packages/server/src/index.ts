@@ -37,8 +37,6 @@ export {
 } from "./gateway/tokens.js";
 export {
   MAX_TERMS,
-  MAX_TERM_CHARS,
-  VOCAB_MAX_BODY_BYTES,
   VocabularyStoreError,
   cleanTerm,
   type VocabularyErrorCode,

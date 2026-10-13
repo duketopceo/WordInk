@@ -1,19 +1,18 @@
 // The desktop-facing OpenAI-compatible transcription route (KTD1). Everything here is
 // Workers-safe: the Node-only token backend lives in file-tokens.ts and is never imported.
-import { createMemoryLimiter, errorName, GATEWAY_LOG_PREFIX, limiterRetrySeconds, readCapped } from "../internal.js";
+import { createMemoryLimiter, errorName, GATEWAY_LOG_PREFIX, isRecord, limiterRetrySeconds, readCapped } from "../internal.js";
 import type { RateLimiter, RateLimitOptions } from "../internal.js";
 import { parseTranscriptionForm, type ParseError } from "./multipart.js";
 import { DEFAULT_MODELS, type ResolvedEntry } from "./providers.js";
 import { createRouter } from "./router.js";
 import type { TokenInfo, TokenStore } from "./tokens.js";
-import { vocabularyPacking } from "./vocabulary.js";
+import { capacityOf, effectiveUnion, foldConfig, foldMap } from "./vocabulary.js";
 import {
   MAX_TERMS,
   VOCAB_MAX_BODY_BYTES,
   VocabularyStoreError,
   cleanTerm,
   type VocabularyStore,
-  type VocabularyTerm,
 } from "./vocabulary-store.js";
 
 /** The route path (under `basePath`) the gateway serves when configured. */
@@ -138,7 +137,9 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
     const store = config.vocabularyStore;
     if (!store) return undefined; // the construction-time set applies
     try {
-      return effectiveUnion(config.vocabulary ?? [], await store.list()).map((entry) => entry.term);
+      const terms = effectiveUnion(config.vocabulary ?? [], await store.list()).map((entry) => entry.term);
+      vocabDegradedWarned = false; // a recovery re-arms the latch so a later failure warns again
+      return terms;
     } catch (err) {
       if (!vocabDegradedWarned) {
         vocabDegradedWarned = true;
@@ -178,16 +179,14 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
     if (err.code === "invalid_term") {
       return openaiError(400, "Vocabulary terms must be non-empty, control-char-free and <= 200 characters.", "invalid_request_error");
     }
+    if (err.code === "changed") {
+      return openaiError(500, "The vocabulary store changed mid-write; retry the request.", "server_error");
+    }
     return openaiError(500, "The vocabulary store could not be read.", "server_error");
   };
 
-  const capacityOf = (union: UnionEntry[]) => {
-    const packed = vocabularyPacking(union.map((e) => e.term));
-    return { packed, prompt_chars: packed.promptChars, keyterm_count: packed.keyterm.filter(Boolean).length };
-  };
-
   /** A capped JSON object body, or the OpenAI-shaped error to answer with (R8). */
-  const jsonBody = async (request: Request): Promise<unknown | Response> => {
+  const jsonBody = async (request: Request): Promise<Record<string, unknown> | Response> => {
     const body = await readCapped(request, VOCAB_MAX_BODY_BYTES);
     if (body === "too_large") return openaiError(413, "The request body is too large.", "invalid_request_error");
     let parsed: unknown;
@@ -196,14 +195,15 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
     } catch {
       return openaiError(400, "The request body is not valid JSON.", "invalid_request_error");
     }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    if (!isRecord(parsed)) {
       return openaiError(400, "The request body must be a JSON object.", "invalid_request_error");
     }
     return parsed;
   };
 
   const vocabGet = async (store: VocabularyStore): Promise<Response> => {
-    const union = effectiveUnion(configTerms, await store.list());
+    const runtime = await store.list();
+    const union = effectiveUnion(configTerms, runtime);
     const { packed, prompt_chars, keyterm_count } = capacityOf(union);
     const data = union.map((entry, i) => ({
       term: entry.term,
@@ -213,32 +213,36 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
       effective: { prompt: packed.prompt[i] === true, keyterm: packed.keyterm[i] === true },
       ...(entry.provenance
         ? {
-            addedBy: entry.provenance.addedBy,
+            ...(entry.provenance.addedBy !== undefined ? { addedBy: entry.provenance.addedBy } : {}),
             ...(entry.provenance.addedByTokenId ? { addedByTokenId: entry.provenance.addedByTokenId } : {}),
-            addedAt: entry.provenance.addedAt,
+            ...(entry.provenance.addedAt !== undefined ? { addedAt: entry.provenance.addedAt } : {}),
           }
         : {}),
     }));
-    return new Response(JSON.stringify({ object: "list", data, prompt_chars, keyterm_count }), { headers: JSON_HEADERS });
+    return new Response(
+      JSON.stringify({ object: "list", data, prompt_chars, keyterm_count, runtime_terms: runtime.length, max_terms: MAX_TERMS }),
+      { headers: JSON_HEADERS },
+    );
   };
 
   /** Resolve one deletion against a snapshot: the outcome + the config spelling it reverts to. */
   const resolveRemove = (
     folded: string,
-    byFold: ReadonlyMap<string, VocabularyTerm>,
+    byFold: ReadonlyMap<string, { term: string }>,
     configByFold: ReadonlyMap<string, string>,
   ): { outcome: "removed" | "not_found" | "term_pinned"; revertedTo?: string } => {
     const rec = byFold.get(folded);
     const cfg = configByFold.get(folded);
-    if (!rec && !cfg) return { outcome: "not_found" };
-    if (!rec || (cfg !== undefined && rec.term === cfg)) return { outcome: "term_pinned" };
+    if (!rec) return cfg === undefined ? { outcome: "not_found" } : { outcome: "term_pinned" };
+    // Any live runtime record is removable — even a same-spelling zombie hiding under a
+    // config term (its removal frees the cap slot and the config spelling reverts).
     return cfg === undefined ? { outcome: "removed" } : { outcome: "removed", revertedTo: cfg };
   };
 
   const vocabPost = async (request: Request, device: TokenInfo, store: VocabularyStore): Promise<Response> => {
     const parsed = await jsonBody(request);
     if (parsed instanceof Response) return parsed;
-    const { terms, remove, dryRun } = parsed as { terms?: unknown; remove?: unknown; dryRun?: unknown };
+    const { terms, remove, dryRun } = parsed;
     if ((terms !== undefined && !Array.isArray(terms)) || (remove !== undefined && !Array.isArray(remove))) {
       return openaiError(400, '`terms` and `remove` must be arrays of terms.', "invalid_request_error");
     }
@@ -247,7 +251,7 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
     }
     const adds = (terms ?? []).map(cleanTerm);
     const removes = (remove ?? []).map(cleanTerm);
-    if (adds.some((t) => t === null) || removes.some((t) => t === null)) {
+    if (!adds.every((t): t is string => t !== null) || !removes.every((t): t is string => t !== null)) {
       return openaiError(400, "Vocabulary terms must be non-empty, control-char-free and <= 200 characters.", "invalid_request_error");
     }
     if (adds.length > MAX_TERMS || removes.length > MAX_TERMS) {
@@ -262,67 +266,117 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
     const byFold = foldMap(runtime);
     const configByFold = foldConfig(configTerms);
 
-    // Resolve adds against the runtime snapshot, then config, then terms pending in this batch.
+    // Resolve adds against the runtime snapshot, then config, then terms pending in this
+    // batch. `netNew` counts distinct folded records, never rows — a folded duplicate
+    // respells its pending record instead of counting twice.
     const toStore = new Map<string, string>();
+    const reverts = new Map<string, string>();
     let netNew = 0;
-    const addRows = (adds as string[]).map((term) => {
+    const addRows = adds.map((term) => {
       const folded = term.toLowerCase();
+      const cfg = configByFold.get(folded);
       const rec = byFold.get(folded);
       if (rec) {
+        // Respelling an override back to the exact config spelling reverts it: the
+        // runtime record is deleted and config re-owns the row. Persisting it would
+        // create a zombie — union-invisible, undeletable, cap-consuming.
+        if (cfg === term) {
+          reverts.set(folded, term);
+          return { term, outcome: "reverted", reverted_to: cfg };
+        }
         const outcome = rec.term === term ? "already_present" : "updated";
         if (outcome === "updated") toStore.set(folded, term);
         return { term, outcome };
       }
-      const cfg = configByFold.get(folded);
       if (cfg !== undefined) {
-        const outcome = cfg === term ? "pinned" : "config_shadowed";
-        if (outcome === "config_shadowed") {
-          toStore.set(folded, term);
-          netNew++;
+        if (cfg === term) {
+          // An earlier row staged a shadow for this key; the config spelling winning
+          // last means nothing should persist — unstage it so "pinned" stays honest.
+          if (toStore.delete(folded)) netNew--;
+          return { term, outcome: "pinned" };
         }
-        return { term, outcome };
+        if (!toStore.has(folded)) netNew++;
+        toStore.set(folded, term);
+        return { term, outcome: "config_shadowed" };
       }
       const pending = toStore.get(folded);
       const outcome = pending === undefined ? "added" : pending === term ? "already_present" : "updated";
-      if (pending === undefined) netNew++;
       if (outcome !== "already_present") toStore.set(folded, term);
+      if (pending === undefined) netNew++;
       return { term, outcome };
     });
 
-    const postCount = runtime.length + netNew;
+    // The cap sees the request's net effect: removes (and override reverts) free slots, so a
+    // rotation batch that fits after its deletions is not a false vocabulary_full.
+    const landing = new Set<string>();
+    for (const term of removes) {
+      const folded = term.toLowerCase();
+      if (byFold.has(folded) || toStore.has(folded)) landing.add(folded);
+    }
+    for (const folded of reverts.keys()) landing.add(folded);
+    const postCount = runtime.length + netNew - landing.size;
     if (postCount > MAX_TERMS && !dry) {
       // Atomic: the cap check precedes every write, so an over-cap batch persists nothing.
       return openaiError(409, `The runtime vocabulary holds at most ${MAX_TERMS} terms; remove some first.`, "invalid_request_error", {
         code: "vocabulary_full",
       });
     }
-    if (!dry && toStore.size > 0) {
-      await store.add([...toStore.values()], { label: device.label, tokenId: device.id });
-    }
 
-    // Removes resolve against post-add state: fresh list on a real write, overlay on a dry run.
-    const postByFold = dry ? new Map(byFold) : foldMap(await store.list());
-    if (dry) for (const [folded, term] of toStore) postByFold.set(folded, { term, addedBy: device.label, addedAt: "" });
-    const removeRows: { term: string; outcome: string; reverted_to?: string }[] = [];
-    for (const term of removes as string[]) {
+    // The batch applies in dependency order: removes of pre-existing records and override
+    // reverts run FIRST so they free the cap slots the adds then need (a rotation batch at
+    // the cap must not trip the store's own ceiling mid-flight). Removes that target a
+    // term staged in this same request resolve last. `postByFold` mirrors every applied
+    // op so the reported union, effective flags and post-change count are post-change —
+    // and folded-duplicate removes resolve sequentially (the second is an honest
+    // not_found). A dry run plays the same sequence against the snapshot with no writes.
+    const attr = { label: device.label, tokenId: device.id };
+    const postByFold: Map<string, { term: string }> = new Map(byFold);
+    type RemoveRow = { term: string; outcome: string; reverted_to?: string };
+    const removeRows: (RemoveRow | undefined)[] = removes.map(() => undefined);
+    const deferred: number[] = [];
+
+    const applyRemove = async (i: number): Promise<void> => {
+      const term = removes[i]!;
       const folded = term.toLowerCase();
       const r = resolveRemove(folded, postByFold, configByFold);
-      if (r.outcome !== "removed" || dry) {
-        removeRows.push({ term, outcome: r.outcome, ...(r.revertedTo ? { reverted_to: r.revertedTo } : {}) });
-        continue;
+      if (r.outcome !== "removed") {
+        removeRows[i] = { term, outcome: r.outcome, ...(r.revertedTo ? { reverted_to: r.revertedTo } : {}) };
+        return;
       }
-      const echo = await store.remove(term, { label: device.label, tokenId: device.id });
-      // A batch-internal folded dupe already removed it — report the miss honestly.
-      removeRows.push(
+      const stored = postByFold.get(folded)!;
+      postByFold.delete(folded);
+      if (dry) {
+        // Dry-run removes echo the stored spelling they would take.
+        removeRows[i] = { term: stored.term, outcome: "removed", ...(r.revertedTo ? { reverted_to: r.revertedTo } : {}) };
+        return;
+      }
+      const echo = await store.remove(term, attr);
+      removeRows[i] =
         echo === null
           ? { term, outcome: "not_found" }
-          : { term: echo, outcome: "removed", ...(r.revertedTo ? { reverted_to: r.revertedTo } : {}) },
-      );
+          : { term: echo, outcome: "removed", ...(r.revertedTo ? { reverted_to: r.revertedTo } : {}) };
+    };
+
+    for (let i = 0; i < removes.length; i++) {
+      const folded = removes[i]!.toLowerCase();
+      if (toStore.has(folded)) deferred.push(i); // targets a staged add — resolve after it lands
+      else await applyRemove(i);
     }
+    for (const [folded, reverted] of reverts) {
+      postByFold.delete(folded);
+      if (!dry) await store.remove(reverted, attr);
+    }
+    if (!dry && toStore.size > 0) await store.add([...toStore.values()], attr);
+    for (const [folded, term] of toStore) postByFold.set(folded, { term });
+    for (const i of deferred) await applyRemove(i);
+
+    // Report the persisted truth on a real write — a fresh list also picks up any
+    // cross-process mutation; on a dry run the op-mirror snapshot is the hypothetical.
+    const finalByFold: Map<string, { term: string }> = dry ? postByFold : foldMap(await store.list());
 
     // Capacity reports the post-change union (or the dry-run hypothetical one): a term that
     // would land past a merge budget must never report itself effective (KTD14).
-    const postUnion = effectiveUnion(configTerms, [...postByFold.values()]);
+    const postUnion = effectiveUnion(configTerms, [...finalByFold.values()]);
     const { packed, prompt_chars, keyterm_count } = capacityOf(postUnion);
     const effectiveOf = (term: string) => {
       const i = postUnion.findIndex((e) => e.term.toLowerCase() === term.toLowerCase());
@@ -332,7 +386,7 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
     };
     const data = [
       ...addRows.map((r) => ({ ...r, effective: effectiveOf(r.term) })),
-      ...removeRows,
+      ...removeRows.flatMap((r) => (r ? [r] : [])),
     ];
     return new Response(
       JSON.stringify({
@@ -340,8 +394,8 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
         data,
         prompt_chars,
         keyterm_count,
-        post_change_terms: postCount,
-        ...(dry ? { dry_run: true, ...(postCount > MAX_TERMS ? { capacity_exceeded: true } : {}) } : {}),
+        post_change_terms: finalByFold.size,
+        ...(dry ? { dry_run: true, ...(finalByFold.size > MAX_TERMS ? { capacity_exceeded: true } : {}) } : {}),
       }),
       { headers: JSON_HEADERS },
     );
@@ -350,7 +404,7 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
   const vocabDelete = async (request: Request, device: TokenInfo, store: VocabularyStore): Promise<Response> => {
     const parsed = await jsonBody(request);
     if (parsed instanceof Response) return parsed;
-    const term = cleanTerm((parsed as { term?: unknown }).term);
+    const term = cleanTerm(parsed.term);
     if (term === null) {
       return openaiError(400, "`term` must be a non-empty, control-char-free string of at most 200 characters.", "invalid_request_error");
     }
@@ -485,69 +539,6 @@ async function verify(store: TokenStore, token: string): Promise<TokenInfo | nul
     console.error(`${GATEWAY_LOG_PREFIX} token store threw during verify; refusing request.`, errorName(err));
     return null;
   }
-}
-
-/** One row of the config∪runtime union (R9 union semantics; the shape GET reports). */
-interface UnionEntry {
-  /** The spelling providers actually receive — the runtime override's when one exists. */
-  term: string;
-  source: "config" | "runtime";
-  /** Config terms own their presence: nothing under `source:"config"` is deletable. */
-  pinned: boolean;
-  /** A runtime record respelled this config term (KTD15): the runtime casing wins the union. */
-  runtimeOverride?: boolean;
-  /** The runtime record behind this row, for provenance fields. */
-  provenance?: VocabularyTerm;
-}
-
-/** Active runtime records keyed by case-folded spelling (first record wins on file dupes). */
-function foldMap(runtime: readonly VocabularyTerm[]): Map<string, VocabularyTerm> {
-  const map = new Map<string, VocabularyTerm>();
-  for (const rec of runtime) {
-    const term = cleanTerm(rec.term);
-    if (term && !map.has(term.toLowerCase())) map.set(term.toLowerCase(), rec);
-  }
-  return map;
-}
-
-/** Config terms keyed by case-folded spelling, config order, first spelling kept. */
-function foldConfig(configTerms: readonly string[]): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const raw of configTerms) {
-    const term = cleanTerm(raw);
-    if (term && !map.has(term.toLowerCase())) map.set(term.toLowerCase(), term);
-  }
-  return map;
-}
-
-/**
- * config ∪ runtime, folded-unique: config terms first in config order, then runtime terms in
- * insertion order — the `mergePrompt` "operator terms first" precedent. A runtime case-variant
- * of a config term is a spelling override: the runtime record wins the union's casing while
- * presence stays config-pinned (KTD15).
- */
-function effectiveUnion(configTerms: readonly string[], runtime: readonly VocabularyTerm[]): UnionEntry[] {
-  const byFold = foldMap(runtime);
-  const union: UnionEntry[] = [];
-  const claimed = new Set<string>();
-  for (const term of foldConfig(configTerms).values()) {
-    claimed.add(term.toLowerCase());
-    const rec = byFold.get(term.toLowerCase());
-    union.push(
-      rec && rec.term !== term
-        ? { term: rec.term, source: "config", pinned: true, runtimeOverride: true, provenance: rec }
-        : { term, source: "config", pinned: true },
-    );
-  }
-  for (const rec of runtime) {
-    const term = cleanTerm(rec.term);
-    if (!term) continue;
-    const folded = term.toLowerCase();
-    if (claimed.has(folded)) continue;
-    claimed.add(folded);
-    union.push({ term: rec.term, source: "runtime", pinned: false, provenance: rec });
-  }
-  return union;
 }
 
 function formError(error: ParseError): Response {

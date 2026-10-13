@@ -200,19 +200,88 @@ def test_vocab_device_token_403_surfaces_cleanly(monkeypatch):
             403, json={"error": {"message": "admin token required", "code": "insufficient_permissions"}}
         )
     )
-    with pytest.raises(WordInkError, match="403: admin token required"):
+    with pytest.raises(WordInkError, match="insufficient_permissions"):
         vocab_list(transport=transport)
+
+
+def test_gateway_error_code_is_preserved_for_agents(monkeypatch):
+    # An agent must branch on the code, not regex the message text.
+    monkeypatch.setenv("WORDINK_ADMIN_TOKEN", "wdk_admin")
+    transport = httpx.MockTransport(
+        lambda r: httpx.Response(
+            409, json={"error": {"message": "Kurultai is config-pinned", "code": "term_pinned"}}
+        )
+    )
+    with pytest.raises(WordInkError) as caught:
+        vocab_remove("Kurultai", transport=transport)
+    assert caught.value.code == "term_pinned"
+    assert caught.value.status == 409
+    assert "term_pinned" in str(caught.value)
+
+
+def test_error_body_fallback_when_not_openai_shaped(monkeypatch):
+    monkeypatch.setenv("WORDINK_ADMIN_TOKEN", "wdk_admin")
+    transport = httpx.MockTransport(lambda r: httpx.Response(500, text="proxy melted"))
+    with pytest.raises(WordInkError) as caught:
+        vocab_list(transport=transport)
+    assert caught.value.status == 500
+    assert caught.value.code is None
+    assert "proxy melted" in str(caught.value)
+
+
+def test_non_json_success_body_is_a_wordink_error(monkeypatch):
+    monkeypatch.setenv("WORDINK_ADMIN_TOKEN", "wdk_admin")
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, text="<html>oops</html>"))
+    with pytest.raises(WordInkError, match="non-JSON"):
+        vocab_list(transport=transport)
+
+
+def test_transport_failure_is_a_wordink_error(monkeypatch):
+    monkeypatch.setenv("WORDINK_ADMIN_TOKEN", "wdk_admin")
+
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    with pytest.raises(WordInkError, match="request failed"):
+        vocab_list(transport=httpx.MockTransport(boom))
+
+
+def test_vocab_remove_via_post_sends_remove_body(monkeypatch):
+    monkeypatch.setenv("WORDINK_ADMIN_TOKEN", "wdk_admin")
+
+    def check(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert json.loads(request.content) == {"remove": ["Kurultai"]}
+        return httpx.Response(200, json={"object": "list", "data": [{"term": "Kurultai", "outcome": "removed"}]})
+
+    resp = vocab_remove("Kurultai", via_post=True, transport=httpx.MockTransport(check))
+    assert resp["data"][0]["outcome"] == "removed"
 
 
 def test_cli_vocab_add_prints_json(monkeypatch, capsys):
     monkeypatch.setenv("WORDINK_ADMIN_TOKEN", "wdk_admin")
-    monkeypatch.setattr(
-        "wordink.cli.vocab_add",
-        lambda terms, **kw: {"object": "list", "data": [{"term": t, "outcome": "added"} for t in terms]},
-    )
+    seen = {}
+
+    def fake_add(terms, **kw):
+        seen.update(kw)
+        return {"object": "list", "data": [{"term": t, "outcome": "added"} for t in terms]}
+
+    monkeypatch.setattr("wordink.cli.vocab_add", fake_add)
     assert main(["vocab", "add", "kurultai"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["data"] == [{"term": "kurultai", "outcome": "added"}]
+    assert seen["dry_run"] is False
+
+
+def test_cli_vocab_add_dry_run_reaches_the_client(monkeypatch):
+    monkeypatch.setenv("WORDINK_ADMIN_TOKEN", "wdk_admin")
+    seen = {}
+    monkeypatch.setattr(
+        "wordink.cli.vocab_add",
+        lambda terms, **kw: seen.update(kw) or {"object": "list", "data": []},
+    )
+    assert main(["vocab", "add", "--dry-run", "kurultai"]) == 0
+    assert seen["dry_run"] is True
 
 
 def test_cli_vocab_list_and_remove(monkeypatch, capsys):
@@ -226,3 +295,14 @@ def test_cli_vocab_list_and_remove(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["data"] == []
     assert main(["vocab", "remove", "kurultai"]) == 0
     assert json.loads(capsys.readouterr().out)["data"][0]["outcome"] == "removed"
+
+
+def test_cli_vocab_remove_via_post_flag(monkeypatch):
+    monkeypatch.setenv("WORDINK_ADMIN_TOKEN", "wdk_admin")
+    seen = {}
+    monkeypatch.setattr(
+        "wordink.cli.vocab_remove",
+        lambda term, **kw: seen.update(kw) or {"object": "list", "data": []},
+    )
+    assert main(["vocab", "remove", "--via-post", "kurultai"]) == 0
+    assert seen["via_post"] is True

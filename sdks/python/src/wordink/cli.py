@@ -94,6 +94,11 @@ def build_parser() -> argparse.ArgumentParser:
     va.add_argument("--dry-run", action="store_true", help="report outcomes without persisting")
     vr = vsub.add_parser("remove", help="remove a runtime vocabulary term")
     vr.add_argument("term")
+    vr.add_argument(
+        "--via-post",
+        action="store_true",
+        help="send POST remove instead of DELETE (proxies that strip DELETE bodies)",
+    )
     return p
 
 
@@ -111,7 +116,12 @@ def main(argv: list[str] | None = None) -> int:
                     token=args.token,
                 )
             else:
-                resp = vocab_remove(args.term, gateway=args.gateway, token=args.token)
+                resp = vocab_remove(
+                    args.term,
+                    via_post=args.via_post,
+                    gateway=args.gateway,
+                    token=args.token,
+                )
             print(json.dumps(resp, indent=2))
             return 0
         if args.cmd == "models":

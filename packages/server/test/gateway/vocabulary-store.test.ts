@@ -1,9 +1,41 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileVocabularyStore, defaultVocabularyPath } from "../../src/gateway/file-vocabulary.js";
 import { MAX_TERMS, VocabularyStoreError, cleanTerm } from "../../src/gateway/vocabulary-store.js";
+
+// stat/rename/rm stay injectable so cross-process writes and mid-save failures are
+// deterministic: vi.mock replaces the module file-vocabulary.ts binds against.
+vi.mock("node:fs/promises", async () => {
+  const real = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  return { ...real, stat: vi.fn(real.stat), rename: vi.fn(real.rename) };
+});
+
+const fsp = vi.mocked(await import("node:fs/promises"));
+const realFsp = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+
+/**
+ * Counts stat calls inside one mutation so a file write can be injected at the exact
+ * statKey re-check — the only point where a cross-process write produces a conflict.
+ * Call 1 is load()'s stat, call 2 the post-update statKey, calls 3/4 the retry's pair.
+ */
+let statCalls = 0;
+let injectAt: ReadonlyMap<number, string> = new Map();
+
+const injectableStats = (): void => {
+  statCalls = 0;
+  injectAt = new Map();
+  vi.mocked(fsp.stat).mockImplementation(async (...args) => {
+    statCalls++;
+    const body = injectAt.get(statCalls);
+    if (body !== undefined) {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, body);
+    }
+    return realFsp.stat(...args);
+  });
+};
 
 let dir: string;
 let path: string;
@@ -13,6 +45,10 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "wdk-vocab-"));
   path = join(dir, "state", "vocabulary.json");
   vi.spyOn(console, "warn").mockImplementation(() => {});
+  // Re-pin delegation every test: per-test mockImplementations and restoreAllMocks must
+  // never leave stat/rename returning undefined into the next file op.
+  vi.mocked(fsp.stat).mockImplementation(realFsp.stat);
+  vi.mocked(fsp.rename).mockImplementation(realFsp.rename);
 });
 
 afterEach(() => {
@@ -32,6 +68,10 @@ describe("cleanTerm", () => {
     ["whitespace-only", "   "],
     ["empty", ""],
     ["a control char", "bad\tterm"],
+    ["a C1 control", "badterm"],
+    ["a zero-width space", "bad​term"],
+    ["a bidi mark", "bad‮term"],
+    ["a mid-string BOM", "ba﻿d"],
     ["201 chars", "x".repeat(201)],
     ["a non-string", 42],
     ["a null", null],
@@ -135,12 +175,76 @@ describe("FileVocabularyStore", () => {
     );
   });
 
-  it("a cross-process write between stat and save is retried once, then wins", async () => {
-    const a = new FileVocabularyStore(path);
-    const b = new FileVocabularyStore(path);
-    await a.add(["from-a"], AGENT);
-    await b.add(["from-b"], AGENT);
-    await a.add(["a-again"], AGENT);
-    expect((await b.list()).map((t) => t.term)).toEqual(["from-a", "from-b", "a-again"]);
+  it("a cross-process write at the stat re-check retries once and merges, not clobbers", async () => {
+    injectableStats();
+    const store = new FileVocabularyStore(path);
+    // The write lands between load() and the statKey re-check.
+    injectAt = new Map([[2, JSON.stringify({ version: 1, terms: [{ term: "extern", addedBy: "b", addedAt: "t" }] })]]);
+    await store.add(["from-a"], AGENT);
+    // stat calls: 1 load, 2 statKey (conflict -> retry), 3 retry load, 4 retry statKey.
+    expect(statCalls).toBe(4);
+    expect((await store.list()).map((t) => t.term)).toEqual(["extern", "from-a"]);
+  });
+
+  it("a second cross-process write on the retry throws 'changed' rather than retry forever", async () => {
+    injectableStats();
+    const store = new FileVocabularyStore(path);
+    // The write wins both the first check and the retry's (distinct bodies, so the key
+    // provably differs — same-content writes can share mtimeMs granularity).
+    injectAt = new Map([
+      [2, JSON.stringify({ version: 1, terms: [{ term: "extern", addedBy: "b", addedAt: "t" }] })],
+      [4, JSON.stringify({ version: 1, terms: [{ term: "extern", addedBy: "b", addedAt: "t" }, { term: "again", addedBy: "b", addedAt: "t" }] })],
+    ]);
+    await expect(store.add(["from-a"], AGENT)).rejects.toMatchObject({ code: "changed" });
+    expect(statCalls).toBe(4); // one retry, then it gives up — no spin loop
+  });
+
+  it("a remove retried into an already-removed term echoes null, not the stale spelling", async () => {
+    const store = new FileVocabularyStore(path);
+    await store.add(["Victim"], AGENT);
+    injectableStats();
+    injectAt = new Map([[2, JSON.stringify({ version: 1, terms: [] })]]); // another process deleted it
+    expect(await store.remove("victim")).toBeNull();
+    expect(await store.list()).toEqual([]); // the external version won; nothing resurrected
+  });
+
+  it("a failed save leaves no tmp file behind and the old file intact", async () => {
+    const store = new FileVocabularyStore(path);
+    await store.add(["old"], AGENT);
+    const before = readFileSync(path, "utf8");
+    vi.mocked(fsp.rename).mockImplementationOnce(() => Promise.reject(new Error("EACCES simulated")));
+    await expect(store.add(["new"], AGENT)).rejects.toThrow("EACCES simulated");
+    expect(readdirSync(dirname(path)).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it("tombstones are bounded at MAX_TERMS: churn cannot grow the file without limit", async () => {
+    const tombstones = Array.from({ length: MAX_TERMS + 5 }, (_, i) => ({
+      term: `old${i}`, addedBy: "a", addedAt: "t", removedBy: "b", removedAt: "t",
+    }));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ version: 1, terms: tombstones }));
+    const store = new FileVocabularyStore(path);
+    await store.add(["new"], AGENT);
+    const raw = JSON.parse(readFileSync(path, "utf8")) as { terms: { term: string; removedAt?: string }[] };
+    expect(raw.terms.filter((t) => t.removedAt)).toHaveLength(MAX_TERMS); // oldest 5 pruned
+    expect(raw.terms.filter((t) => !t.removedAt).map((t) => t.term)).toEqual(["new"]);
+    expect(raw.terms[0]!.term).toBe("old5"); // pruning drops the oldest first
+  });
+
+  it.each<[string, string]>([
+    ["a null element", '{"version":1,"terms":[null]}'],
+    ["a non-record element", '{"version":1,"terms":[42]}'],
+    ["a record without a term", '{"version":1,"terms":[{"addedBy":"a"}]}'],
+    ["a non-string term", '{"version":1,"terms":[{"term":5}]}'],
+    ["a control-char term", '{"version":1,"terms":[{"term":"bad\\tterm"}]}'],
+    ["a raw string element", '{"version":1,"terms":["plain"]}'],
+    ["the wrong version", '{"version":2,"terms":[]}'],
+  ])("a parseable file with %s is unreadable, not a TypeError", async (_name, raw) => {
+    mkdirSync(join(dir, "state"), { recursive: true });
+    writeFileSync(path, raw, { mode: 0o600 });
+    const store = new FileVocabularyStore(path);
+    await expect(store.list()).rejects.toMatchObject({ code: "unreadable" });
+    expect(readFileSync(path, "utf8")).toBe(raw);
   });
 });

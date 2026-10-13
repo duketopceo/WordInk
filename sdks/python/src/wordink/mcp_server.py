@@ -108,12 +108,13 @@ async def vocab_add_tool(terms: list[str], dry_run: bool = False) -> str:
         "Remove a runtime vocabulary term (case-folded match). A term_pinned error "
         "means the term lives in the operator's gateway.json — only the operator can "
         "remove it there. Removing a runtime spelling override on a config term "
-        "reverts to the config spelling (reported as reverted_to). Returns JSON."
+        "reverts to the config spelling (reported as reverted_to). Set via_post when "
+        "an intermediary strips DELETE bodies — same result through POST. Returns JSON."
     )
 )
-async def vocab_remove_tool(term: str) -> str:
+async def vocab_remove_tool(term: str, via_post: bool = False) -> str:
     try:
-        return json.dumps(await asyncio.to_thread(vocab_remove, term))
+        return json.dumps(await asyncio.to_thread(vocab_remove, term, via_post=via_post))
     except WordInkError as exc:
         return f"wordink: {exc}"
 

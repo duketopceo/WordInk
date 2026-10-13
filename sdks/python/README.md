@@ -44,7 +44,13 @@ wordink vocab list                        # effective vocabulary (config + runti
 wordink vocab add Kurultai Omarchy        # add terms; outcomes per term
 wordink vocab add X --dry-run             # report outcomes without persisting
 wordink vocab remove Kurultai             # remove a runtime term
+wordink vocab remove Kurultai --via-post  # same, through POST (proxies that strip DELETE bodies)
 ```
+
+`WordInkError` keeps the gateway's machine-readable error code on `.code`
+(`term_pinned`, `vocabulary_full`, `insufficient_permissions`, `term_not_found`,
+`too_many_terms`) and the HTTP status on `.status`, so callers can branch on the
+failure mode instead of parsing the message.
 
 ## MCP
 
@@ -67,7 +73,7 @@ must be set in the host's environment:
 
 Tools: `transcribe(file_path, language?, prompt?)` → transcript text;
 `list_models()` → the gateway's model ids;
-`vocab_list()` / `vocab_add(terms, dry_run?)` / `vocab_remove(term)` → the
+`vocab_list()` / `vocab_add(terms, dry_run?)` / `vocab_remove(term, via_post?)` → the
 vocabulary API's JSON responses. The vocab tools need `WORDINK_ADMIN_TOKEN`
 (either env var satisfies the server gate; a device token 403s on vocab calls).
 Use `transcribe(prompt=…)` for one-off corrections and `vocab_add` only for
