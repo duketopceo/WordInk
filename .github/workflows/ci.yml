@@ -94,4 +94,4 @@ jobs:
       - name: Build and test on iOS Simulator
         run: |
           SIM=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; devs=json.load(sys.stdin)["devices"]; names=[d["name"] for r in devs.values() for d in r if d["name"].startswith("iPhone")]; print(sorted(names)[-1])')
-          xcodebuild -scheme WordInkRemote -destination "platform=iOS Simulator,name=$SIM" CODE_SIGNING_ALLOWED=NO -derivedDataPath build test
+          xcodebuild -scheme WordInkRemote -destination "platform=iOS Simulator,name=$SIM" CODE_SIGN_IDENTITY="-" -derivedDataPath build test

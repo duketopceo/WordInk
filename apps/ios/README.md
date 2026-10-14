@@ -22,7 +22,7 @@ CI runs the same flow headlessly:
 xcodegen --spec project.yml
 xcodebuild -scheme WordInkRemote \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
-  CODE_SIGNING_ALLOWED=NO -derivedDataPath build test
+  CODE_SIGN_IDENTITY="-" -derivedDataPath build test
 ```
 
 Targets: `WordInkRemote` (app, iOS 17+), `WordInkWidgets` (Control Center widget, iOS 18+),

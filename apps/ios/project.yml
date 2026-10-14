@@ -19,11 +19,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wordink.remote
         INFOPLIST_FILE: WordInkRemote/Info.plist
+        CODE_SIGN_ENTITLEMENTS: WordInkRemote/WordInkRemote.entitlements
         TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
-        CODE_SIGNING_ALLOWED: "NO"
   WordInkWidgets:
     type: app-extension
     platform: iOS
@@ -41,7 +41,6 @@ targets:
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
-        CODE_SIGNING_ALLOWED: "NO"
         SKIP_INSTALL: "NO"
   WordInkRemoteTests:
     type: bundle.unit-test
@@ -55,7 +54,6 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wordink.remote.tests
         SWIFT_VERSION: "5.0"
-        CODE_SIGNING_ALLOWED: "NO"
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/WordInkRemote.app/WordInkRemote
 schemes:
   WordInkRemote:
