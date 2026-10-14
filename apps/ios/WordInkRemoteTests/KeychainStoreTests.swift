@@ -7,7 +7,7 @@ final class KeychainStoreTests: XCTestCase {
 
     func testRoundTripAndRotation() {
         XCTAssertNil(KeychainStore.loadToken())
-        XCTAssertTrue(KeychainStore.saveToken("wdk_one"))
+        XCTAssertEqual(KeychainStore.saveTokenStatus("wdk_one"), errSecSuccess)
         XCTAssertEqual(KeychainStore.loadToken(), "wdk_one")
         XCTAssertTrue(KeychainStore.saveToken("wdk_two"))
         XCTAssertEqual(KeychainStore.loadToken(), "wdk_two")

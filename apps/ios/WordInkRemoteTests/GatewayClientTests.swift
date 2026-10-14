@@ -14,6 +14,22 @@ final class MockProtocol: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
+    /// URLSession may deliver the request body as a stream, not httpBody.
+    static func bodyData(_ request: URLRequest) -> Data {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        while stream.hasBytesAvailable {
+            let n = stream.read(&buffer, maxLength: buffer.count)
+            if n <= 0 { break }
+            data.append(contentsOf: buffer[0..<n])
+        }
+        return data
+    }
+
     override func startLoading() {
         MockProtocol.lastRequest = request
         guard let handler = MockProtocol.handler else {
@@ -99,7 +115,7 @@ final class GatewayClientTests: XCTestCase {
         MockProtocol.handler = { req in
             XCTAssertEqual(req.url?.path, "/v1/audio/transcriptions")
             XCTAssertTrue(req.value(forHTTPHeaderField: "Content-Type")?.contains("multipart/form-data") == true)
-            let body = String(decoding: req.httpBody ?? Data(), as: UTF8.self)
+            let body = String(decoding: MockProtocol.bodyData(req), as: UTF8.self)
             XCTAssertTrue(body.contains("name=\"file\""))
             XCTAssertTrue(body.contains("name=\"model\""))
             XCTAssertTrue(body.contains("whisper-1"))

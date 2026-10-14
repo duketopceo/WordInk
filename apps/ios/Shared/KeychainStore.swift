@@ -26,20 +26,24 @@ enum KeychainStore {
         return token
     }
 
+    /// OSStatus-returning variant so callers/tests can see the real failure
+    /// (e.g. errSecMissingEntitlement) instead of a bare Bool.
     @discardableResult
-    static func saveToken(_ token: String) -> Bool {
+    static func saveTokenStatus(_ token: String) -> OSStatus {
         let data = Data(token.utf8)
         var attrs = query
         attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         attrs[kSecValueData as String] = data
-        switch SecItemAdd(attrs as CFDictionary, nil) {
-        case errSecSuccess:
-            return true
-        case errSecDuplicateItem:
-            return SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary) == errSecSuccess
-        default:
-            return false
+        let status = SecItemAdd(attrs as CFDictionary, nil)
+        if status == errSecDuplicateItem {
+            return SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         }
+        return status
+    }
+
+    @discardableResult
+    static func saveToken(_ token: String) -> Bool {
+        saveTokenStatus(token) == errSecSuccess
     }
 
     @discardableResult
