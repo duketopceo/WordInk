@@ -18,6 +18,12 @@ enum GatewayError: Error, Equatable, LocalizedError {
     /// LocalizedError so Shortcuts shows the real cause when an intent throws.
     var errorDescription: String? { message }
 
+    /// Maps an arbitrary thrown error into the taxonomy: a GatewayError passes
+    /// through unchanged; anything else reads as reachability (R9).
+    static func wrap(_ error: Error) -> GatewayError {
+        (error as? GatewayError) ?? .unreachable
+    }
+
     var message: String {
         switch self {
         case .invalidEndpoint(let why):

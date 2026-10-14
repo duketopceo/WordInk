@@ -5,7 +5,7 @@ import WidgetKit
 struct DictateControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "com.wordink.remote.dictate") {
-            ControlButton(action: StartDictationIntent()) {
+            ControlWidgetButton(action: StartDictationIntent()) {
                 Label("Dictate", systemImage: "mic.fill")
             }
         }

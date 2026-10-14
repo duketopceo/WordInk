@@ -14,11 +14,7 @@ struct GatewayClient {
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.timeoutInterval = 10
         let (_, response) = try await perform(req)
-        switch response.statusCode {
-        case 200: return
-        case 401, 403: throw GatewayError.auth
-        default: throw GatewayError.server(response.statusCode)
-        }
+        try checkStatus(response)
     }
 
     /// Multipart transcription: `file` field plus a fixed `model` value the
@@ -43,13 +39,18 @@ struct GatewayClient {
         req.httpBody = body
 
         let (data, response) = try await perform(req)
+        try checkStatus(response)
+        struct Transcription: Decodable { let text: String }
+        guard let decoded = try? JSONDecoder().decode(Transcription.self, from: data) else {
+            throw GatewayError.decoding
+        }
+        return decoded.text
+    }
+
+    /// 200 is success; 401/403 map to auth; everything else to server (R5).
+    private func checkStatus(_ response: HTTPURLResponse) throws {
         switch response.statusCode {
-        case 200:
-            struct Transcription: Decodable { let text: String }
-            guard let decoded = try? JSONDecoder().decode(Transcription.self, from: data) else {
-                throw GatewayError.decoding
-            }
-            return decoded.text
+        case 200: return
         case 401, 403: throw GatewayError.auth
         default: throw GatewayError.server(response.statusCode)
         }
@@ -60,10 +61,8 @@ struct GatewayClient {
             let (data, response) = try await session.data(for: req)
             guard let http = response as? HTTPURLResponse else { throw GatewayError.unreachable }
             return (data, http)
-        } catch let error as GatewayError {
-            throw error
         } catch {
-            throw GatewayError.unreachable
+            throw GatewayError.wrap(error)
         }
     }
 }

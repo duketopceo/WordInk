@@ -59,10 +59,8 @@ final class DictationViewModel: ObservableObject {
                 copy(text)
                 history.append(text)
                 state = .done(text)
-            } catch let error as GatewayError {
-                state = .failed(error)
             } catch {
-                state = .failed(.unreachable)
+                state = .failed(GatewayError.wrap(error))
             }
         }
     }

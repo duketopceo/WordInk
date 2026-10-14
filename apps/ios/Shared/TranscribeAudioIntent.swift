@@ -23,6 +23,6 @@ struct TranscribeAudioIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        .result(value: try await Self.run(service: service, data: try audioFile.data))
+        .result(value: try await Self.run(service: service, data: audioFile.data))
     }
 }

@@ -49,10 +49,8 @@ struct OnboardingView: View {
                 try await GatewayClient().validate(baseURL: url, token: tokenText)
                 KeychainStore.saveToken(tokenText)
                 baseURL = url
-            } catch let e as GatewayError {
-                error = e
             } catch {
-                error = .unreachable
+                error = GatewayError.wrap(error)
             }
             validating = false
         }
