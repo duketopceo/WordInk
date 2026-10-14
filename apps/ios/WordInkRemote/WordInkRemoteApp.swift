@@ -10,8 +10,15 @@ struct WordInkRemoteApp: App {
 }
 
 struct ContentView: View {
+    @AppStorage(GatewayDefaults.endpointKey) private var baseURL: URL?
+
     var body: some View {
-        Text("WordInk Remote")
-            .padding()
+        NavigationStack {
+            if baseURL != nil {
+                DictationView()
+            } else {
+                OnboardingView()
+            }
+        }
     }
 }
