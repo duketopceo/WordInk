@@ -93,6 +93,11 @@ final class GatewayClientTests: XCTestCase {
         MockProtocol.handler = { req in
             XCTAssertEqual(req.url?.path, "/v1/audio/transcriptions")
             XCTAssertTrue(req.value(forHTTPHeaderField: "Content-Type")?.contains("multipart/form-data") == true)
+            let body = String(decoding: req.httpBody ?? Data(), as: UTF8.self)
+            XCTAssertTrue(body.contains("name=\"file\""))
+            XCTAssertTrue(body.contains("name=\"model\""))
+            XCTAssertTrue(body.contains("whisper-1"))
+            XCTAssertTrue(body.contains("fake-audio"))
             return stubResponse(req.url!, status: 200, body: #"{"text":"hello world"}"#)
         }
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("clip.m4a")

@@ -66,6 +66,7 @@ final class DictationViewModel: ObservableObject {
     }
 
     func cancelRecording() {
+        guard state == .recording else { return }
         ClipCleanup.delete(recorder.stop())
         state = .ready
     }

@@ -14,7 +14,7 @@ final class AudioRecorder: ClipRecorder {
 
     func start() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+        try session.setCategory(.record)
         try session.setActive(true)
 
         let url = FileManager.default.temporaryDirectory

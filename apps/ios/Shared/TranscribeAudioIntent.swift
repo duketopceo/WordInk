@@ -1,6 +1,5 @@
 import AppIntents
 import Foundation
-import UniformTypeIdentifiers
 
 /// Headless file -> transcript intent for Shortcuts (KTD6 background path).
 /// iOS gives an intent no microphone, so headless capture is the Shortcuts
@@ -9,7 +8,9 @@ struct TranscribeAudioIntent: AppIntent {
     static var title: LocalizedStringResource = "Transcribe Audio"
     static var openAppWhenRun: Bool = false
 
-    @Parameter(title: "Audio file", supportedContentTypes: [.audio])
+    // supportedContentTypes: on @Parameter is iOS 18+; the plain file
+    // parameter keeps iOS 17 support. The gateway validates the audio anyway.
+    @Parameter(title: "Audio file")
     var audioFile: IntentFile
 
     var service = TranscribeService()
