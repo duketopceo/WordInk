@@ -44,3 +44,26 @@ endpoints (loopback/RFC-1918 IPs, `.local`/unqualified hosts, and Tailscale's
 1. Mint a device token on the gateway: `wordink-gateway tokens create`.
 2. In the app, enter the gateway URL and the token; it validates against `/v1/models`.
 3. Hold (or tap) the capture control, dictate, release — the transcript is on the clipboard.
+
+## Shortcuts, Siri, Action Button
+
+Two App Intents ship in the app:
+
+- **Dictate** (`StartDictationIntent`) opens the app and starts recording — use it from a
+  lock-screen/Control Center widget (iOS 18+), an Action Button shortcut, or "Hey Siri, dictate
+  with WordInk Remote".
+- **Transcribe Audio** (`TranscribeAudioIntent`) is headless: it takes an audio file and returns
+  the transcript text. Since an intent has no microphone, the no-UI capture flow is a Shortcuts
+  composition: *Record Audio → Transcribe Audio → Copy to Clipboard / Paste*, then assign that
+  shortcut to the Action Button.
+
+## App Store
+
+- Display name: `WordInk Remote`. Bundle ID: `com.wordink.remote` (widgets `…remote.widgets`).
+- Privacy policy URL: the deployed `apps/docs` privacy page (`/privacy.html`) — it carries the
+  iOS data-flow section.
+- App Review note to include: the app transcribes only through a user-configured, self-hosted
+  WordInk gateway (OpenAI-compatible `POST /v1/audio/transcriptions`); there is no account system
+  and nothing is sent to the developer.
+- Signing and App Store Connect keys are not in this repo; archive locally with `xcodegen` +
+  Xcode or an unsigned CI build for compile checks.
