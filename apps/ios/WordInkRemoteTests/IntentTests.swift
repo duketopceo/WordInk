@@ -44,6 +44,8 @@ final class IntentTests: XCTestCase {
             XCTFail("expected unreachable")
         } catch let error as GatewayError {
             XCTAssertEqual(error, .unreachable)
+        } catch {
+            XCTFail("expected GatewayError, got \(error)")
         }
     }
 }

@@ -36,6 +36,8 @@ final class TranscribeServiceTests: XCTestCase {
             guard case .invalidEndpoint = error else {
                 return XCTFail("expected invalidEndpoint, got \(error)")
             }
+        } catch {
+            XCTFail("expected GatewayError, got \(error)")
         }
     }
 
@@ -46,6 +48,8 @@ final class TranscribeServiceTests: XCTestCase {
             XCTFail("expected auth")
         } catch let error as GatewayError {
             XCTAssertEqual(error, .auth)
+        } catch {
+            XCTFail("expected GatewayError, got \(error)")
         }
     }
 }

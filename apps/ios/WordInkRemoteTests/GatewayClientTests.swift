@@ -66,6 +66,8 @@ final class GatewayClientTests: XCTestCase {
             XCTFail("expected auth error")
         } catch let error as GatewayError {
             XCTAssertEqual(error, .auth)
+        } catch {
+            XCTFail("expected GatewayError, got \(error)")
         }
     }
 
@@ -76,6 +78,8 @@ final class GatewayClientTests: XCTestCase {
             XCTFail("expected unreachable")
         } catch let error as GatewayError {
             XCTAssertEqual(error, .unreachable)
+        } catch {
+            XCTFail("expected GatewayError, got \(error)")
         }
     }
 
@@ -86,6 +90,8 @@ final class GatewayClientTests: XCTestCase {
             XCTFail("expected server error")
         } catch let error as GatewayError {
             XCTAssertEqual(error, .server(502))
+        } catch {
+            XCTFail("expected GatewayError, got \(error)")
         }
     }
 
@@ -115,6 +121,8 @@ final class GatewayClientTests: XCTestCase {
             XCTFail("expected decoding error")
         } catch let error as GatewayError {
             XCTAssertEqual(error, .decoding)
+        } catch {
+            XCTFail("expected GatewayError, got \(error)")
         }
     }
 
@@ -127,6 +135,8 @@ final class GatewayClientTests: XCTestCase {
             XCTFail("expected auth error")
         } catch let error as GatewayError {
             XCTAssertEqual(error, .auth)
+        } catch {
+            XCTFail("expected GatewayError, got \(error)")
         }
     }
 }
