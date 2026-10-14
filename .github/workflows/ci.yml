@@ -81,3 +81,17 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - run: uv sync
       - run: uv run python -m compileall wordink
+  ios:
+    runs-on: macos-15
+    defaults:
+      run: { working-directory: apps/ios }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen --spec project.yml
+      - name: Build and test on iOS Simulator
+        run: |
+          SIM=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; devs=json.load(sys.stdin)["devices"]; names=[d["name"] for r in devs.values() for d in r if d["name"].startswith("iPhone")]; print(sorted(names)[-1])')
+          xcodebuild -scheme WordInkRemote -destination "platform=iOS Simulator,name=$SIM" CODE_SIGNING_ALLOWED=NO -derivedDataPath build test
