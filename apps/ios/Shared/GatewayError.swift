@@ -1,7 +1,7 @@
 import Foundation
 
 /// Named failure causes surfaced verbatim to the user (R5, R9).
-enum GatewayError: Error, Equatable {
+enum GatewayError: Error, Equatable, LocalizedError {
     /// The endpoint fails the transport policy or cannot be parsed; carries the reason.
     case invalidEndpoint(String)
     /// DNS, connect, TLS, or timeout failure — reads as reachability per R9.
@@ -14,6 +14,9 @@ enum GatewayError: Error, Equatable {
     case decoding
     /// Microphone capture failed before upload; carries the reason.
     case recording(String)
+
+    /// LocalizedError so Shortcuts shows the real cause when an intent throws.
+    var errorDescription: String? { message }
 
     var message: String {
         switch self {

@@ -8,6 +8,7 @@ struct DictationView: View {
     @ObservedObject private var history = HistoryStore.shared
     @State private var pressedAt: Date?
     @State private var showSettings = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 32) {
@@ -40,6 +41,16 @@ struct DictationView: View {
             }
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .onAppear(perform: consumePendingDictation)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { consumePendingDictation() }
+        }
+    }
+
+    /// StartDictationIntent (control widget / Siri / Action Button) arms a
+    /// flag, then opens the app — consume it once and begin capture.
+    private func consumePendingDictation() {
+        if PendingDictation.consume() { vm.startRecording() }
     }
 
     private var statusLabel: some View {
