@@ -225,7 +225,7 @@ public struct FlowKeyboardBarView: View {
         let isTranscribing = viewModel.sessionState == .transcribing
 
         return HStack(spacing: 6) {
-            Image(systemName: isListening ? "waveform" : (isTranscribing ? "ellipsis.Bubble" : "mic.fill"))
+            Image(systemName: isListening ? "waveform" : (isTranscribing ? "ellipsis.bubble" : "mic.fill"))
                 .font(.system(size: 15, weight: .bold))
             Text(micButtonLabel)
                 .font(.caption.weight(.bold))

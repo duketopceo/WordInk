@@ -11,7 +11,7 @@ import UIKit
 /// `textDocumentProxy.insertText(_:)`, captures `selectedText` for Command Mode, and runs the
 /// 20-second post-insertion `EditVocabularyLearner`.
 public final class KeyboardViewController: UIInputViewController {
-    private let store: AppGroupStore = UserDefaultsAppGroupStore() ?? InMemoryAppGroupStore()
+    private let store: AppGroupStore = (UserDefaultsAppGroupStore() as AppGroupStore?) ?? InMemoryAppGroupStore()
     private lazy var flowController = KeyboardFlowController(store: store)
     private lazy var editLearner = EditVocabularyLearner(
         store: store,

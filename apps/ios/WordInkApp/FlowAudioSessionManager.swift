@@ -39,7 +39,7 @@ public final class FlowAudioSessionManager: ObservableObject {
     #endif
 
     public init(
-        store: AppGroupStore = UserDefaultsAppGroupStore() ?? InMemoryAppGroupStore()
+        store: AppGroupStore = (UserDefaultsAppGroupStore() as AppGroupStore?) ?? InMemoryAppGroupStore()
     ) {
         self.store = store
         let initial = store.loadPayload()
