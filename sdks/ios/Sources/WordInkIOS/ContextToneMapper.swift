@@ -1,0 +1,92 @@
+import Foundation
+
+/// Simplified representation of `UITextDocumentProxy` keyboard traits so `ContextToneMapper`
+/// remains portable and testable on both iOS and macOS without importing UIKit.
+public struct KeyboardFieldTraits: Equatable, Sendable {
+    public var keyboardType: String?
+    public var textContentType: String?
+    public var autocorrectionDisabled: Bool
+    public var isMonospacedOrCodeField: Bool
+
+    public init(
+        keyboardType: String? = nil,
+        textContentType: String? = nil,
+        autocorrectionDisabled: Bool = false,
+        isMonospacedOrCodeField: Bool = false
+    ) {
+        self.keyboardType = keyboardType
+        self.textContentType = textContentType
+        self.autocorrectionDisabled = autocorrectionDisabled
+        self.isMonospacedOrCodeField = isMonospacedOrCodeField
+    }
+}
+
+/// Maps the host application's bundle identifier and active text-field traits to a `FlowTone` preset.
+public enum ContextToneMapper {
+    private static let casualBundles: Set<String> = [
+        "com.apple.mobilesms",
+        "net.whatsapp.whatsapp",
+        "org.whispersystems.signal",
+        "ph.telegra.telegraph",
+        "com.atebits.tweetie2",
+        "com.burbn.instagram",
+        "com.hammerandchisel.discord"
+    ]
+
+    private static let workBundles: Set<String> = [
+        "com.tinyspeck.chatlyio", // Slack
+        "com.microsoft.skype.teams",
+        "notion.id",
+        "com.linear",
+        "com.apple.mobilenotes",
+        "com.google.docs"
+    ]
+
+    private static let emailBundles: Set<String> = [
+        "com.apple.mobilemail",
+        "com.google.gmail",
+        "com.microsoft.office.outlook",
+        "com.superhuman.mail",
+        "com.readdle.smartemail"
+    ]
+
+    private static let codeBundles: Set<String> = [
+        "com.termius",
+        "com.termius.ios",
+        "com.panic.prompt",
+        "ish.app",
+        "com.github.storm",
+        "app.workingcopy"
+    ]
+
+    /// Resolve the appropriate `FlowTone` for a given host bundle ID and keyboard traits.
+    public static func tone(
+        forBundleId bundleId: String?,
+        traits: KeyboardFieldTraits = KeyboardFieldTraits()
+    ) -> FlowTone {
+        if traits.isMonospacedOrCodeField {
+            return .code
+        }
+        if let kb = traits.keyboardType?.lowercased(),
+           kb == "url" || kb == "asciicapable" && traits.autocorrectionDisabled {
+            return .code
+        }
+
+        // An explicit email field wins over the host app's bundle (e.g. an email field in a work app).
+        if let contentType = traits.textContentType?.lowercased(), contentType.contains("email") {
+            return .email
+        }
+
+        if let rawBundle = bundleId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !rawBundle.isEmpty {
+            let lower = rawBundle.lowercased()
+            // Known built-in bundle IDs only; arbitrary identifiers are never classified by substring.
+            if codeBundles.contains(lower) { return .code }
+            if emailBundles.contains(lower) { return .email }
+            if casualBundles.contains(lower) { return .casual }
+            if workBundles.contains(lower) { return .work }
+        }
+
+        return .work
+    }
+}

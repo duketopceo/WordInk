@@ -36,6 +36,19 @@ export {
   type TokenStore,
 } from "./gateway/tokens.js";
 export {
+  applyFlowCleanup,
+  applyTonePreset,
+  buildFlowCleanupPrompt,
+  expandSnippets,
+  formatSpokenLists,
+  learnVocabularyFromEdit,
+  resolveCourseCorrections,
+  stripFillers,
+  type FlowOptions,
+  type FlowTone,
+  type LearnedVocabularyDiff,
+} from "./gateway/flow.js";
+export {
   MAX_TERMS,
   VocabularyStoreError,
   cleanTerm,

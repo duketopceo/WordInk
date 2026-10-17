@@ -3,6 +3,7 @@
 import { createMemoryLimiter, errorName, GATEWAY_LOG_PREFIX, isRecord, limiterRetrySeconds, readCapped } from "../internal.js";
 import type { RateLimiter, RateLimitOptions } from "../internal.js";
 import { parseTranscriptionForm, type ParseError } from "./multipart.js";
+import { applyFlowCleanup, type FlowOptions } from "./flow.js";
 import { DEFAULT_MODELS, type ResolvedEntry } from "./providers.js";
 import { createRouter } from "./router.js";
 import type { TokenInfo, TokenStore } from "./tokens.js";
@@ -66,6 +67,14 @@ export interface GatewayConfig {
    * opt in) and transcription uses the static `vocabulary` alone.
    */
   vocabularyStore?: VocabularyStore | undefined;
+  /**
+   * Optional deterministic Wispr Flow post-processing applied to transcription responses.
+   * This is an operator-wide opt-in: when set it rewrites `text` for EVERY client of this gateway,
+   * including clients that send no Flow fields. Leave unset (the default) to keep responses
+   * byte-identical for Voxtype and TypeWhisper. The unprocessed provider text is preserved in
+   * `verbose_json` as `wordink.raw`.
+   */
+  flow?: FlowOptions | undefined;
   /** Per-token limiter settings, or a limiter function. Default {@link DEFAULT_GATEWAY_RATE_LIMIT}. */
   rateLimit?: RateLimitOptions | RateLimiter | undefined;
   /** Upload cap; larger bodies get 413 in the OpenAI shape before any provider call. Default 25 MB. */
@@ -509,11 +518,18 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
         return new Response(JSON.stringify(result.body), { status: result.status, headers: JSON_HEADERS });
       }
 
+      const text = config.flow ? applyFlowCleanup(result.text, config.flow) : result.text;
       if (parsed.form.responseFormat === "text") {
-        return new Response(result.text, { status: 200, headers: TEXT_HEADERS });
+        return new Response(text, { status: 200, headers: TEXT_HEADERS });
       }
       const json =
-        parsed.form.responseFormat === "verbose_json" ? (result.verbose ?? { text: result.text }) : { text: result.text };
+        parsed.form.responseFormat === "verbose_json"
+          ? {
+              ...(result.verbose ?? {}),
+              text,
+              ...(config.flow ? { wordink: { raw: result.text } } : {}),
+            }
+          : { text };
       return new Response(JSON.stringify(json), { status: 200, headers: JSON_HEADERS });
     } catch (err) {
       // An unexpected throw (e.g. a reset body stream mid-upload) still answers in
