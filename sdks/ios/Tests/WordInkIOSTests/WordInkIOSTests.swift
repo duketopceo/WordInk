@@ -65,6 +65,65 @@ final class WordInkIOSTests: XCTestCase {
         XCTAssertEqual(secondPoll.lastSeq, 2)
     }
 
+    func testKeyboardFlowControllerKeepsTranscriptPendingUntilAcknowledged() {
+        let store = InMemoryAppGroupStore(
+            initialPayload: SharedFlowPayload(
+                state: .readyToInsert,
+                lease: FlowLease(acquiredAt: 1_000),
+                seq: 3,
+                transcript: "Pending text."
+            )
+        )
+        let controller = KeyboardFlowController(store: store)
+
+        // A tap while a transcript is waiting must not orphan it.
+        XCTAssertEqual(controller.onMicTap(now: 1_010), .none)
+        XCTAssertEqual(controller.pollInsertion(lastSeq: 2).textToInsert, "Pending text.")
+        // Polling alone does not consume it.
+        XCTAssertEqual(store.loadPayload().transcript, "Pending text.")
+
+        controller.acknowledgeInsertion(seq: 3, now: 1_011)
+        XCTAssertNil(store.loadPayload().transcript)
+        XCTAssertNotEqual(controller.onMicTap(now: 1_012), .none)
+    }
+
+    func testKeyboardFlowControllerClearsStaleHostBundleId() {
+        let store = InMemoryAppGroupStore(
+            initialPayload: SharedFlowPayload(state: .warming, lease: FlowLease(acquiredAt: 1_000))
+        )
+        let controller = KeyboardFlowController(store: store)
+        _ = controller.onMicTap(now: 1_010, hostBundleId: "com.apple.MobileSMS")
+        XCTAssertEqual(store.loadPayload().hostBundleId, "com.apple.MobileSMS")
+        _ = controller.onMicRelease(now: 1_011)
+        var payload = store.loadPayload()
+        payload.state = .warming
+        store.savePayload(payload)
+        _ = controller.onMicTap(now: 1_012, hostBundleId: nil)
+        XCTAssertNil(store.loadPayload().hostBundleId)
+    }
+
+    func testStoreDoesNotLetStaleWriteEraseNewerHostUtterance() {
+        let store = InMemoryAppGroupStore(
+            initialPayload: SharedFlowPayload(state: .readyToInsert, seq: 5, transcript: "newer")
+        )
+        store.savePayload(SharedFlowPayload(state: .warming, seq: 2, activeTone: .email))
+        let payload = store.loadPayload()
+        XCTAssertEqual(payload.seq, 5)
+        XCTAssertEqual(payload.transcript, "newer")
+        XCTAssertEqual(payload.activeTone, .email)
+    }
+
+    func testContextToneMapperPrefersEmailFieldAndKnownBundlesOnly() {
+        XCTAssertEqual(
+            ContextToneMapper.tone(
+                forBundleId: "com.tinyspeck.chatlyio",
+                traits: KeyboardFieldTraits(textContentType: "emailAddress")
+            ),
+            .email
+        )
+        XCTAssertEqual(ContextToneMapper.tone(forBundleId: "com.example.mailroom"), .work)
+    }
+
     func testContextToneMapperMapsHostBundlesAndTraits() {
         XCTAssertEqual(ContextToneMapper.tone(forBundleId: "com.apple.MobileSMS"), .casual)
         XCTAssertEqual(ContextToneMapper.tone(forBundleId: "com.tinyspeck.chatlyio"), .work)

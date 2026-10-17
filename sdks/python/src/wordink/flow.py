@@ -111,7 +111,7 @@ def strip_fillers(text: str) -> str:
 
 
 CORRECTION_MARKER_RE = re.compile(
-    r"[,\s—-]*\b(no\s+wait|wait\s+no|actually\s+no|scratch\s+that|i\s+mean|or\s+rather)\b[,\s—-]*",
+    r"[,\s—-]*\b(no\s+wait|wait\s+no|actually\s+no|scratch\s+that)\b[,\s—-]*",
     re.IGNORECASE,
 )
 
@@ -161,7 +161,7 @@ CLAUSE_STARTERS = {
 
 
 def resolve_course_corrections(text: str) -> str:
-    """Resolve mid-sentence backtracking markers (no wait, actually no, scratch that, I mean)."""
+    """Resolve mid-sentence backtracking markers (no wait, wait no, actually no, scratch that)."""
     if not text:
         return text
     current = text

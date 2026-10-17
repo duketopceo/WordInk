@@ -47,10 +47,21 @@ public final class KeyboardFlowController {
         hostBundleId: String? = nil
     ) -> KeyboardMicAction {
         var payload = store.loadPayload()
-        payload.activeTone = tone
-        if let hostBundleId {
-            payload.hostBundleId = hostBundleId
+
+        // Never start a new utterance while one is in flight or its transcript is still waiting
+        // to be inserted; doing so would orphan the pending transcript.
+        switch payload.state {
+        case .listening, .transcribing:
+            return .none
+        case .readyToInsert where payload.transcript != nil:
+            return .none
+        default:
+            break
         }
+
+        payload.activeTone = tone
+        // Assigned unconditionally so a tap without a bundle ID never inherits the previous app's ID.
+        payload.hostBundleId = hostBundleId
 
         guard let lease = payload.lease, lease.isWarm(at: now), payload.state != .cold else {
             payload.state = .warming
@@ -81,9 +92,13 @@ public final class KeyboardFlowController {
 
     /// Poll the shared App Group payload for a newly transcribed utterance.
     /// Never returns the same utterance twice: only a payload with `seq > lastSeq` and a non-empty
-    /// transcript is consumed, advancing `lastSeq` to `payload.seq`.
+    /// transcript is returned, advancing `lastSeq` to `payload.seq`.
+    ///
+    /// Polling does not consume the transcript. The caller must call `acknowledgeInsertion(seq:now:)`
+    /// after `textDocumentProxy.insertText(_:)` so an utterance is not lost if the extension exits
+    /// before the insertion completes.
     public func pollInsertion(lastSeq: UInt64) -> PollInsertionResult {
-        var payload = store.loadPayload()
+        let payload = store.loadPayload()
         guard payload.state == .readyToInsert,
               payload.seq > lastSeq,
               let text = payload.transcript,
@@ -91,10 +106,17 @@ public final class KeyboardFlowController {
             return PollInsertionResult(textToInsert: nil, lastSeq: lastSeq)
         }
 
-        let newSeq = payload.seq
+        return PollInsertionResult(textToInsert: text, lastSeq: payload.seq)
+    }
+
+    /// Confirm that the utterance with sequence `seq` was inserted, clearing its pending transcript.
+    /// A no-op when a newer utterance has since been published.
+    public func acknowledgeInsertion(seq: UInt64, now: TimeInterval) {
+        var payload = store.loadPayload()
+        guard payload.seq == seq, payload.transcript != nil else { return }
         payload.transcript = nil
+        payload.updatedAt = now
         store.savePayload(payload)
-        return PollInsertionResult(textToInsert: text, lastSeq: newSeq)
     }
 
     private func buildWarmDeepLink(tone: FlowTone, hostBundleId: String?) -> URL {

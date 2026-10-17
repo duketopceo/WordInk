@@ -46,7 +46,13 @@ export interface GatewayConfig {
   providers: readonly ResolvedEntry[];
   /** Gateway-wide operator vocabulary merged into every attempt's prompt or keyterms (KTD6, R12). */
   vocabulary?: readonly string[] | undefined;
-  /** Optional deterministic Wispr Flow post-processing applied to transcription responses. */
+  /**
+   * Optional deterministic Wispr Flow post-processing applied to transcription responses.
+   * This is an operator-wide opt-in: when set it rewrites `text` for EVERY client of this gateway,
+   * including clients that send no Flow fields. Leave unset (the default) to keep responses
+   * byte-identical for Voxtype and TypeWhisper. The unprocessed provider text is preserved in
+   * `verbose_json` as `wordink.raw`.
+   */
   flow?: FlowOptions | undefined;
   /** Per-token limiter settings, or a limiter function. Default {@link DEFAULT_GATEWAY_RATE_LIMIT}. */
   rateLimit?: RateLimitOptions | RateLimiter | undefined;
@@ -152,7 +158,11 @@ export function createGatewayHandler(config: GatewayConfig): (request: Request) 
       }
       const json =
         parsed.form.responseFormat === "verbose_json"
-          ? { ...(result.verbose ?? { text }), text }
+          ? {
+              ...(result.verbose ?? {}),
+              text,
+              ...(config.flow ? { wordink: { raw: result.text } } : {}),
+            }
           : { text };
       return new Response(JSON.stringify(json), { status: 200, headers: JSON_HEADERS });
     } catch (err) {

@@ -72,25 +72,19 @@ public enum ContextToneMapper {
             return .code
         }
 
+        // An explicit email field wins over the host app's bundle (e.g. an email field in a work app).
+        if let contentType = traits.textContentType?.lowercased(), contentType.contains("email") {
+            return .email
+        }
+
         if let rawBundle = bundleId?.trimmingCharacters(in: .whitespacesAndNewlines),
            !rawBundle.isEmpty {
             let lower = rawBundle.lowercased()
-            if codeBundles.contains(lower) || lower.contains("termius") || lower.contains("terminal") || lower.contains("code") {
-                return .code
-            }
-            if emailBundles.contains(lower) || lower.contains("mail") {
-                return .email
-            }
-            if casualBundles.contains(lower) || lower.contains("mobilesms") || lower.contains("imessage") {
-                return .casual
-            }
-            if workBundles.contains(lower) || lower.contains("slack") || lower.contains("chatlyio") {
-                return .work
-            }
-        }
-
-        if let contentType = traits.textContentType?.lowercased(), contentType.contains("email") {
-            return .email
+            // Known built-in bundle IDs only; arbitrary identifiers are never classified by substring.
+            if codeBundles.contains(lower) { return .code }
+            if emailBundles.contains(lower) { return .email }
+            if casualBundles.contains(lower) { return .casual }
+            if workBundles.contains(lower) { return .work }
         }
 
         return .work

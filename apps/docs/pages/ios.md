@@ -47,7 +47,7 @@ WordInk solves both constraints using the **Two-Process Warm-Lease Flow Architec
 Every platform shares the exact same deterministic post-processing rules verified against `tests/fixtures/flow-contract.json`:
 
 - `stripFillers`: Removes spoken hesitations (`um`, `uh`, `erm`, `ah`) and comma-flanked discourse fillers (`like`, `you know`) while preserving sentence capitalization and real words.
-- `resolveCourseCorrections`: Resolves mid-sentence backtracking markers (`no wait`, `scratch that`, `actually no`, `I mean`) so only the intended replacement phrase remains.
+- `resolveCourseCorrections`: Resolves mid-sentence backtracking markers (`no wait`, `wait no`, `scratch that`, `actually no`); ordinary phrases such as `I mean` are left alone so only the intended replacement phrase remains.
 - `formatSpokenLists`: Formats spoken ordinal sequences (`first ... second ... third ...`) and spoken bullets (`bullet one ... bullet two ...`) into numbered or bulleted lists.
 - `expandSnippets`: Expands case-insensitive spoken triggers (`"my calendly"` -> `"https://cal.com/luke"`) on word boundaries with longest-match precedence.
 - `applyTonePreset`: Formats output for `casual`, `work`, `email`, `code` (`camel case`, `snake case`, `pascal case`, `kebab case`, `screaming snake case`), or `verbatim`.

@@ -40,9 +40,9 @@
       "expected": "deploy to production"
     },
     {
-      "id": "backtrack-i-mean-number",
-      "input": "we need five I mean six reviewers",
-      "expected": "we need six reviewers"
+      "id": "i-mean-is-not-a-marker",
+      "input": "we should ship, I mean it, today",
+      "expected": "we should ship, I mean it, today"
     },
     {
       "id": "backtrack-full-clause-replacement",

@@ -117,6 +117,23 @@ public struct SharedFlowPayload: Codable, Equatable, Sendable {
     }
 }
 
+extension SharedFlowPayload {
+    /// Returns `self` with the host-owned utterance fields (`seq`, `transcript`, `state`) taken from
+    /// `existing` when `existing` carries a newer utterance. The keyboard and host both
+    /// load-modify-save the whole payload, so without this a stale keyboard write would replace a
+    /// transcript the host published in the meantime. Stores apply it at write time to keep the
+    /// race window to a single read-then-write. A fully atomic cross-process update would need the
+    /// utterance data split from the keyboard-owned session fields.
+    func preservingNewerUtterance(from existing: SharedFlowPayload) -> SharedFlowPayload {
+        guard existing.seq > seq else { return self }
+        var merged = self
+        merged.seq = existing.seq
+        merged.transcript = existing.transcript
+        merged.state = existing.state
+        return merged
+    }
+}
+
 /// Abstraction over the shared App Group key-value store so the controller and learner can be
 /// unit-tested deterministically without requiring an entitled iOS simulator container.
 public protocol AppGroupStore: AnyObject {
@@ -147,7 +164,7 @@ public final class InMemoryAppGroupStore: AppGroupStore {
     }
 
     public func savePayload(_ payload: SharedFlowPayload) {
-        payloadData = try? encoder.encode(payload)
+        payloadData = try? encoder.encode(payload.preservingNewerUtterance(from: loadPayload()))
     }
 
     public func loadPersonalDictionary() -> [String] {
@@ -185,7 +202,7 @@ public final class UserDefaultsAppGroupStore: AppGroupStore {
     }
 
     public func savePayload(_ payload: SharedFlowPayload) {
-        if let data = try? encoder.encode(payload) {
+        if let data = try? encoder.encode(payload.preservingNewerUtterance(from: loadPayload())) {
             defaults.set(data, forKey: WordInkAppGroup.payloadKey)
         }
     }

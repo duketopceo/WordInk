@@ -7,7 +7,7 @@ Lightweight Swift 5.9+ package (`iOS 17+`, `macOS 14+`) implementing the Wispr F
 Apple enforces strict sandbox and memory limits on custom keyboard extensions (`UIInputViewController`):
 
 1. **48 MB Memory Ceiling (`jetsam`):** A keyboard extension cannot load local Whisper/Moonshine neural models or retain large PCM buffers in-process without being terminated by the operating system.
-2. **Microphone & Background Audio Sandbox:** iOS blocks keyboard extensions from starting `AVAudioEngine` / `AVAudioSession` recording unless `RequestsOpenAccess = YES` is granted, and even with Open Access, iOS restricts background microphone activation directly from an unprimed extension process.
+2. **Microphone & Background Audio Sandbox:** iOS gives custom keyboard extensions no microphone access at all. `RequestsOpenAccess = YES` only enables capabilities such as network access and writing to a shared container; it does not grant the microphone. Audio capture therefore always stays in the host app.
 3. **`RequestsOpenAccess` + Deep-Link Warm Lease:** Like Wispr Flow, `WordInkIOS` splits responsibility across two targets sharing an App Group container (`group.io.wordink.shared`):
    - **Host App (`WordInkHost`):** Activated once via deep link (`wordink://flow/warm?tone=work`) when the mic lease is cold or expired. The host app configures an active `AVAudioSession` with `.playAndRecord` + `UIBackgroundModes = [audio]`, starts a Dynamic Island / Lock Screen **Live Activity** (`ActivityKit`), and keeps a warm microphone lease (`FlowLease`, default TTL 300 seconds) alive in the background.
    - **Keyboard Extension (`WordInkKeyboard`):** Runs a zero-allocation state machine (`KeyboardFlowController`) well under a few megabytes of RAM. When the user taps the mic key:

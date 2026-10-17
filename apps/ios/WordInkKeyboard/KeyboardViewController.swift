@@ -139,6 +139,7 @@ public final class KeyboardViewController: UIInputViewController {
 
         lastInsertedSeq = result.lastSeq
         textDocumentProxy.insertText(text)
+        flowController.acknowledgeInsertion(seq: result.lastSeq, now: Date().timeIntervalSince1970)
         editLearner.recordInsertion(text, at: Date().timeIntervalSince1970)
     }
 

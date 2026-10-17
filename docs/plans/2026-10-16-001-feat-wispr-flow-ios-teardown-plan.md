@@ -6,7 +6,7 @@ topic: wispr-flow-ios-teardown
 artifact_contract: ce-unified-plan/v1
 product_contract_source: ce-plan (teardown-derived)
 execution: code
-target_repo: duketopceo/WordInk (/home/user/workspace/re/WordInk)
+target_repo: duketopceo/WordInk
 ---
 
 # Wispr Flow + Wispr Flow for iOS Teardown and WordInk iOS Keyboard - Plan
@@ -23,7 +23,7 @@ target_repo: duketopceo/WordInk (/home/user/workspace/re/WordInk)
   - Stop if a change would alter current `/v1/audio/transcriptions` responses for clients that send no new Flow fields (Voxtype and TypeWhisper must stay byte-identical).
   - Do not copy GPLv3 TypeWhisper iOS code into MIT WordInk. Re-implement the *pattern* only.
 - **Execution profile:** W1 and W2 run first, server side, and parallel to each other. W3 comes next. W4 and W5 run in parallel after W3. W6 and W7 come last.
-- **Coordination note:** A separate subagent is changing `packages/server/src/gateway/flow.ts`, `gateway/index.ts` and `test/gateway/flow.test.ts`. The diff is uncommitted (`git status`: `M gateway/index.ts`, `?? gateway/flow.ts`, `?? test/gateway/flow.test.ts`). W1 and W2 below are written as **deltas against that in-tree baseline**. They do not restart it.
+- **Coordination note:** The `packages/server/src/gateway/flow.ts`, `gateway/index.ts` and `test/gateway/flow.test.ts` baseline is now committed on this branch. W1 and W2 below are written as **deltas against that baseline**.
 
 ---
 
@@ -35,7 +35,7 @@ Each claim carries one provenance label and one confidence level.
 | --- | --- |
 | **documentation-based** | Wispr Flow's own help center (`docs.wisprflow.ai`), marketing site (`wisprflow.ai`), App Store listing, or Apple developer documentation. |
 | **source-assisted** | Read from public open-source repositories: `Baranets/typewhisper-ios` (GPLv3 mirror of TypeWhisper iOS) and `argmaxinc/WhisperKit` (MIT). |
-| **in-tree** | Read from `/home/user/workspace/re/WordInk` (MIT), read-only. |
+| **in-tree** | Read from this repository (MIT), read-only. |
 | **third-party** | Press coverage (TechCrunch, 9to5Mac, MacStories, KeyboardKit docs). Corroborating only. |
 
 Confidence: **high** = stated directly by a first-party source or seen in code. **moderate** = inferred from several consistent sources, or community-measured. **low** = plausible inference that has not been verified.
@@ -44,7 +44,7 @@ Confidence: **high** = stated directly by a first-party source or seen in code. 
 - **No commercial Wispr Flow IPA, macOS `.app`, Windows binary, or Android APK was downloaded, decrypted, decompiled, or disassembled.** No network traffic from Wispr Flow was intercepted. Every Wispr claim below comes from Wispr's public documentation and press, not from the binary.
 - No Reddit sources were used.
 - No code from GPLv3 TypeWhisper iOS goes into WordInk. Only architecture patterns, which are not copyrightable, are carried over, and they are described in prose.
-- No files under `/home/user/workspace/re/WordInk` were changed by this plan's author.
+- The plan's author changed no files other than this document.
 
 ---
 
@@ -126,7 +126,7 @@ Apple warns that with Full Access users "know their keystrokes are available to 
 | O4 | **TypeWhisper iOS docs** | Describes the dictation and keyboard UX ([TypeWhisper docs](https://www.typewhisper.com/en/docs/ios/dictation-and-keyboard/)). | documentation-based | high |
 | O5 | **WhisperKit (Argmax, MIT)** | Whisper on Core ML and the Apple Neural Engine, from the `tiny` model up to `large-v3-turbo` ([GitHub](https://github.com/argmaxinc/WhisperKit), [docs](https://argmaxinc-whisperkit.mintlify.app/introduction), [blog](https://www.argmaxinc.com/blog/whisperkit)). Even the tiny Whisper models are reported far above keyboard limits at runtime (about 273 MB for whisper.cpp tiny per [OpenSuperWhisper #135](https://github.com/Starmel/OpenSuperWhisper/issues/135)), so it **must run in the host app**. | source-assisted + third-party | high (host-only) / moderate (exact RAM) |
 | O6 | **WordInk gateway** (`packages/server/src/gateway/`) | `index.ts`: `POST /v1/audio/transcriptions`, `GET /v1/models`, Bearer `wdk_…` tokens, 60 req/min per token, 25 MB cap, and `config.flow` applied **gateway-wide**. `router.ts`: ordered fallback across Groq → OpenAI → Deepgram with cooldowns. `vocabulary.ts`: 800-char prompt merge and a 50-keyterm cap. `multipart.ts`: only `file/model/prompt/language/response_format/temperature` are parsed. | in-tree | high |
-| O7 | **WordInk `flow.ts`** (in progress, uncommitted) | `stripFillers`, `resolveCourseCorrections` (markers: `no wait`, `wait no`, `actually no`, `scratch that`, `I mean`, `or rather`), `formatSpokenLists`, `expandSnippets` (longest-first, Unicode word boundary), `applyTonePreset` (`casual\|work\|email\|code\|verbatim`), `buildFlowCleanupPrompt` (with Command mode), and `learnVocabularyFromEdit` (LCS diff, 40% rewrite guard, ≤ 3-token spans). | in-tree | high |
+| O7 | **WordInk `flow.ts`** (committed on this branch) | `stripFillers`, `resolveCourseCorrections` (markers: `no wait`, `wait no`, `actually no`, `scratch that`; `I mean` and `or rather` were dropped as default markers because they corrupt ordinary speech), `formatSpokenLists`, `expandSnippets` (longest-first, Unicode word boundary), `applyTonePreset` (`casual\|work\|email\|code\|verbatim`), `buildFlowCleanupPrompt` (with Command mode), and `learnVocabularyFromEdit` (LCS diff, 40% rewrite guard, ≤ 3-token spans). | in-tree | high |
 | O8 | **WordInk `wordink-core`** (`crates/wordink-core/src/session.rs`) | Sans-I/O `Session` state machine, `SPEECH_RMS_THRESHOLD = 0.01`, `MIN_SPEECH_MS = 300`, `MAX_UTTERANCE_MS = 60_000`. | in-tree | high |
 
 ### 3.5 Gap map: Wispr behavior vs the current WordInk in-tree baseline
@@ -381,7 +381,7 @@ sequenceDiagram
 | Darwin notifications are unreliable across extension suspension | low-moderate | 250 ms fallback poll plus heartbeat staleness (D4). |
 | The keyboard memory cap is lower on old devices | moderate | 20 MB self-budget, no ML in the keyboard, memory gate in CI. |
 | Learned dictionary gets polluted | moderate | Noise filters, tombstones, Levenshtein rewrite guard, user-visible list. |
-| A coordination conflict with the subagent editing `flow.ts` | high (near term) | W1 and W2 land only after that diff merges, and are rebased as additive changes. |
+| A coordination conflict while `flow.ts` was being edited elsewhere | resolved | The baseline is committed; W1 and W2 apply as additive changes. |
 
 ## 11. Open Questions (non-blocking)
 
@@ -430,4 +430,4 @@ sequenceDiagram
 - WhisperKit (Argmax): https://github.com/argmaxinc/WhisperKit
 - WhisperKit docs: https://argmaxinc-whisperkit.mintlify.app/introduction
 - Argmax WhisperKit blog: https://www.argmaxinc.com/blog/whisperkit
-- In-tree (read-only): `/home/user/workspace/re/WordInk/packages/server/src/gateway/{index,flow,multipart,providers,router,vocabulary,tokens,file-tokens}.ts`, `/home/user/workspace/re/WordInk/packages/server/test/gateway/flow.test.ts`, `/home/user/workspace/re/WordInk/crates/wordink-core/src/{lib,session,audio}.rs`
+- In-tree (read-only): `packages/server/src/gateway/{index,flow,multipart,providers,router,vocabulary,tokens,file-tokens}.ts`, `packages/server/test/gateway/flow.test.ts`, `crates/wordink-core/src/{lib,session,audio}.rs`

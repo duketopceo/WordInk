@@ -170,7 +170,12 @@ public final class EditVocabularyLearner {
             return false
         }
         let hasUpperOrSymbol = to.range(of: "[A-Z0-9_-]", options: .regularExpression) != nil
-        let isRespelling = to.lowercased() == from.lowercased() || !to.contains(" ")
+        // A respelling is a case-only change or a spacing change ("word ink" -> "wordink"), not an
+        // arbitrary one-word substitution such as "meat" -> "meet".
+        let toLower = to.lowercased()
+        let fromLower = from.lowercased()
+        let isRespelling = toLower == fromLower
+            || fromLower.replacingOccurrences(of: " ", with: "") == toLower
         return hasUpperOrSymbol || isRespelling
     }
 }
