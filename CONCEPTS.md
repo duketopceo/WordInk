@@ -8,7 +8,15 @@ The OpenAI-compatible transcription endpoint `@wordink/server` exposes for deskt
 
 ### Device token
 
-A per-device bearer credential (`wdk_…`) a desktop client sends as its OpenAI "API key". Only hashes are stored; the token itself is shown once at creation and can be revoked per device, taking effect on the device's next request. Long-lived provider keys stay on the gateway and never reach a device.
+A per-device bearer credential (`wdk_…`) a desktop client sends as its OpenAI "API key". Only hashes are stored; the token itself is shown once at creation and can be revoked per device, taking effect on the device's next request. Long-lived provider keys stay on the gateway and never reach a device. Every token has a scope; a record written before scopes existed resolves to `device` (fail closed).
+
+### Admin token
+
+A device token minted with `tokens create --admin`. Admin is a superset of device scope: it transcribes and lists models like any device token and additionally reaches the vocabulary routes (`GET|POST|DELETE /v1/vocabulary`), which answer `403 insufficient_permissions` to device tokens. Intended for agents and operators, not daily dictation clients.
+
+### Runtime vocabulary
+
+Terms appended to the gateway's `vocabulary` at runtime via `/v1/vocabulary`, persisted to `$XDG_STATE_HOME/wordink/vocabulary.json` with provenance (`addedBy`, `addedByTokenId`, `addedAt`, plus tombstone fields for deletes). The effective set is the union: config terms first (operator-owned, `pinned`, undeletable through the API), then runtime terms in insertion order. A runtime case-variant of a config term is a spelling override (`config_shadowed`): the runtime record wins the union's casing while presence stays config-owned — deleting the override reverts to the config spelling. Mutations take effect on the next transcription; a corrupt file degrades transcription to config-only rather than taking dictation down.
 
 ### Provider entry
 

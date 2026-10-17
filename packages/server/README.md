@@ -167,12 +167,17 @@ Clients post the standard OpenAI multipart fields — `file`, `model`, `prompt`,
 | `tokenStore` | required | `TokenStore` implementation; `FileTokenStore` keeps SHA-256 hashes at `$XDG_STATE_HOME/wordink/gateway-tokens.json` (mode 0600, re-read on change so a CLI revoke lands on the next request). |
 | `providers` | required | Ordered `{ provider, key, model? }` entries; `model` defaults per provider (`whisper-large-v3-turbo`, `gpt-4o-transcribe`, `nova-3`). |
 | `vocabulary` | `[]` | Operator terms merged into every request. |
+| `vocabularyStore` | — | `VocabularyStore` implementation; `FileVocabularyStore` (from `@wordink/server/node`) persists runtime terms at `$XDG_STATE_HOME/wordink/vocabulary.json` (mode 0600). Set → `GET|POST|DELETE /v1/vocabulary` answer for admin tokens and every transcription resolves the live union; unset → those paths 404. |
 | `rateLimit` | `60/min per token, no daily cap` | A separate limiter instance from the browser relay's; 429s carry `Retry-After`. |
 | `maxBodyBytes` | `25 MB` | Larger uploads get 413 before any provider call. |
 | `upstreamTimeoutMs` | `15000` | Per-attempt timeout; the next entry is tried. |
 | `deadlineMs` | `30000` | Whole-chain bound; on expiry the client gets 504. |
 
 The gateway route needs no `authorize` hook and skips the browser Origin check — a `Bearer` device token is the credential. With `gateway` set and no `authorize`, the browser routes fail closed as usual and the startup log says so. The `wordink-gateway` CLI (`serve`, `tokens create|list|revoke`, `check`) wraps all of this with config-file key resolution; see `examples/gateway-systemd/`.
+
+### Runtime vocabulary
+
+Tokens carry a scope — `tokens create <label>` mints a `device` token; `tokens create --admin <label>` mints an `admin` one (a superset: it also transcribes and lists models). `GET|POST|DELETE {basePath}/v1/vocabulary` require admin scope: a device token gets `403 insufficient_permissions`, a missing/unknown/revoked one `401 invalid_api_key`. `POST {"terms": […]}` adds or respells terms (optional `"remove": […]` — the proxy-safe delete path — and `"dryRun": true`, which reports outcomes plus `capacity_exceeded` without persisting); `DELETE {"term": "…"}` removes a runtime term (`404 term_not_found`, `409 term_pinned` on config-owned terms, `400 too_many_terms`, `409 vocabulary_full` past the 200-term cap). Per-term outcomes: `added`/`already_present`/`updated`/`pinned`/`config_shadowed`/`reverted` for adds, `removed`/`term_pinned`/`not_found` (with `reverted_to` when an override was deleted) for removes; mixed batches apply removes of existing records first — freeing cap slots — then adds, reporting `post_change_terms`, `prompt_chars`, `keyterm_count` and per-term `effective` flags for the post-change union. Runtime terms persist with provenance (`addedBy`, `addedByTokenId`, `addedAt` + bounded delete tombstones) and merge into the effective vocabulary per request — config terms first, then runtime insertion order; a runtime case-variant of a config term is a spelling override that wins the casing while staying config-pinned. If `vocabulary.json` is unreadable, vocabulary calls answer `500` and transcriptions fall back to config terms with a warn-once log.
 
 ## Security notes
 

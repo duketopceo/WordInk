@@ -10,7 +10,7 @@ import {
   type RateLimiter,
   type RateLimitOptions,
 } from "./internal.js";
-import { createGatewayHandler, GATEWAY_MODELS_PATH, GATEWAY_TRANSCRIPTIONS_PATH } from "./gateway/index.js";
+import { createGatewayHandler, GATEWAY_MODELS_PATH, GATEWAY_TRANSCRIPTIONS_PATH, GATEWAY_VOCABULARY_PATH } from "./gateway/index.js";
 import type { GatewayConfig } from "./gateway/index.js";
 
 export { GROQ_TRANSCRIPTIONS_URL } from "./groq.js";
@@ -22,6 +22,7 @@ export {
   DEFAULT_GATEWAY_RATE_LIMIT,
   GATEWAY_MODELS_PATH,
   GATEWAY_TRANSCRIPTIONS_PATH,
+  GATEWAY_VOCABULARY_PATH,
   type GatewayConfig,
 } from "./gateway/index.js";
 export type { ProviderName, ResolvedEntry, VerboseTranscript } from "./gateway/providers.js";
@@ -31,6 +32,7 @@ export {
   hashToken,
   type TokenInfo,
   type TokenRecord,
+  type TokenScope,
   type TokenStore,
 } from "./gateway/tokens.js";
 export {
@@ -46,6 +48,14 @@ export {
   type FlowTone,
   type LearnedVocabularyDiff,
 } from "./gateway/flow.js";
+export {
+  MAX_TERMS,
+  VocabularyStoreError,
+  cleanTerm,
+  type VocabularyErrorCode,
+  type VocabularyStore,
+  type VocabularyTerm,
+} from "./gateway/vocabulary-store.js";
 
 /** Long-lived provider keys. They stay on the server; a route whose key is missing answers 503. */
 export interface ProviderKeys {
@@ -154,7 +164,9 @@ export function createRelay(config: RelayConfig): RelayHandler {
     // apply to them, and when no gateway is configured the paths fall through to 404 (KTD1, KTD9).
     if (
       gateway !== null &&
-      (path === `${basePath}${GATEWAY_TRANSCRIPTIONS_PATH}` || path === `${basePath}${GATEWAY_MODELS_PATH}`)
+      (path === `${basePath}${GATEWAY_TRANSCRIPTIONS_PATH}` ||
+        path === `${basePath}${GATEWAY_MODELS_PATH}` ||
+        path === `${basePath}${GATEWAY_VOCABULARY_PATH}`)
     ) {
       return gateway(request);
     }

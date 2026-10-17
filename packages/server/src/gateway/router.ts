@@ -28,7 +28,12 @@ export interface RouterOptions {
 }
 
 export interface GatewayRouter {
-  transcribe(audio: AudioFile, options: Omit<TranscribeOptions, "vocabulary">): Promise<RouterResult>;
+  /**
+   * `options.vocabulary`, when present, replaces the construction-time set for this call —
+   * the gateway resolves the live union once per transcription (KTD10). Every attempt in a
+   * fallback chain sees the same term set. Omitted → the construction-time set applies.
+   */
+  transcribe(audio: AudioFile, options: TranscribeOptions): Promise<RouterResult>;
 }
 
 /**
@@ -46,8 +51,8 @@ export function createRouter(entries: readonly ResolvedEntry[], options: RouterO
       throw new Error(`createRouter: providers[${i}] (${entry.provider}) has no resolved key`);
     }
   });
-  // Deduped once: the operator vocabulary is static for the router's lifetime.
-  const vocabulary = uniqueTerms(options.vocabulary ?? []);
+  // Deduped once: the operator vocabulary is the fallback when a call passes no per-request set.
+  const configured = uniqueTerms(options.vocabulary ?? []);
   const attemptMs = options.upstreamTimeoutMs ?? DEFAULT_GATEWAY_UPSTREAM_TIMEOUT_MS;
   const deadlineMs = options.deadlineMs ?? DEFAULT_GATEWAY_DEADLINE_MS;
   const now = options.now ?? Date.now;
@@ -66,6 +71,7 @@ export function createRouter(entries: readonly ResolvedEntry[], options: RouterO
 
   return {
     async transcribe(audio, request) {
+      const vocabulary = request.vocabulary === undefined ? configured : uniqueTerms(request.vocabulary);
       const deadline = now() + deadlineMs;
       const tried = new Set<number>();
       for (;;) {

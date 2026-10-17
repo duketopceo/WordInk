@@ -81,3 +81,22 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - run: uv sync
       - run: uv run python -m compileall wordink
+  ios:
+    runs-on: macos-15
+    defaults:
+      run: { working-directory: apps/ios }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        env:
+          XCODEGEN_VERSION: "2.46.0"
+        run: |
+          curl -fsSL "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip" -o /tmp/xcodegen.zip
+          unzip -q /tmp/xcodegen.zip -d /tmp/xcodegen
+          echo "/tmp/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
+      - name: Generate Xcode project
+        run: xcodegen --spec project.yml
+      - name: Build and test on iOS Simulator
+        run: |
+          SIM=$(xcrun simctl list devices available --json | python3 -c 'import json,sys,re; devs=json.load(sys.stdin)["devices"]; nums=lambda s: tuple(int(x) for x in re.findall(r"\d+", s)); pick=max((nums(rt), nums(d["name"]), d["name"]) for rt,ds in devs.items() if "iOS" in rt for d in ds if d["name"].startswith("iPhone")); print(pick[2])')
+          xcodebuild -scheme WordInkRemote -destination "platform=iOS Simulator,name=$SIM" CODE_SIGN_IDENTITY="-" CODE_SIGNING_ALLOWED=YES -derivedDataPath build test

@@ -267,9 +267,11 @@ describe("gateway integration with flow post-processing", () => {
     const tokenHash = await hashToken(rawToken);
     const tokenStore: TokenStore = {
       async verify(t: string): Promise<TokenInfo | null> {
-        return (await hashToken(t)) === tokenHash ? { id: "dev-1", label: "ios-keyboard" } : null;
+        return (await hashToken(t)) === tokenHash
+          ? { id: "dev-1", label: "ios-keyboard", scope: "device" }
+          : null;
       },
-      async create(): Promise<{ id: string; label: string; token: string }> {
+      async create(): Promise<TokenInfo & { token: string }> {
         throw new Error("unused");
       },
       async list(): Promise<TokenRecord[]> {

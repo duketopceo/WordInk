@@ -194,10 +194,95 @@ describe("tokens", () => {
     expect(again.code).not.toBe(0);
   });
 
+  it("create --admin mints an admin token; the flag never lands inside the label", async () => {
+    const device = await run(["tokens", "create", "laptop"]);
+    expect(device.stdout).toContain("scope=device");
+    const admin = await run(["tokens", "create", "--admin", "agent"]);
+    expect(admin.code).toBe(0);
+    expect(admin.stdout).toContain("scope=admin");
+    const listed = await run(["tokens", "list"]);
+    expect(listed.stdout).toMatch(/device\s+laptop/);
+    expect(listed.stdout).toMatch(/admin\s+agent/);
+
+    const bare = await run(["tokens", "create", "--admin"]);
+    expect(bare.code).toBe(1);
+    const spaced = await run(["tokens", "create", "--admin", "my", "laptop"]);
+    expect(spaced.code).toBe(0);
+    expect(spaced.stdout).toContain('label="my laptop"');
+    expect(spaced.stdout).not.toContain("--admin");
+  });
+
   it("revoke of an unknown id exits non-zero", async () => {
     const r = await run(["tokens", "revoke", "no-such-id"]);
     expect(r.code).not.toBe(0);
     expect(r.stderr + r.stdout).toContain("no-such-id");
+  });
+});
+
+describe("vocabulary visibility (R11)", () => {
+  const vocabDir = () => join(home, "state", "wordink");
+
+  it("check warns when no live admin token exists; minting one silences the warning", async () => {
+    writeConfig({ providers: [{ provider: "groq", keyEnv: "WORDINK_TEST_KEY_A" }] });
+    const r = await run(["check"], { WORDINK_TEST_KEY_A: KEY_A });
+    expect(r.stderr).toMatch(/no live admin token/);
+
+    await run(["tokens", "create", "--admin", "agent"]);
+    const again = await run(["check"], { WORDINK_TEST_KEY_A: KEY_A });
+    expect(again.stderr).not.toMatch(/no live admin token/);
+  });
+
+  it("serve warns too — the gateway would boot with every /v1/vocabulary call 403ing", async () => {
+    writeConfig({
+      port: await freePort(),
+      providers: [{ provider: "groq", keyEnv: "WORDINK_TEST_KEY_A" }],
+    });
+    const child = spawn("node", [BIN, "serve"], { env: baseEnv({ WORDINK_TEST_KEY_A: KEY_A }) });
+    children.push(child);
+    let err = "";
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`no admin warning within 10s; stderr: ${err}`)), 10_000);
+      child.stderr.on("data", (d: Buffer) => {
+        err += d.toString();
+        if (/no live admin token/.test(err)) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+  }, 15_000);
+
+  it("check reports config count and the runtime store state", async () => {
+    writeConfig({
+      providers: [{ provider: "groq", keyEnv: "WORDINK_TEST_KEY_A" }],
+      vocabulary: ["Omarchy", "Kurultai"],
+    });
+    mkdirSync(vocabDir(), { recursive: true });
+    writeFileSync(
+      join(vocabDir(), "vocabulary.json"),
+      JSON.stringify({ version: 1, terms: [{ term: "wisp", addedBy: "a", addedAt: "t" }] }),
+    );
+    const r = await run(["check"], { WORDINK_TEST_KEY_A: KEY_A });
+    expect(r.stdout).toContain("vocabulary: 2 config terms");
+    expect(r.stdout).toMatch(/vocabulary: \+1 runtime terms/);
+  });
+
+  it("check says when the runtime vocabulary file is unreadable instead of hiding it", async () => {
+    writeConfig({ providers: [{ provider: "groq", keyEnv: "WORDINK_TEST_KEY_A" }] });
+    mkdirSync(vocabDir(), { recursive: true });
+    writeFileSync(join(vocabDir(), "vocabulary.json"), "{corrupt");
+    const r = await run(["check"], { WORDINK_TEST_KEY_A: KEY_A });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/vocabulary: .*unreadable — transcriptions will use config terms only/);
+  });
+
+  it("an unreadable token store still warns instead of crashing check", async () => {
+    writeConfig({ providers: [{ provider: "groq", keyEnv: "WORDINK_TEST_KEY_A" }] });
+    mkdirSync(join(home, "state", "wordink"), { recursive: true });
+    writeFileSync(join(home, "state", "wordink", "gateway-tokens.json"), "{corrupt");
+    const r = await run(["check"], { WORDINK_TEST_KEY_A: KEY_A });
+    expect(r.code).toBe(0);
+    expect(r.stderr).toMatch(/cannot read the token store/);
   });
 });
 

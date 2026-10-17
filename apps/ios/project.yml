@@ -1,0 +1,77 @@
+name: WordInk
+options:
+  bundleIdPrefix: com.duketopceo
+  groupSortPosition: top
+settings:
+  base:
+    DEVELOPMENT_TEAM: 6BP7W45U55
+    CODE_SIGN_STYLE: Automatic
+targets:
+  WordInkRemote:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: WordInkRemote
+        excludes:
+          - Info.plist
+      - path: Shared
+    dependencies:
+      - target: WordInkWidgets
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.duketopceo.wordink
+        INFOPLIST_FILE: WordInkRemote/Info.plist
+        CODE_SIGN_ENTITLEMENTS: WordInkRemote/WordInkRemote.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+  WordInkWidgets:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: WordInkWidgets
+        excludes:
+          - Info.plist
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.duketopceo.wordink.widgets
+        INFOPLIST_FILE: WordInkWidgets/Info.plist
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        SKIP_INSTALL: "NO"
+  WordInkRemoteTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: WordInkRemoteTests
+    dependencies:
+      - target: WordInkRemote
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.duketopceo.wordink.tests
+        GENERATE_INFOPLIST_FILE: "YES"
+        SWIFT_VERSION: "5.0"
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/WordInkRemote.app/WordInkRemote
+schemes:
+  WordInkRemote:
+    build:
+      targets:
+        WordInkRemote: all
+        WordInkWidgets: [run, archive]
+        WordInkRemoteTests: [test]
+    test:
+      targets:
+        - WordInkRemoteTests
+    run:
+      config: Debug
+    archive:
+      config: Release
