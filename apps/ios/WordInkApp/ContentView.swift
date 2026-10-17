@@ -37,9 +37,11 @@ public final class KeychainTokenStore: @unchecked Sendable {
 
     public init() {}
 
-    public func saveToken(_ token: String) {
+    /// Stores the token, or clears it when `token` is empty. Returns `false` if the Keychain write failed.
+    @discardableResult
+    public func saveToken(_ token: String) -> Bool {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let data = trimmed.data(using: .utf8) else { return }
+        guard let data = trimmed.data(using: .utf8) else { return false }
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -48,11 +50,11 @@ public final class KeychainTokenStore: @unchecked Sendable {
         ]
         SecItemDelete(query as CFDictionary)
 
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return true }
         var insert = query
         insert[kSecValueData as String] = data
         insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(insert as CFDictionary, nil)
+        return SecItemAdd(insert as CFDictionary, nil) == errSecSuccess
     }
 
     public func loadToken() -> String? {
@@ -400,8 +402,7 @@ public struct ContentView: View {
                     .autocorrectionDisabled()
                 Button("Save Gateway Credentials to Keychain") {
                     AppGroupSettingsStore.shared.saveGatewayURL(gatewayURLString)
-                    KeychainTokenStore.shared.saveToken(gatewayToken)
-                    tokenSavedBanner = true
+                    tokenSavedBanner = KeychainTokenStore.shared.saveToken(gatewayToken)
                 }
                 if tokenSavedBanner {
                     Label("Saved wdk_... token in iOS Keychain", systemImage: "checkmark.seal.fill")

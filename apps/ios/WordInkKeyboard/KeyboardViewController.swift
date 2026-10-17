@@ -247,6 +247,14 @@ public final class KeyboardViewController: UIInputViewController {
         }
     }
 
+    deinit {
+        // The Darwin callback holds an unretained pointer to `self`; it must be removed before deallocation.
+        CFNotificationCenterRemoveEveryObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque()
+        )
+    }
+
     private func registerDarwinObservers() {
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         let observer = Unmanaged.passUnretained(self).toOpaque()

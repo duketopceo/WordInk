@@ -733,9 +733,13 @@ function computeLcsIndices(a: readonly string[], b: readonly string[]): { d: num
 
 function isLearnableTerm(to: string, from: string): boolean {
   if (COMMON_STOPWORDS.has(to.toLowerCase())) return false;
-  // Proper noun, camelCase, hyphenated, contains digits/symbols, or respelling of the same word
+  // Proper noun, camelCase, hyphenated, contains digits/symbols, or a case or spacing respelling of
+  // the dictated span ("word ink" -> "wordink"). Arbitrary one-word substitutions ("meat" -> "meet")
+  // are not learned.
   const hasUpperOrSymbol = /[A-Z0-9_-]/.test(to);
-  const isRespelling = to.toLowerCase() === from.toLowerCase() || !to.includes(" ");
+  const toLower = to.toLowerCase();
+  const fromLower = from.toLowerCase();
+  const isRespelling = toLower === fromLower || fromLower.replace(/ /g, "") === toLower;
   return hasUpperOrSymbol || isRespelling;
 }
 

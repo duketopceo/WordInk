@@ -65,7 +65,12 @@ public struct AppleSFSpeechAdapter: OnDeviceSpeechAdapter {
         #endif
     }
 
-    public func recognize(wavData: Data, localeIdentifier: String = "en-US") async throws -> String {
+    /// Recognizes with the locale this adapter was created with.
+    public func recognize(wavData: Data) async throws -> String {
+        try await recognize(wavData: wavData, localeIdentifier: localeIdentifier)
+    }
+
+    public func recognize(wavData: Data, localeIdentifier: String) async throws -> String {
         guard !wavData.isEmpty else {
             throw LocalFallbackError.emptyAudioBuffer
         }

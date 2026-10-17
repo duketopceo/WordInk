@@ -224,6 +224,12 @@ describe("learnVocabularyFromEdit", () => {
     });
   });
 
+  it("does not learn ordinary one-word substitutions", () => {
+    const diff = learnVocabularyFromEdit("we meat him there", "we meet him their");
+    expect(diff.addedTerms).toEqual([]);
+    expect(diff.replacements).toEqual({});
+  });
+
   it("ignores pure deletions", () => {
     const diff = learnVocabularyFromEdit(
       "Please send the quarterly report to Alice right now.",
