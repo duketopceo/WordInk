@@ -1,9 +1,17 @@
 // Shared (Workers-safe) device token primitives. No node:* imports here: Node-only
 // backends live in file-tokens.ts.
 
+/**
+ * What a live token may call. `"admin"` is a superset of `"device"`: it transcribes and lists
+ * models like any device token and additionally reaches the vocabulary-mutation surfaces.
+ * A stored record with no scope resolves to `"device"` — fail closed, never the wider one.
+ */
+export type TokenScope = "device" | "admin";
+
 export interface TokenInfo {
   id: string;
   label: string;
+  scope: TokenScope;
 }
 
 export interface TokenRecord {
@@ -11,13 +19,15 @@ export interface TokenRecord {
   label: string;
   createdAt: string;
   revokedAt?: string;
+  /** Version-1 files predate scopes; readers resolve a missing field to `"device"`. */
+  scope?: TokenScope;
 }
 
 export interface TokenStore {
   /** The device behind a live token, or null for an unknown or revoked one. */
   verify(token: string): Promise<TokenInfo | null>;
   /** Mint a token. The full token is returned here and never again. */
-  create(label: string): Promise<TokenInfo & { token: string }>;
+  create(label: string, scope?: TokenScope): Promise<TokenInfo & { token: string }>;
   list(): Promise<TokenRecord[]>;
   /** True if a live token with this id was revoked. */
   revoke(id: string): Promise<boolean>;

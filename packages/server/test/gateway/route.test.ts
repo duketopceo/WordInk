@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRelay, type GatewayConfig, type RelayConfig } from "../../src/index.js";
-import {
-  constantTimeEqualHex,
-  generateToken,
-  hashToken,
-  type TokenRecord,
-  type TokenStore,
-} from "../../src/gateway/tokens.js";
+import { generateToken, type TokenStore } from "../../src/gateway/tokens.js";
 import {
   DEEPGRAM_LISTEN_URL,
   GROQ_AUDIO_URL,
@@ -16,6 +10,7 @@ import {
 import {
   hang,
   makeUpstream,
+  MemoryTokenStore,
   ok,
   sentForm,
   statusWith,
@@ -37,51 +32,6 @@ const deepgram: ResolvedEntry = { provider: "deepgram", key: DEEPGRAM_KEY };
 const BASE = "http://127.0.0.1:8941";
 const AUDIO = new Uint8Array([7, 7, 7, 7]);
 
-interface Stored extends TokenRecord {
-  hash: string;
-}
-
-/** In-memory TokenStore for route tests (the file backend is covered by tokens.test.ts). */
-class MemoryTokenStore implements TokenStore {
-  private readonly records = new Map<string, Stored>();
-
-  async create(label: string) {
-    const token = generateToken();
-    const rec: Stored = {
-      id: crypto.randomUUID(),
-      label,
-      hash: await hashToken(token),
-      createdAt: new Date().toISOString(),
-    };
-    this.records.set(rec.id, rec);
-    return { id: rec.id, label, token };
-  }
-
-  async verify(token: string) {
-    const hash = await hashToken(token);
-    let found: Stored | undefined;
-    for (const rec of this.records.values()) {
-      if (constantTimeEqualHex(rec.hash, hash)) found = rec;
-    }
-    return !found || found.revokedAt ? null : { id: found.id, label: found.label };
-  }
-
-  async list(): Promise<TokenRecord[]> {
-    return [...this.records.values()].map((r) => ({
-      id: r.id,
-      label: r.label,
-      createdAt: r.createdAt,
-      ...(r.revokedAt ? { revokedAt: r.revokedAt } : {}),
-    }));
-  }
-
-  async revoke(id: string) {
-    const rec = this.records.get(id);
-    if (!rec || rec.revokedAt) return false;
-    rec.revokedAt = new Date().toISOString();
-    return true;
-  }
-}
 
 const status = statusWith(GROQ_KEY_A);
 

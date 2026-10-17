@@ -6,6 +6,8 @@ import { createRelay, type ProviderKeys, type RelayConfig } from "./index.js";
 // The file-backed token store is Node-only (node:fs), so it is reachable from this adapter and
 // the gateway bin only — the core and Workers entries never see it (KTD3).
 export { FileTokenStore, defaultTokenPath } from "./gateway/file-tokens.js";
+// The file-backed runtime vocabulary store is Node-only for the same reason.
+export { FileVocabularyStore, defaultVocabularyPath } from "./gateway/file-vocabulary.js";
 
 /** Relay config for Node: `keys` default to GROQ_API_KEY / OPENAI_API_KEY / DEEPGRAM_API_KEY from process.env. */
 export type NodeRelayConfig = Omit<RelayConfig, "keys"> & { keys?: ProviderKeys };

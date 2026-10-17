@@ -47,12 +47,26 @@ describe("FileTokenStore", () => {
     const store = new FileTokenStore(path);
     const a = await store.create("a");
     const b = await store.create("b");
-    expect(await store.verify(a.token)).toEqual({ id: a.id, label: "a" });
+    expect(await store.verify(a.token)).toEqual({ id: a.id, label: "a", scope: "device" });
     expect(await store.verify(generateToken())).toBeNull();
     expect(await store.verify("")).toBeNull();
     expect(await store.revoke(a.id)).toBe(true);
     expect(await store.verify(a.token)).toBeNull();
-    expect(await store.verify(b.token)).toEqual({ id: b.id, label: "b" });
+    expect(await store.verify(b.token)).toEqual({ id: b.id, label: "b", scope: "device" });
+  });
+
+  it("mints admin tokens on request and resolves a legacy scope-less record as device", async () => {
+    const store = new FileTokenStore(path);
+    const device = await store.create("laptop");
+    const admin = await store.create("agent", "admin");
+    expect(device.scope).toBe("device");
+    expect(admin.scope).toBe("admin");
+    expect((await store.verify(admin.token))?.scope).toBe("admin");
+    // A version-1 file has no scope field — it must resolve to "device", never admin.
+    const raw = JSON.parse(readFileSync(path, "utf8")) as { tokens: { scope?: string }[] };
+    delete raw.tokens[0]!.scope;
+    writeFileSync(path, JSON.stringify(raw));
+    expect(await store.verify(device.token)).toEqual({ id: device.id, label: "laptop", scope: "device" });
   });
 
   it("revoke returns false for an unknown id", async () => {
@@ -76,7 +90,8 @@ describe("FileTokenStore", () => {
     const rows = await store.list();
     expect(rows).toHaveLength(2);
     for (const r of rows) {
-      expect(Object.keys(r).every((k) => ["id", "label", "createdAt", "revokedAt"].includes(k))).toBe(true);
+      expect(Object.keys(r).every((k) => ["id", "label", "createdAt", "revokedAt", "scope"].includes(k))).toBe(true);
+      expect(r.scope).toBe("device");
     }
     expect(rows.find((r) => r.id === a.id)?.revokedAt).toBeTruthy();
     expect(JSON.stringify(rows)).not.toContain(a.token);
@@ -152,7 +167,7 @@ describe("import graph", () => {
   // The Cloudflare entry's reachable set: every src/ module except the declared
   // Node-only ones. A node: import in any of these breaks the Workers bundle (KTD3).
   const SRC = join(import.meta.dirname, "../../src");
-  const NODE_ONLY = new Set(["node.ts", join("gateway", "file-tokens.ts")]);
+  const NODE_ONLY = new Set(["node.ts", join("gateway", "file-tokens.ts"), join("gateway", "file-vocabulary.ts")]);
   const SKIP_DIR = `bin${sep}`;
   const NODE_IMPORT = /from\s+["']node:|require\(\s*["']node:|import\(\s*["']node:/;
 

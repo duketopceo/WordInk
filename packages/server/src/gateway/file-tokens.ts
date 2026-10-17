@@ -9,6 +9,7 @@ import {
   hashToken,
   type TokenInfo,
   type TokenRecord,
+  type TokenScope,
   type TokenStore,
 } from "./tokens.js";
 
@@ -38,8 +39,6 @@ export function defaultTokenPath(
  */
 export class FileTokenStore implements TokenStore {
   private cache: { key: string; tokens: StoredToken[] } | undefined;
-  /** The file key the last read was taken from, for the write race re-check. */
-  private loadedKey: string | null = null;
   /** Warn-once latches: a persistent failure must not log once per request. */
   private statWarned = false;
   private unreadableWarnedFor: string | null = null;
@@ -50,14 +49,19 @@ export class FileTokenStore implements TokenStore {
     return (await this.read()).tokens;
   }
 
-  /** Tokens for a write; throws when the file exists but cannot be parsed. */
-  private async loadForWrite(): Promise<StoredToken[]> {
-    const { tokens, unreadable } = await this.read();
+  /** Tokens plus the stat key they were read under; throws when the file cannot be parsed. */
+  private async loadForWrite(): Promise<{ tokens: StoredToken[]; key: string | null }> {
+    const { tokens, key, unreadable } = await this.read();
     if (unreadable) throw new Error(`wordink gateway: token file ${this.path} is unreadable; fix or remove it first`);
-    return tokens;
+    return { tokens, key };
   }
 
-  private async read(): Promise<{ tokens: StoredToken[]; unreadable: boolean }> {
+  /**
+   * The file's tokens plus the stat key they were read under, as one result: keeping the
+   * pair together is what lets a mutation compare the write-guard key against the snapshot
+   * it actually loaded — a concurrent read() can never shift the comparison.
+   */
+  private async read(): Promise<{ tokens: StoredToken[]; key: string | null; unreadable: boolean }> {
     let key: string;
     try {
       const s = await stat(this.path);
@@ -65,23 +69,21 @@ export class FileTokenStore implements TokenStore {
       key = `${s.ino}:${s.mtimeMs}:${s.size}`;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        this.loadedKey = null;
-        return { tokens: [], unreadable: false };
+        return { tokens: [], key: null, unreadable: false };
       }
       if (!this.statWarned) {
         this.statWarned = true;
         console.warn(`wordink gateway: cannot stat token file ${this.path}`);
       }
-      return { tokens: [], unreadable: true };
+      return { tokens: [], key: null, unreadable: true };
     }
-    this.loadedKey = key;
-    if (this.cache?.key === key) return { tokens: this.cache.tokens, unreadable: false };
+    if (this.cache?.key === key) return { tokens: this.cache.tokens, key, unreadable: false };
     try {
       const parsed = JSON.parse(await readFile(this.path, "utf8")) as Partial<TokenFile>;
       if (!Array.isArray(parsed.tokens)) throw new Error("no tokens array");
       const tokens = parsed.tokens;
       this.cache = { key, tokens };
-      return { tokens, unreadable: false };
+      return { tokens, key, unreadable: false };
     } catch {
       // A failed read is not cached: the next call retries, so a transient error (a
       // transient EACCES, a chmod away and back) recovers instead of latching dead.
@@ -89,7 +91,7 @@ export class FileTokenStore implements TokenStore {
         this.unreadableWarnedFor = key;
         console.warn(`wordink gateway: token file ${this.path} is unreadable; no token will verify`);
       }
-      return { tokens: [], unreadable: true };
+      return { tokens: [], key: null, unreadable: true };
     }
   }
 
@@ -123,7 +125,7 @@ export class FileTokenStore implements TokenStore {
       if (constantTimeEqualHex(t.hash, hash)) found = t;
     }
     if (!found || found.revokedAt) return null;
-    return { id: found.id, label: found.label };
+    return { id: found.id, label: found.label, scope: found.scope ?? "device" };
   }
 
   /**
@@ -133,9 +135,8 @@ export class FileTokenStore implements TokenStore {
    */
   private async mutate(update: (tokens: StoredToken[]) => StoredToken[] | null): Promise<boolean> {
     for (let tries = 0; ; tries++) {
-      const loaded = await this.loadForWrite();
-      const keyAtLoad = this.loadedKey;
-      const next = update(loaded);
+      const { tokens, key: keyAtLoad } = await this.loadForWrite();
+      const next = update(tokens);
       if (next === null) return false;
       if ((await this.statKey()) === keyAtLoad) {
         await this.save(next);
@@ -147,24 +148,31 @@ export class FileTokenStore implements TokenStore {
     }
   }
 
-  async create(label: string): Promise<TokenInfo & { token: string }> {
+  async create(label: string, scope: TokenScope = "device"): Promise<TokenInfo & { token: string }> {
     const token = generateToken();
     const entry: StoredToken = {
       id: randomUUID(),
       label,
       hash: await hashToken(token),
       createdAt: new Date().toISOString(),
+      scope,
     };
     await this.mutate((tokens) => [...tokens, entry]);
-    return { id: entry.id, label, token };
+    return { id: entry.id, label, scope, token };
   }
 
   async list(): Promise<TokenRecord[]> {
-    return (await this.load()).map(({ id, label, createdAt, revokedAt }) => ({
+    const { tokens, unreadable } = await this.read();
+    // Unlike verify() — which fails closed on an unreadable file — listing must not
+    // answer "no tokens" for a file that merely can't be read: the operator would see a
+    // false empty store. `tokens list` and the admin-token health check surface the error.
+    if (unreadable) throw new Error(`wordink gateway: token file ${this.path} is unreadable; fix or remove it first`);
+    return tokens.map(({ id, label, createdAt, revokedAt, scope }) => ({
       id,
       label,
       createdAt,
       ...(revokedAt ? { revokedAt } : {}),
+      scope: scope ?? "device",
     }));
   }
 

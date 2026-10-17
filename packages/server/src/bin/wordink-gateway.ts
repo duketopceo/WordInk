@@ -7,7 +7,7 @@ import { createServer } from "node:http";
 import { isIP } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createNodeHandler, FileTokenStore, defaultTokenPath } from "../node.js";
+import { createNodeHandler, FileTokenStore, FileVocabularyStore, defaultTokenPath, defaultVocabularyPath } from "../node.js";
 import { isRecord, type RateLimitOptions } from "../internal.js";
 import { DEFAULT_MODELS, type ProviderEntry, type ProviderName, type ResolvedEntry } from "../gateway/providers.js";
 
@@ -20,8 +20,10 @@ const USAGE = `Usage: wordink-gateway <command>
 
   serve                  Run the gateway (config: $XDG_CONFIG_HOME/wordink/gateway.json)
   check                  Resolve the config and report which provider keys are present
-  tokens create <label>  Mint a device token; the token is printed exactly once
-  tokens list            List device tokens: id, label, created, revoked (never the token)
+  tokens create [--admin] <label>
+                         Mint a device token (or an admin token with --admin);
+                         the token is printed exactly once
+  tokens list            List device tokens: id, scope, label, created, revoked (never the token)
   tokens revoke <id>     Revoke a device token; it is refused on its next request
 `;
 
@@ -191,6 +193,19 @@ function resolveKeys(
   return { resolved, skipped };
 }
 
+/** Without one live admin token every /v1/vocabulary call 403s — say so at check/serve (R11). */
+async function warnIfNoAdmin(store: FileTokenStore): Promise<void> {
+  try {
+    const live = await store.list();
+    if (!live.some((t) => t.scope === "admin" && !t.revokedAt)) {
+      console.warn(`${PREFIX} warning: no live admin token — /v1/vocabulary will refuse everything. ` +
+        `Mint one with \`wordink-gateway tokens create --admin <label>\`.`);
+    }
+  } catch {
+    console.warn(`${PREFIX} warning: cannot read the token store to check for an admin token.`);
+  }
+}
+
 async function cmdCheck(): Promise<number> {
   const path = defaultConfigPath();
   const config = await loadConfig(path);
@@ -208,7 +223,15 @@ async function cmdCheck(): Promise<number> {
     );
   }
   console.log(`tokens: ${defaultTokenPath()}`);
-  if (config.vocabulary !== undefined) console.log(`vocabulary: ${config.vocabulary.length} terms`);
+  await warnIfNoAdmin(new FileTokenStore());
+  if (config.vocabulary !== undefined) console.log(`vocabulary: ${config.vocabulary.length} config terms`);
+  const vocabStore = new FileVocabularyStore();
+  try {
+    const runtime = await vocabStore.list();
+    console.log(`vocabulary: +${runtime.length} runtime terms (${defaultVocabularyPath()})`);
+  } catch {
+    console.log(`vocabulary: ${defaultVocabularyPath()} is unreadable — transcriptions will use config terms only`);
+  }
   console.log("providers, in fallback order:");
   config.providers.forEach((entry, i) => {
     const key = process.env[entry.keyEnv];
@@ -263,12 +286,15 @@ async function cmdServe(): Promise<number> {
     );
   }
 
+  const tokenStore = new FileTokenStore();
+  await warnIfNoAdmin(tokenStore);
   const handler = createNodeHandler({
     keys: {},
     gateway: {
-      tokenStore: new FileTokenStore(),
+      tokenStore,
       providers: resolved,
       vocabulary: config.vocabulary,
+      vocabularyStore: new FileVocabularyStore(),
       rateLimit: config.rateLimit,
       maxBodyBytes: config.maxBodyBytes,
       upstreamTimeoutMs: config.upstreamTimeoutMs,
@@ -297,22 +323,29 @@ async function cmdTokens(args: string[]): Promise<number> {
   const [sub, ...rest] = args;
   switch (sub) {
     case "create": {
-      const label = rest.join(" ").trim();
+      // `--admin` is a real flag, pulled out anywhere in the args — folding it into
+      // the joined label would mint a token literally named "--admin laptop".
+      const admin = rest.includes("--admin");
+      const label = rest.filter((a) => a !== "--admin").join(" ").trim();
       if (!label) {
-        console.error(`${PREFIX} usage: wordink-gateway tokens create <label>`);
+        console.error(`${PREFIX} usage: wordink-gateway tokens create [--admin] <label>`);
         return 1;
       }
-      const made = await store.create(label);
+      const made = await store.create(label, admin ? "admin" : "device");
       // The full token is printed exactly once (R10); only its hash is stored.
       console.log(made.token);
-      console.log(`created id=${made.id} label="${made.label}" — store the token now; it is never shown again.`);
+      console.log(
+        `created id=${made.id} scope=${made.scope} label="${made.label}" — store the token now; it is never shown again.`,
+      );
       return 0;
     }
     case "list": {
       const rows = await store.list();
       if (rows.length === 0) console.log("no device tokens");
       for (const row of rows) {
-        console.log(`${row.id}  ${row.label}  created ${row.createdAt}${row.revokedAt ? `  revoked ${row.revokedAt}` : ""}`);
+        console.log(
+          `${row.id}  ${row.scope ?? "device"}  ${row.label}  created ${row.createdAt}${row.revokedAt ? `  revoked ${row.revokedAt}` : ""}`,
+        );
       }
       return 0;
     }
