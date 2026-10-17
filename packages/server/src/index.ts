@@ -33,6 +33,19 @@ export {
   type TokenRecord,
   type TokenStore,
 } from "./gateway/tokens.js";
+export {
+  applyFlowCleanup,
+  applyTonePreset,
+  buildFlowCleanupPrompt,
+  expandSnippets,
+  formatSpokenLists,
+  learnVocabularyFromEdit,
+  resolveCourseCorrections,
+  stripFillers,
+  type FlowOptions,
+  type FlowTone,
+  type LearnedVocabularyDiff,
+} from "./gateway/flow.js";
 
 /** Long-lived provider keys. They stay on the server; a route whose key is missing answers 503. */
 export interface ProviderKeys {
