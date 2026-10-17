@@ -4,7 +4,7 @@ import Security
 /// Generic-password Keychain item holding the device token (R7).
 /// AfterFirstUnlock keeps it readable from background-launched intents.
 enum KeychainStore {
-    static let service = "com.wordink.remote.gateway"
+    static let service = "com.duketopceo.wordink.gateway"
     private static let account = "device-token"
 
     private static var query: [String: Any] {

@@ -59,7 +59,7 @@ Two App Intents ship in the app:
 
 ## App Store
 
-- Display name: `WordInk Remote`. Bundle ID: `com.wordink.remote` (widgets `…remote.widgets`).
+- Display name: `WordInk Remote`. Bundle ID: `com.duketopceo.wordink` (widgets `com.duketopceo.wordink.widgets`), team `6BP7W45U55`. TestFlight: `scripts/testflight.sh`.
 - Privacy policy URL: the deployed `apps/docs` privacy page (`/privacy.html`) — it carries the
   iOS data-flow section.
 - App Review note to include: the app transcribes only through a user-configured, self-hosted

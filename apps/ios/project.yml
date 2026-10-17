@@ -1,7 +1,11 @@
 name: WordInk
 options:
-  bundleIdPrefix: com.wordink
+  bundleIdPrefix: com.duketopceo
   groupSortPosition: top
+settings:
+  base:
+    DEVELOPMENT_TEAM: 6BP7W45U55
+    CODE_SIGN_STYLE: Automatic
 targets:
   WordInkRemote:
     type: application
@@ -17,9 +21,10 @@ targets:
         embed: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.wordink.remote
+        PRODUCT_BUNDLE_IDENTIFIER: com.duketopceo.wordink
         INFOPLIST_FILE: WordInkRemote/Info.plist
         CODE_SIGN_ENTITLEMENTS: WordInkRemote/WordInkRemote.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
@@ -35,7 +40,7 @@ targets:
       - path: Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.wordink.remote.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.duketopceo.wordink.widgets
         INFOPLIST_FILE: WordInkWidgets/Info.plist
         TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "1.0.0"
@@ -52,7 +57,7 @@ targets:
       - target: WordInkRemote
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.wordink.remote.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.duketopceo.wordink.tests
         GENERATE_INFOPLIST_FILE: "YES"
         SWIFT_VERSION: "5.0"
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/WordInkRemote.app/WordInkRemote
