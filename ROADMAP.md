@@ -2,7 +2,7 @@
 
 **Program plan (start here):** [`docs/plans/2026-10-10-001-docs-wordink-program-plan.md`](docs/plans/2026-10-10-001-docs-wordink-program-plan.md) — Now / Next / Later units with status, difficulty, feasibility and simpler alternatives, the Phase 2 desktop options (owner decision), and the `WF-WRITE` workflow-permission review. Research: [`docs/research/2026-10-10-landscape.md`](docs/research/2026-10-10-landscape.md). Design: [`DESIGN.md`](DESIGN.md).
 
-**Now:** U1 green `master` CI (e2e demo test failing), U2 npm go-live (operator), U3 reconcile issues and docs, U4 Argus reviewer PR (owner decision). **Next:** U5 live OpenAI/Deepgram checks, U6 browser handcheck, U7 Python SDK CI, U8 retire `legacy/`, U9 desktop direction (owner decision). **Later:** U10 cleanup presets, U11 stronger local engine, U12 mobile, U13 standalone desktop.
+**Now:** U1 green `master` CI (e2e demo test failing), U2 npm go-live (operator), U3 reconcile issues and docs, U4 Argus reviewer PR (owner decision). **Next:** U5 live OpenAI/Deepgram checks, U6 browser handcheck, U7 Python SDK CI, U8 retire `legacy/`, U9 desktop direction (owner decision). **Later:** U10 cleanup presets, U11 stronger local engine, U12 mobile (iOS remote mic in progress — see Phase 4), U13 standalone desktop.
 
 **Phase 2 note:** this file records Option A (integrate) as decided and shipped. The program plan lists the remaining desktop options with difficulty and feasibility and leaves any further choice to the owner.
 
@@ -24,7 +24,7 @@ Detailed plans: [`docs/plans/2026-10-04-1757-feat-wordink-web-sdk-plan.md`](docs
 | **1. Core + Web SDK** | `@wordink/core` (provider-agnostic engine), `<wordink-mic>` web component, `useDictation` React hook, Groq/OpenAI/Deepgram + local engine, reference credential server, docs site with live demo | Done — merged to master; docs live on Pages; npm publish gated on org setup |
 | **2. Desktop** | Integrate with existing apps: `wordink-gateway`, an OpenAI-compatible transcription endpoint with provider fallback and per-device tokens. Voxtype on Linux verified; TypeWhisper via its bundled OpenAI-compatible engine + `GET /v1/models` | Done — gateway + docs + `/v1/models` shipped |
 | **3. WordInk Desktop: Windows + macOS** | Was contingent on Phase 2 picking a standalone app | Dropped — Phase 2 chose integration |
-| **4. More SDKs** | Python tooling for agents and CLIs: `wordink` CLI + `wordink-mcp` MCP server over the gateway (`sdks/python`); then mobile (React Native / native) based on demand | Built |
+| **4. More SDKs** | Python tooling for agents and CLIs: `wordink` CLI + `wordink-mcp` MCP server over the gateway (`sdks/python`); then mobile — first an iOS remote-mic companion (`apps/ios/`, native Swift, BYO gateway) per `docs/plans/2026-10-13-1640-feat-ios-remote-mic-plan.md` | Built; iOS companion in progress |
 
 ### Phase 2 decision (Oct 2026)
 

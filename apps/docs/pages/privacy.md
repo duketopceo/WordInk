@@ -54,3 +54,21 @@ default.
 
 The SDK keeps no usage statistics. If you want them, count `wordink-transcript` events (or
 `onTranscript` calls) in your own code and send them to your own backend.
+
+## WordInk Remote (iOS)
+
+WordInk Remote is a remote microphone for **your own** WordInk gateway. It sends nothing to
+WordInk — there is no WordInk server to send to.
+
+- **Audio** goes from the phone to the gateway URL you enter, and nowhere else. Whatever provider
+  that gateway uses sees the audio under that provider's own retention policy.
+- **Your device token** is stored in the iOS Keychain and is sent only to your gateway as a
+  bearer credential. Provider API keys never reach the phone — they stay on the gateway.
+- **Recordings** are written to a temp file, uploaded, and deleted when the transcription
+  finishes. The app keeps no audio.
+- **Transcripts** are copied to the iOS clipboard and kept in a small on-device history (the last
+  20 entries) in the app's Application Support container. They never leave the device unless you
+  paste or share them yourself.
+- **The microphone** is used only while you hold (or start) the capture control, inside the app.
+- **Crash reports and App Store analytics**, if you allow them in iOS Settings, go to Apple under
+  Apple's privacy policy — not to WordInk.
