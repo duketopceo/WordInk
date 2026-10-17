@@ -7,15 +7,21 @@ re-derive them one CI cycle at a time.
 ## Recipe that works
 
 ```yaml
-- run: brew install xcodegen
+- env: { XCODEGEN_VERSION: "2.46.0" }
+  run: |
+    curl -fsSL "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip" -o /tmp/xcodegen.zip
+    unzip -q /tmp/xcodegen.zip -d /tmp/xcodegen
+    echo "/tmp/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
 - run: xcodegen --spec project.yml
 - run: |
     SIM=$(xcrun simctl list devices available --json | python3 -c \
-      'import json,sys; devs=json.load(sys.stdin)["devices"]; \
-       names=[d["name"] for r in devs.values() for d in r if d["name"].startswith("iPhone")]; \
-       print(sorted(names)[-1])')
+      'import json,sys,re; devs=json.load(sys.stdin)["devices"]; \
+       nums=lambda s: tuple(int(x) for x in re.findall(r"\d+", s)); \
+       pick=max((nums(rt), nums(d["name"]), d["name"]) for rt,ds in devs.items() \
+        if "iOS" in rt for d in ds if d["name"].startswith("iPhone")); \
+       print(pick[2])')
     xcodebuild -scheme <Scheme> -destination "platform=iOS Simulator,name=$SIM" \
-      CODE_SIGN_IDENTITY="-" -derivedDataPath build test
+      CODE_SIGN_IDENTITY="-" CODE_SIGNING_ALLOWED=YES -derivedDataPath build test
 ```
 
 ## Pitfalls in order hit
