@@ -1,0 +1,220 @@
+{
+  "version": "1.0.0",
+  "description": "Canonical cross-language Wispr Flow post-processing and edit-learning contract shared across TypeScript (@wordink/server), Python (sdks/python), and Swift (WordInkIOS).",
+  "stripFillers": [
+    {
+      "id": "hesitations-sentence-start-and-mid",
+      "input": "Um, we should, uh, ship the release today.",
+      "expected": "We should ship the release today."
+    },
+    {
+      "id": "hesitations-erm-ah",
+      "input": "Erm I think ah this works",
+      "expected": "I think this works"
+    },
+    {
+      "id": "discourse-fillers-comma-flanked",
+      "input": "We need, like, three more tests, you know, before merging.",
+      "expected": "We need, three more tests, before merging."
+    },
+    {
+      "id": "discourse-fillers-preserve-real-words",
+      "input": "You know, I like umbrellas and you know Alice.",
+      "expected": "I like umbrellas and you know Alice."
+    }
+  ],
+  "resolveCourseCorrections": [
+    {
+      "id": "backtrack-no-wait-time",
+      "input": "let us meet at 2 pm no wait 3 pm",
+      "expected": "let us meet at 3 pm"
+    },
+    {
+      "id": "backtrack-scratch-that-recipient",
+      "input": "send it to Bob scratch that Alice",
+      "expected": "send it to Alice"
+    },
+    {
+      "id": "backtrack-actually-no-target",
+      "input": "deploy to staging, actually no, production",
+      "expected": "deploy to production"
+    },
+    {
+      "id": "backtrack-i-mean-number",
+      "input": "we need five I mean six reviewers",
+      "expected": "we need six reviewers"
+    },
+    {
+      "id": "backtrack-full-clause-replacement",
+      "input": "I will call him tomorrow, scratch that, let us email him today",
+      "expected": "let us email him today"
+    }
+  ],
+  "formatSpokenLists": [
+    {
+      "id": "ordinal-numbered-list",
+      "input": "first ship the gateway second test iOS third write docs",
+      "expected": "1. Ship the gateway\n2. Test iOS\n3. Write docs"
+    },
+    {
+      "id": "ordinal-list-with-lead-in",
+      "input": "Three priorities today: first fix CI, second cut a release, third update docs.",
+      "expected": "Three priorities today:\n1. Fix CI\n2. Cut a release\n3. Update docs"
+    },
+    {
+      "id": "bullet-one-two-list",
+      "input": "bullet one buy milk bullet two walk the dog",
+      "expected": "- Buy milk\n- Walk the dog"
+    }
+  ],
+  "expandSnippets": [
+    {
+      "id": "case-insensitive-word-boundary-snippets",
+      "input": "send my calendly or My Email today",
+      "snippets": {
+        "my calendly": "https://cal.com/luke",
+        "my email": "luke@wordink.io"
+      },
+      "expected": "send https://cal.com/luke or luke@wordink.io today"
+    },
+    {
+      "id": "longest-trigger-precedence",
+      "input": "here is my cal link",
+      "snippets": {
+        "cal": "https://cal.com",
+        "cal link": "https://cal.com/luke/30min"
+      },
+      "expected": "here is my https://cal.com/luke/30min"
+    }
+  ],
+  "applyTonePreset": [
+    {
+      "id": "casual-strips-trailing-period",
+      "input": "Sounds good to me.",
+      "tone": "casual",
+      "expected": "sounds good to me"
+    },
+    {
+      "id": "casual-keeps-question-mark",
+      "input": "Are you joining the call?",
+      "tone": "casual",
+      "expected": "are you joining the call?"
+    },
+    {
+      "id": "casual-keeps-exclamation-mark",
+      "input": "That is awesome!",
+      "tone": "casual",
+      "expected": "that is awesome!"
+    },
+    {
+      "id": "work-sentence-case-and-period",
+      "input": "we finished the gateway review. it looks solid",
+      "tone": "work",
+      "expected": "We finished the gateway review. It looks solid."
+    },
+    {
+      "id": "email-greeting-body-signoff",
+      "input": "hi sarah thanks for sending the roadmap over best luke",
+      "tone": "email",
+      "expected": "Hi Sarah,\n\nThanks for sending the roadmap over.\n\nBest,\nLuke"
+    },
+    {
+      "id": "code-camel-case",
+      "input": "camel case foo bar",
+      "tone": "code",
+      "expected": "fooBar"
+    },
+    {
+      "id": "code-snake-case",
+      "input": "snake case foo bar",
+      "tone": "code",
+      "expected": "foo_bar"
+    },
+    {
+      "id": "code-pascal-case",
+      "input": "pascal case flow controller",
+      "tone": "code",
+      "expected": "FlowController"
+    },
+    {
+      "id": "code-kebab-case",
+      "input": "kebab case word ink web",
+      "tone": "code",
+      "expected": "word-ink-web"
+    },
+    {
+      "id": "code-screaming-snake-case",
+      "input": "screaming snake case max retry count",
+      "tone": "code",
+      "expected": "MAX_RETRY_COUNT"
+    },
+    {
+      "id": "verbatim-unmodified",
+      "input": "um let us meet at 2 pm no wait 3 pm",
+      "tone": "verbatim",
+      "expected": "um let us meet at 2 pm no wait 3 pm"
+    }
+  ],
+  "applyFlowCleanup": [
+    {
+      "id": "full-pipeline-work-with-snippets",
+      "input": "um send it to Bob scratch that Alice with my calendly",
+      "options": {
+        "tone": "work",
+        "snippets": {
+          "my calendly": "https://cal.com/luke"
+        }
+      },
+      "expected": "Send it to Alice with https://cal.com/luke."
+    },
+    {
+      "id": "full-pipeline-casual-backtrack",
+      "input": "um let us meet at 2 pm no wait 3 pm.",
+      "options": {
+        "tone": "casual"
+      },
+      "expected": "let us meet at 3 pm"
+    },
+    {
+      "id": "full-pipeline-verbatim-passthrough",
+      "input": "um let us meet at 2 pm no wait 3 pm",
+      "options": {
+        "tone": "verbatim"
+      },
+      "expected": "um let us meet at 2 pm no wait 3 pm"
+    }
+  ],
+  "learnVocabularyFromEdit": [
+    {
+      "id": "learns-proper-nouns-and-respellings",
+      "dictated": "We deployed word ink on omarchy with stephen today.",
+      "edited": "We deployed WordInk on Omarchy with Stefan today.",
+      "expected": {
+        "addedTerms": ["WordInk", "Omarchy", "Stefan"],
+        "replacements": {
+          "word ink": "WordInk",
+          "omarchy": "Omarchy",
+          "stephen": "Stefan"
+        }
+      }
+    },
+    {
+      "id": "ignores-pure-deletions",
+      "dictated": "Please send the quarterly report to Alice right now.",
+      "edited": "Please send the report to Alice.",
+      "expected": {
+        "addedTerms": [],
+        "replacements": {}
+      }
+    },
+    {
+      "id": "ignores-large-rewrites-over-40-percent",
+      "dictated": "Let us schedule the design review for Tuesday morning.",
+      "edited": "Cancel the entire meeting and ship the hotfix tonight.",
+      "expected": {
+        "addedTerms": [],
+        "replacements": {}
+      }
+    }
+  ]
+}

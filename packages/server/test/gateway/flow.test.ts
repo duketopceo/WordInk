@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyFlowCleanup,
@@ -6,16 +7,37 @@ import {
   createRelay,
   expandSnippets,
   formatSpokenLists,
-   generateToken,
+  generateToken,
   hashToken,
   learnVocabularyFromEdit,
   resolveCourseCorrections,
   stripFillers,
+  type FlowOptions,
+  type FlowTone,
   type TokenInfo,
   type TokenRecord,
   type TokenStore,
 } from "../../src/index.js";
 import { makeUpstream, ok } from "./fakes.js";
+
+interface FlowContractFixture {
+  stripFillers: { id: string; input: string; expected: string }[];
+  resolveCourseCorrections: { id: string; input: string; expected: string }[];
+  formatSpokenLists: { id: string; input: string; expected: string }[];
+  expandSnippets: { id: string; input: string; snippets: Record<string, string>; expected: string }[];
+  applyTonePreset: { id: string; input: string; tone: FlowTone; expected: string }[];
+  applyFlowCleanup: { id: string; input: string; options: FlowOptions; expected: string }[];
+  learnVocabularyFromEdit: {
+    id: string;
+    dictated: string;
+    edited: string;
+    expected: { addedTerms: string[]; replacements: Record<string, string> };
+  }[];
+}
+
+const FLOW_CONTRACT = JSON.parse(
+  readFileSync(new URL("../../../../tests/fixtures/flow-contract.json", import.meta.url), "utf8"),
+) as FlowContractFixture;
 
 describe("stripFillers", () => {
   it("removes hesitation sounds (um, uh, erm, ah) and preserves capitalization", () => {
@@ -259,5 +281,49 @@ describe("gateway integration with flow post-processing", () => {
     expect(await res.json()).toEqual({
       text: "Let us meet at 3 pm with https://cal.com/luke.",
     });
+  });
+});
+
+describe("shared multi-OS tests/fixtures/flow-contract.json parity", () => {
+  it("verifies all stripFillers contract cases", () => {
+    for (const c of FLOW_CONTRACT.stripFillers) {
+      expect(stripFillers(c.input), c.id).toBe(c.expected);
+    }
+  });
+
+  it("verifies all resolveCourseCorrections contract cases", () => {
+    for (const c of FLOW_CONTRACT.resolveCourseCorrections) {
+      expect(resolveCourseCorrections(c.input), c.id).toBe(c.expected);
+    }
+  });
+
+  it("verifies all formatSpokenLists contract cases", () => {
+    for (const c of FLOW_CONTRACT.formatSpokenLists) {
+      expect(formatSpokenLists(c.input), c.id).toBe(c.expected);
+    }
+  });
+
+  it("verifies all expandSnippets contract cases", () => {
+    for (const c of FLOW_CONTRACT.expandSnippets) {
+      expect(expandSnippets(c.input, c.snippets), c.id).toBe(c.expected);
+    }
+  });
+
+  it("verifies all applyTonePreset contract cases", () => {
+    for (const c of FLOW_CONTRACT.applyTonePreset) {
+      expect(applyTonePreset(c.input, c.tone), c.id).toBe(c.expected);
+    }
+  });
+
+  it("verifies all applyFlowCleanup contract cases", () => {
+    for (const c of FLOW_CONTRACT.applyFlowCleanup) {
+      expect(applyFlowCleanup(c.input, c.options), c.id).toBe(c.expected);
+    }
+  });
+
+  it("verifies all learnVocabularyFromEdit contract cases", () => {
+    for (const c of FLOW_CONTRACT.learnVocabularyFromEdit) {
+      expect(learnVocabularyFromEdit(c.dictated, c.edited), c.id).toEqual(c.expected);
+    }
   });
 });

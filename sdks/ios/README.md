@@ -24,3 +24,5 @@ Apple enforces strict sandbox and memory limits on custom keyboard extensions (`
 | `KeyboardFlowController.swift` | Pure state machine for the keyboard extension (`onMicTap(now:)`, `onMicRelease(now:)`, `pollInsertion(lastSeq:)`). |
 | `ContextToneMapper.swift` | Maps host app bundle IDs (`com.apple.MobileSMS` -> `.casual`, `com.tinyspeck.chatlyio` -> `.work`, `com.apple.mobilemail` -> `.email`, `com.Termius` / code traits -> `.code`) and keyboard traits to `FlowTone`. |
 | `EditVocabularyLearner.swift` | Post-insertion token-diff learner that detects user corrections in `documentContextBeforeInput` within a 20-second window and appends learned terms to the shared App Group dictionary. |
+| `GatewayClient.swift` | `GatewayTranscriptionClient` building `multipart/form-data` `POST /v1/audio/transcriptions` requests with `Bearer wdk_...` tokens and Flow options, plus `WhisperGainBooster` (+20 dB soft-speech gain stage). |
+| `LocalSpeechFallback.swift` | `SpeechTranscriberProtocol`, `LocalFallbackTranscriber` (`WhisperKit` + Apple `SFSpeechRecognizer` on-device adapters), and `TranscriberRouter` for automatic offline/5xx fallback. |

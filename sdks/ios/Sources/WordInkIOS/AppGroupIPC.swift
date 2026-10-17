@@ -5,6 +5,9 @@ public enum WordInkAppGroup {
     public static let identifier = "group.io.wordink.shared"
     public static let payloadKey = "io.wordink.shared.flow.payload"
     public static let personalDictionaryKey = "io.wordink.shared.flow.dictionary"
+    public static let snippetsKey = "io.wordink.shared.flow.snippets"
+    public static let perAppStylesKey = "io.wordink.shared.flow.perAppStyles"
+    public static let whisperModeKey = "io.wordink.shared.flow.whisperMode"
 }
 
 /// Cross-process Darwin notification names used to signal between the Keyboard Extension and Host App.
@@ -82,6 +85,10 @@ public struct SharedFlowPayload: Codable, Equatable, Sendable {
     public var hostBundleId: String?
     /// Optional error message when `state == .failed`.
     public var errorMessage: String?
+    /// Whether Whispering Mode (+20 dB soft-speech gain boost) is active for the session.
+    public var whisperMode: Bool
+    /// Selected text captured from `textDocumentProxy.selectedText` for Command Mode transformations.
+    public var selectedText: String?
     /// Epoch timestamp of the last state transition.
     public var updatedAt: TimeInterval
 
@@ -93,6 +100,8 @@ public struct SharedFlowPayload: Codable, Equatable, Sendable {
         activeTone: FlowTone = .work,
         hostBundleId: String? = nil,
         errorMessage: String? = nil,
+        whisperMode: Bool = false,
+        selectedText: String? = nil,
         updatedAt: TimeInterval = 0
     ) {
         self.state = state
@@ -102,6 +111,8 @@ public struct SharedFlowPayload: Codable, Equatable, Sendable {
         self.activeTone = activeTone
         self.hostBundleId = hostBundleId
         self.errorMessage = errorMessage
+        self.whisperMode = whisperMode
+        self.selectedText = selectedText
         self.updatedAt = updatedAt
     }
 }

@@ -9,6 +9,9 @@ import wave
 from pathlib import Path
 
 from .client import WordInkError, list_models, transcribe
+from .flow import FlowTone, apply_flow_cleanup
+
+TONE_CHOICES: tuple[FlowTone, ...] = ("casual", "work", "email", "code", "verbatim")
 
 SAMPLE_RATE = 16000
 MIMETYPES = {
@@ -73,11 +76,31 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("file", type=Path)
     t.add_argument("--language", help="ISO-639 language hint, e.g. en")
     t.add_argument("--prompt", help="vocabulary/style hint passed upstream")
+    t.add_argument(
+        "--tone",
+        choices=TONE_CHOICES,
+        help="apply Wispr Flow tone preset (casual, work, email, code, verbatim)",
+    )
+    t.add_argument(
+        "--flow-cleanup",
+        action="store_true",
+        help="run deterministic Wispr Flow post-processing (fillers, backtracking, lists, tone)",
+    )
 
     d = sub.add_parser("dictate", help="record mic audio and transcribe it")
     d.add_argument("--seconds", type=float, help="fixed capture length")
     d.add_argument("--language")
     d.add_argument("--prompt")
+    d.add_argument(
+        "--tone",
+        choices=TONE_CHOICES,
+        help="apply Wispr Flow tone preset (casual, work, email, code, verbatim)",
+    )
+    d.add_argument(
+        "--flow-cleanup",
+        action="store_true",
+        help="run deterministic Wispr Flow post-processing (fillers, backtracking, lists, tone)",
+    )
 
     m = sub.add_parser("models", help="list models the gateway serves")
     m.set_defaults(models=True)
@@ -96,31 +119,33 @@ def main(argv: list[str] | None = None) -> int:
             if not path.is_file():
                 raise WordInkError(f"not a file: {path}")
             ctype = MIMETYPES.get(path.suffix.lower(), "application/octet-stream")
-            print(
-                transcribe(
-                    path,
-                    filename=path.name,
-                    content_type=ctype,
-                    gateway=args.gateway,
-                    token=args.token,
-                    language=args.language,
-                    prompt=args.prompt,
-                )
+            text = transcribe(
+                path,
+                filename=path.name,
+                content_type=ctype,
+                gateway=args.gateway,
+                token=args.token,
+                language=args.language,
+                prompt=args.prompt,
             )
+            if args.flow_cleanup or args.tone:
+                text = apply_flow_cleanup(text, {"tone": args.tone or "work"})
+            print(text)
             return 0
         if args.cmd == "dictate":
             wav = _record(args.seconds)
             print("transcribing…", file=sys.stderr)
-            print(
-                transcribe(
-                    wav,
-                    filename="dictation.wav",
-                    gateway=args.gateway,
-                    token=args.token,
-                    language=args.language,
-                    prompt=args.prompt,
-                )
+            text = transcribe(
+                wav,
+                filename="dictation.wav",
+                gateway=args.gateway,
+                token=args.token,
+                language=args.language,
+                prompt=args.prompt,
             )
+            if args.flow_cleanup or args.tone:
+                text = apply_flow_cleanup(text, {"tone": args.tone or "work"})
+            print(text)
             return 0
     except WordInkError as exc:
         print(f"wordink: {exc}", file=sys.stderr)

@@ -91,4 +91,127 @@ final class WordInkIOSTests: XCTestCase {
         let expiredDiff = learner.observeContextBeforeInput("We deployed WordInkPro on Omarchy today.", at: 2_025)
         XCTAssertEqual(expiredDiff.addedTerms, [])
     }
+
+    func testGatewayTranscriptionClientBuildsMultipartRequestWithBearerAndFlowOptions() throws {
+        let client = GatewayTranscriptionClient(
+            baseURL: URL(string: "https://gateway.wordink.io")!,
+            deviceToken: "wdk_live_test_token_123",
+            model: "whisper-large-v3-turbo"
+        )
+        let options = FlowRequestOptions(
+            tone: .email,
+            stripFillers: true,
+            backtrack: true,
+            lists: false,
+            whisperMode: true,
+            selectedText: "Let us meet tomorrow.",
+            snippets: ["my calendly": "https://cal.com/luke"],
+            vocabulary: ["WordInk", "Omarchy"]
+        )
+        let audioBytes = Data([0x52, 0x49, 0x46, 0x46, 0x01, 0x02])
+        let request = try client.buildMultipartRequest(
+            audioData: audioBytes,
+            filename: "utterance.wav",
+            mimeType: "audio/wav",
+            options: options,
+            boundary: "WordInkTestBoundary"
+        )
+
+        XCTAssertEqual(request.url?.absoluteString, "https://gateway.wordink.io/v1/audio/transcriptions")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer wdk_live_test_token_123")
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "Content-Type"),
+            "multipart/form-data; boundary=WordInkTestBoundary"
+        )
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-WordInk-Tone"), "email")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-WordInk-Strip-Fillers"), "true")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-WordInk-Backtrack"), "true")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-WordInk-Lists"), "false")
+
+        let bodyString = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+        XCTAssertTrue(bodyString.contains("name=\"model\"\r\n\r\nwhisper-large-v3-turbo"))
+        XCTAssertTrue(bodyString.contains("name=\"tone\"\r\n\r\nemail"))
+        XCTAssertTrue(bodyString.contains("name=\"stripFillers\"\r\n\r\ntrue"))
+        XCTAssertTrue(bodyString.contains("name=\"backtrack\"\r\n\r\ntrue"))
+        XCTAssertTrue(bodyString.contains("name=\"lists\"\r\n\r\nfalse"))
+        XCTAssertTrue(bodyString.contains("name=\"whisperMode\"\r\n\r\ntrue"))
+        XCTAssertTrue(bodyString.contains("name=\"selectedText\"\r\n\r\nLet us meet tomorrow."))
+        XCTAssertTrue(bodyString.contains("name=\"prompt\"\r\n\r\nWordInk, Omarchy"))
+        XCTAssertTrue(bodyString.contains("name=\"file\"; filename=\"utterance.wav\""))
+    }
+
+    func testTranscriberRouterFallsBackToLocalWhenOfflineOrGatewayReturns5xx() async throws {
+        struct StubTransport: HTTPDataTransport {
+            let statusCode: Int
+            func perform(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: statusCode,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                let payload = Data("{\"error\":{\"message\":\"upstream gateway failure\"}}".utf8)
+                return (payload, response)
+            }
+        }
+
+        let gatewayClient = GatewayTranscriptionClient(
+            baseURL: URL(string: "http://127.0.0.1:8941")!,
+            deviceToken: "wdk_test_fallback",
+            transport: StubTransport(statusCode: 502)
+        )
+        let whisperAdapter = WhisperKitAdapter(
+            modelVariant: "openai_whisper-base",
+            isAvailable: { true },
+            transcribeHandler: { _, _ in
+                "um ship the release with my calendly"
+            }
+        )
+        let fallback = LocalFallbackTranscriber(adapters: [whisperAdapter])
+        let router = TranscriberRouter(primary: gatewayClient, fallback: fallback)
+
+        let output = try await router.transcribe(
+            audioData: Data([0x01, 0x02, 0x03]),
+            options: FlowRequestOptions(
+                tone: .work,
+                stripFillers: true,
+                snippets: ["my calendly": "https://cal.com/luke"]
+            )
+        )
+
+        XCTAssertEqual(output.source, .onDeviceWhisperKit)
+        XCTAssertEqual(output.text, "Ship the release with https://cal.com/luke.")
+
+        // Also verify immediate offline routing without calling primary
+        let offlineRouter = TranscriberRouter(
+            primary: gatewayClient,
+            fallback: fallback,
+            isOffline: { true }
+        )
+        let offlineOutput = try await offlineRouter.transcribe(
+            audioData: Data([0x01, 0x02]),
+            options: FlowRequestOptions(tone: .casual, stripFillers: true)
+        )
+        XCTAssertEqual(offlineOutput.source, .onDeviceWhisperKit)
+        XCTAssertEqual(offlineOutput.text, "ship the release with my calendly")
+    }
+
+    func testWhisperGainBoosterApplies20dBLinearGainAndSoftKneeLimiting() {
+        let linear = WhisperGainBooster.linearGain(forDecibels: 20.0)
+        XCTAssertEqual(linear, 10.0, accuracy: 0.0001)
+
+        // Quiet whisper sample (0.04) scales by 10x -> 0.40 (below 0.85 soft-knee threshold)
+        // Loud sample (0.50) scales by 10x -> 5.0, soft-knee compressed into (0.85, 1.0] without clipping
+        let input: [Float] = [0.0, 0.04, -0.05, 0.50, -0.80]
+        let boosted = WhisperGainBooster.boostPCMFloat32(input, decibels: 20.0)
+
+        XCTAssertEqual(boosted[0], 0.0, accuracy: 0.0001)
+        XCTAssertEqual(boosted[1], 0.40, accuracy: 0.0001)
+        XCTAssertEqual(boosted[2], -0.50, accuracy: 0.0001)
+        XCTAssertGreaterThan(boosted[3], 0.85)
+        XCTAssertLessThanOrEqual(boosted[3], 1.0)
+        XCTAssertLessThan(boosted[4], -0.85)
+        XCTAssertGreaterThanOrEqual(boosted[4], -1.0)
+    }
 }
