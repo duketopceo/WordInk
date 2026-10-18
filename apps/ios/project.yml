@@ -6,6 +6,9 @@ settings:
   base:
     DEVELOPMENT_TEAM: 6BP7W45U55
     CODE_SIGN_STYLE: Automatic
+packages:
+  WordInkIOS:
+    path: ../../sdks/ios
 targets:
   WordInkRemote:
     type: application
@@ -47,6 +50,49 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
         SKIP_INSTALL: "NO"
+  WordInkApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: WordInkApp
+        excludes:
+          - Info.plist
+    dependencies:
+      - target: WordInkKeyboard
+        embed: true
+      - package: WordInkIOS
+        product: WordInkIOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.wordink.app
+        INFOPLIST_FILE: WordInkApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: WordInkApp/WordInkApp.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+  WordInkKeyboard:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: WordInkKeyboard
+        excludes:
+          - Info.plist
+    dependencies:
+      - package: WordInkIOS
+        product: WordInkIOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.wordink.app.keyboard
+        INFOPLIST_FILE: WordInkKeyboard/Info.plist
+        CODE_SIGN_ENTITLEMENTS: WordInkKeyboard/WordInkKeyboard.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        SKIP_INSTALL: "NO"
   WordInkRemoteTests:
     type: bundle.unit-test
     platform: iOS
@@ -62,6 +108,15 @@ targets:
         SWIFT_VERSION: "5.0"
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/WordInkRemote.app/WordInkRemote
 schemes:
+  WordInkApp:
+    build:
+      targets:
+        WordInkApp: all
+        WordInkKeyboard: [run, archive]
+    run:
+      config: Debug
+    archive:
+      config: Release
   WordInkRemote:
     build:
       targets:
