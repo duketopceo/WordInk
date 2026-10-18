@@ -32,9 +32,11 @@ const ORT_DIST = join(transformers, "..", "..", "onnxruntime-web", "dist");
 const CORS = { "access-control-allow-origin": "*", "cache-control": "no-store" };
 
 /**
- * Writes @wordink/local's hello-world fixture with 0.3 s of silence before and 2.5 s after, at half
- * volume. The leading silence mirrors a real press, the trailing silence fills the rest of a 3.5 s
- * hold, and the lower gain leaves headroom for the capture's automatic gain control, which clips the original.
+ * Writes @wordink/local's hello-world fixture with 0.3 s of silence before and after, normalized
+ * toward full scale (gain capped at 1.3 so a quiet fixture isn't overdriven). The leading silence
+ * mirrors a real press and absorbs the audio graph's startup latency; the clip must be shorter
+ * than the 3.5 s hold so the utterance's tail always lands inside the capture — a 2.5 s tail
+ * pushed "world" past the release point and the transcript came back "Hello, Will." (#40).
  */
 export function writeFakeMicClip(): void {
   const wav = readFileSync(FIXTURE_WAV);
@@ -48,8 +50,15 @@ export function writeFakeMicClip(): void {
   if (!data) throw new Error("no data chunk in the fixture");
   const rate = wav.readUInt32LE(24);
   const pre = Math.round(0.3 * rate) * 2;
-  const pcm = Buffer.alloc(pre + data.length + Math.round(2.5 * rate) * 2);
-  for (let i = 0; i < data.length; i += 2) pcm.writeInt16LE(Math.round(data.readInt16LE(i) * 0.5), pre + i);
+  const pcm = Buffer.alloc(pre + data.length + Math.round(0.3 * rate) * 2);
+  let fixturePeak = 1;
+  for (let i = 0; i < data.length; i += 2) fixturePeak = Math.max(fixturePeak, Math.abs(data.readInt16LE(i)));
+  const gain = Math.min(1.3, (0.98 * 32768) / fixturePeak);
+  for (let i = 0; i < data.length; i += 2) pcm.writeInt16LE(Math.round(data.readInt16LE(i) * gain), pre + i);
+  // A silent clip fails every dictation as NoSpeech 3.5 s + inference in — catch it here instead.
+  let writtenPeak = 0;
+  for (let i = 0; i + 2 <= pcm.length; i += 2) writtenPeak = Math.max(writtenPeak, Math.abs(pcm.readInt16LE(i)));
+  if (writtenPeak < 100) throw new Error(`fake mic clip is silent (peak ${writtenPeak})`);
   // RIFF header and the 16-byte fmt chunk, then a bare data chunk (dropping the LIST chunk).
   const header = Buffer.alloc(44);
   wav.copy(header, 0, 0, 36);
@@ -117,43 +126,113 @@ export const withoutWebGPU = (page: Page) =>
   });
 
 /**
- * Stubs getUserMedia so each mic open plays the padded clip once from its start. Chromium's
- * file-backed fake device starts looping at browser launch, so where a hold lands in the clip
- * depended on how long setup took, and a hold that caught the loop restarting ("…world. Hel")
- * transcribed to nothing. Call before navigating.
+ * Captures deterministic audio by replacing the capture worklet rather than the device: the
+ * addModule load is redirected to a same-named processor that emits the padded clip over
+ * port.postMessage, real-time paced on the render clock and resampled to the context rate.
+ * BufferSource→MediaStreamDestination→MediaStreamSource proved unreliable under headless
+ * Chromium (the track delivered silence to every consumer — #40), while postMessage delivery
+ * is exact and can't starve. getUserMedia only has to return a live audio track for
+ * createMediaStreamSource; its content is ignored. Call before navigating.
  */
 export async function fakeMicFromClip(page: Page): Promise<void> {
   const wav = readFileSync(FAKE_MIC_WAV);
   const rate = wav.readUInt32LE(24);
-  const pcm = wav.subarray(44).toString("base64");
+  const pcm = wav.subarray(44);
+  const samples: number[] = [];
+  for (let i = 0; i + 2 <= pcm.length; i += 2) samples.push(pcm.readInt16LE(i));
   await page.addInitScript(
-    ({ pcm, rate }: { pcm: string; rate: number }) => {
-      const bytes = Uint8Array.from(atob(pcm), (c) => c.charCodeAt(0));
-      const samples = new Int16Array(bytes.buffer);
+    ({ samples, rate }: { samples: number[]; rate: number }) => {
+      // Same interface as the app's capture processor: ~20 ms Float32 posts. The clip is
+      // emitted once from the press, then the worklet outputs silence like an open mic.
+      const moduleSrc = [
+        `const CLIP = new Int16Array([${samples.join(",")}]);`,
+        `const STEP = ${rate} / sampleRate;`,
+        `class WordInkCapture extends AudioWorkletProcessor {`,
+        `  constructor() { super(); this.size = Math.max(128, Math.round(sampleRate / 50));`,
+        `    this.buf = new Float32Array(this.size); this.n = 0; this.pos = 0; }`,
+        `  process(inputs) {`,
+        `    const frames = (inputs[0] && inputs[0][0] && inputs[0][0].length) || 128;`,
+        `    for (let i = 0; i < frames; i++) {`,
+        `      const idx = Math.floor(this.pos), frac = this.pos - idx;`,
+        `      const a = idx < CLIP.length ? CLIP[idx] / 32768 : 0;`,
+        `      const b = idx + 1 < CLIP.length ? CLIP[idx + 1] / 32768 : 0;`,
+        `      this.buf[this.n++] = a + (b - a) * frac;`,
+        `      this.pos += STEP;`,
+        `      if (this.n === this.size) { this.port.postMessage(this.buf, [this.buf.buffer]);`,
+        `        this.buf = new Float32Array(this.size); this.n = 0; }`,
+        `    }`,
+        `    return true;`,
+        `  }`,
+        `}`,
+        `registerProcessor("wordink-capture", WordInkCapture);`,
+      ].join("\n");
+      const blobUrl = URL.createObjectURL(new Blob([moduleSrc], { type: "text/javascript" }));
+      const origAddModule = AudioWorklet.prototype.addModule;
+      // The only worklet module the app loads is wordink-capture; substitute ours for any load.
+      AudioWorklet.prototype.addModule = function (this: AudioWorklet) {
+        return origAddModule.call(this, blobUrl);
+      };
       navigator.mediaDevices.getUserMedia = async () => {
         const ctx = new AudioContext();
-        await ctx.resume();
-        const buffer = ctx.createBuffer(1, samples.length, rate);
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < samples.length; i++) data[i] = samples[i]! / 32768;
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        const dest = ctx.createMediaStreamDestination();
-        source.connect(dest);
-        source.start();
-        return dest.stream;
+        return ctx.createMediaStreamDestination().stream;
       };
     },
-    { pcm, rate },
+    { samples, rate },
   );
 }
 
 /** Hold the element's button for `ms` while the fake microphone plays the clip (see {@link fakeMicFromClip}). */
-export async function holdToTalk(page: Page, ms: number): Promise<void> {
+export async function holdToTalk(page: Page, ms: number): Promise<number> {
   const mic = page.locator("wordink-mic").first();
   await mic.locator('[part="button"]').hover();
   await page.mouse.down();
-  await page.waitForFunction(() => document.querySelector("wordink-mic")?.getAttribute("data-state") === "listening");
-  await page.waitForTimeout(ms);
+  await page.waitForFunction(
+    () => document.querySelector("wordink-mic")?.getAttribute("data-state") === "listening",
+    { timeout: 30_000 },
+  );
+  // Sample the element's level meter through the hold so a silent capture is diagnosable (#40).
+  const meter = mic.locator('[part="meter"]');
+  const deadline = Date.now() + ms;
+  let peak = 0;
+  while (Date.now() < deadline) {
+    const v = await meter.evaluate((el) => el.style.getPropertyValue("--wordink-level")).catch(() => "");
+    peak = Math.max(peak, parseFloat(v) || 0);
+    await page.waitForTimeout(200);
+  }
   await page.mouse.up();
+  return peak;
+}
+
+/**
+ * Hold, release, and wait for the session to settle (`idle` on a final, `error` on NoSpeech et al.),
+ * then return the field's text. `attempts` re-dictates while `match` doesn't hold — the bundled
+ * model is Moonshine-tiny and occasionally returns empty or garbled text even on clean captures
+ * (#40); a second attempt encodes the same "speak again" recovery a real user performs.
+ */
+export async function dictate(
+  page: Page,
+  target: string,
+  match: (text: string) => boolean,
+  { attempts = 2, holdMs = 3500 } = {},
+): Promise<{ text: string; state: string | null; peak: number }> {
+  const mic = page.locator("wordink-mic").first();
+  let peak = 0;
+  let text = "";
+  let state: string | null = null;
+  for (let i = 0; i < attempts; i++) {
+    peak = Math.max(peak, await holdToTalk(page, holdMs));
+    await page.waitForFunction(
+      () => {
+        const s = document.querySelector("wordink-mic")?.getAttribute("data-state");
+        return s === "idle" || s === "error";
+      },
+      // The provider watchdog fails a stuck transcription at ~30 s, so 60 s bounds an attempt
+      // well under the test timeout and leaves room for a second try.
+      { timeout: 60_000 },
+    );
+    state = await mic.getAttribute("data-state");
+    text = await page.locator(target).inputValue().catch(() => "");
+    if (text.trim() && match(text)) break;
+  }
+  return { text, state, peak };
 }

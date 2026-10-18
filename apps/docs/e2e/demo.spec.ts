@@ -2,7 +2,7 @@
 // engine and no key, its wasm and worker assets resolve under the base path, and the dev-key form
 // exists only on localhost (KTD3).
 import { expect, test } from "@playwright/test";
-import { DOCS_HOST, SITE_PORT, fakeThirdParties, fakeMicFromClip, holdToTalk, withoutWebGPU } from "./env.js";
+import { DOCS_HOST, SITE_PORT, dictate, fakeThirdParties, fakeMicFromClip, withoutWebGPU } from "./env.js";
 
 test("on a public hostname the demo dictates with the local engine and offers no dev-key form", async ({ page, context }) => {
   const served = await fakeThirdParties(context);
@@ -14,18 +14,35 @@ test("on a public hostname the demo dictates with the local engine and offers no
   });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  const consoleErrors: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error") consoleErrors.push(m.text());
+  });
 
   await page.goto(`http://${DOCS_HOST}:${SITE_PORT}/WordInk/`);
   await expect(page.locator("#demo wordink-mic")).toHaveAttribute("data-state", "idle");
   await expect(page.locator("#demo-devkey")).toBeEmpty();
   expect(await page.locator("#demo-devkey input, .devkey").count()).toBe(0);
 
-  await holdToTalk(page, 3500);
-  await expect(page.locator("#demo-text")).not.toHaveValue("");
+  const r = await dictate(page, "#demo-text", (t) => /hello/i.test(t) && /world/i.test(t));
+  if (!r.text.trim()) {
+    // If the capture ever flakes again (#40), the page state says where: holdPeak ~0 means the
+    // worklet emitted silence, a peak with an error status means the model rejected the audio.
+    const micState = await page.locator("#demo wordink-mic").getAttribute("data-state");
+    const statusText = await page.locator("#demo-status").textContent();
+    const micStatus = await page
+      .locator("#demo wordink-mic")
+      .locator('[part="status"]')
+      .textContent()
+      .catch(() => null);
+    console.log(`[demo-flake-debug] micState=${micState} status=${JSON.stringify(statusText)} ` +
+      `micStatus=${JSON.stringify(micStatus)} holdPeak=${r.peak} dictationState=${r.state} ` +
+      `pageerrors=${JSON.stringify(errors)} console=${JSON.stringify(consoleErrors)}`);
+  }
+  expect(r.text.trim()).not.toBe("");
   await expect(page.locator("#demo-status")).toContainText("WebAssembly");
-  const text = await page.locator("#demo-text").inputValue();
-  expect(text).toMatch(/hello/i);
-  expect(text).toMatch(/world/i);
+  expect(r.text).toMatch(/hello/i);
+  expect(r.text).toMatch(/world/i);
 
   expect(failed).toEqual([]);
   expect(errors).toEqual([]);
