@@ -6,7 +6,7 @@ import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { release, snippet } from "../site.js";
-import { DOCS_DIR, QUICKSTART_DIR, QUICKSTART_PORT, fakeThirdParties, fakeMicFromClip, holdToTalk, withoutWebGPU } from "./env.js";
+import { DOCS_DIR, QUICKSTART_DIR, QUICKSTART_PORT, dictate, fakeThirdParties, fakeMicFromClip, withoutWebGPU } from "./env.js";
 
 const PAGE = `http://127.0.0.1:${QUICKSTART_PORT}/`;
 
@@ -39,11 +39,11 @@ test("the HTML quickstart with the local engine dictates into the textarea in un
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(PAGE);
   await expect(page.locator("wordink-mic")).toHaveAttribute("data-state", "idle");
-  await holdToTalk(page, 3500);
-  await expect(page.locator("#message")).not.toHaveValue("");
+  const r = await dictate(page, "#message", (t) => /hello/i.test(t) && /world/i.test(t));
   const totalMs = Date.now() - t0;
 
-  const text = await page.locator("#message").inputValue();
+  const text = r.text;
+  expect(text.trim()).not.toBe("");
   console.log(
     `[quickstart] setup ${(setupMs / 1000).toFixed(1)} s, first dictation ${((totalMs - setupMs) / 1000).toFixed(1)} s, ` +
       `total ${(totalMs / 1000).toFixed(1)} s: ${JSON.stringify(text)}`,

@@ -9,6 +9,9 @@ writeFakeMicClip();
 // on WASM), so allow minutes. `pnpm test:e2e` first builds the site with base /WordInk/ into e2e/.site.
 export default defineConfig({
   testDir: "e2e",
+  // One worker: the dictation specs run a real-time worklet graph while ONNX loads the model, and
+  // both specs share the fixed SITE_PORT/QUICKSTART_PORT servers below — parallel workers collide.
+  workers: 1,
   timeout: 300_000,
   expect: { timeout: 180_000 },
   retries: process.env.CI ? 1 : 0,
