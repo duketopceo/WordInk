@@ -23,40 +23,47 @@ JSON
 export GROQ_API_KEY=gsk_…
 $GW check   # reports which providers have keys — never prints them
 
-# 4. Serve in a second terminal, then mint a device token
+# 4. `serve` runs in the foreground — leave it in this terminal:
 $GW serve                # listens on http://127.0.0.1:8941
+
+# 5. In a SECOND terminal, repeat the setup then mint a device token:
+export GROQ_API_KEY=gsk_…
+GW="node packages/server/dist/bin/wordink-gateway.js"
 $GW tokens create test   # prints wdk_… once — save it
 ```
 
-PowerShell:
+PowerShell 5.1+:
 
 ```powershell
 pnpm --filter @wordink/server build
 $GW = "packages\server\dist\bin\wordink-gateway.js"
 
 # Config at the resolved path ($env:XDG_CONFIG_HOME or ~\.config)
-$cfg = Join-Path ($env:XDG_CONFIG_HOME ?? "$HOME\.config") "wordink"
+$cfg = if ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME "wordink" } else { "$HOME\.config\wordink" }
 New-Item -ItemType Directory -Force $cfg | Out-Null
 '{ "providers": [{ "provider": "groq", "keyEnv": "GROQ_API_KEY" }] }' |
-  Set-Content (Join-Path $cfg "gateway.json")
+  Set-Content -Encoding utf8 (Join-Path $cfg "gateway.json")
 
 $env:GROQ_API_KEY = "gsk_…"
 node $GW check
-node $GW serve                 # second terminal
+node $GW serve                 # foreground — leave it running in this window
+
+# In a SECOND PowerShell window, repeat $env:GROQ_API_KEY and $GW, then:
 node $GW tokens create test    # prints wdk_… once — save it
 ```
 
-Two calls prove the chain:
+Two calls prove the chain (POSIX `curl`; in PowerShell use `curl.exe` — plain `curl` aliases `Invoke-WebRequest`):
 
 ```sh
 # Providers the gateway will try, in fallback order
 curl -H "Authorization: Bearer wdk_…" http://127.0.0.1:8941/v1/models
+# PowerShell:  curl.exe -H "Authorization: Bearer wdk_…" http://127.0.0.1:8941/v1/models
 
 # Any short WAV or m4a works — the repo ships one
-# (PowerShell: use curl.exe, not the curl alias)
 curl -H "Authorization: Bearer wdk_…" \
      -F file=@packages/local/test/fixtures/hello-world.wav \
      http://127.0.0.1:8941/v1/audio/transcriptions
+# PowerShell:  curl.exe -H "Authorization: Bearer wdk_…" -F "file=@packages\local\test\fixtures\hello-world.wav" http://127.0.0.1:8941/v1/audio/transcriptions
 ```
 
 `{"text": "Hello, world"}` back means everything works end to end: token auth → provider key → upstream transcription → OpenAI-shaped response.
