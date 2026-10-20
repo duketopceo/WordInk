@@ -1,22 +1,25 @@
 # Verify your gateway
 
-A five-minute smoke test that proves the whole chain on any machine the gateway runs on — Linux, macOS or Windows: Node serves the endpoints, a provider key resolves, a device token authenticates, and audio comes back as text. Node 20+ is the only requirement.
+A five-minute smoke test that proves the whole chain on any machine the gateway runs on — Linux, macOS or Windows: Node serves the endpoints, a provider key resolves, a device token authenticates, and audio comes back as text. The gateway itself needs only Node 20+; the recipe below also assumes a repo checkout (for the build and the bundled test clip), `pnpm`, and `curl` — `curl.exe` on Windows.
 
 The gateway is a plain HTTP server. It needs no microphone, audio-device or accessibility permission anywhere — the dictation app that points at it owns those permissions on its own machine.
 
 ## The smoke test
+
+Bash / zsh:
 
 ```sh
 # 1. Build the CLI (until @wordink/server is on npm)
 pnpm --filter @wordink/server build
 GW="node packages/server/dist/bin/wordink-gateway.js"
 
-# 2. Minimal config — see per-OS paths below
-cat > ~/.config/wordink/gateway.json <<'JSON'
+# 2. Minimal config at the resolved path ($XDG_CONFIG_HOME or ~/.config)
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/wordink"
+cat > "${XDG_CONFIG_HOME:-$HOME/.config}/wordink/gateway.json" <<'JSON'
 { "providers": [{ "provider": "groq", "keyEnv": "GROQ_API_KEY" }] }
 JSON
 
-# 3. Provider key in the environment (PowerShell: $env:GROQ_API_KEY = "gsk_…")
+# 3. Provider key in the environment
 export GROQ_API_KEY=gsk_…
 $GW check   # reports which providers have keys — never prints them
 
@@ -25,13 +28,32 @@ $GW serve                # listens on http://127.0.0.1:8941
 $GW tokens create test   # prints wdk_… once — save it
 ```
 
+PowerShell:
+
+```powershell
+pnpm --filter @wordink/server build
+$GW = "packages\server\dist\bin\wordink-gateway.js"
+
+# Config at the resolved path ($env:XDG_CONFIG_HOME or ~\.config)
+$cfg = Join-Path ($env:XDG_CONFIG_HOME ?? "$HOME\.config") "wordink"
+New-Item -ItemType Directory -Force $cfg | Out-Null
+'{ "providers": [{ "provider": "groq", "keyEnv": "GROQ_API_KEY" }] }' |
+  Set-Content (Join-Path $cfg "gateway.json")
+
+$env:GROQ_API_KEY = "gsk_…"
+node $GW check
+node $GW serve                 # second terminal
+node $GW tokens create test    # prints wdk_… once — save it
+```
+
 Two calls prove the chain:
 
 ```sh
 # Providers the gateway will try, in fallback order
 curl -H "Authorization: Bearer wdk_…" http://127.0.0.1:8941/v1/models
 
-# Any short WAV or m4a works — the repo ships one:
+# Any short WAV or m4a works — the repo ships one
+# (PowerShell: use curl.exe, not the curl alias)
 curl -H "Authorization: Bearer wdk_…" \
      -F file=@packages/local/test/fixtures/hello-world.wav \
      http://127.0.0.1:8941/v1/audio/transcriptions
