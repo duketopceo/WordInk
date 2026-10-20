@@ -14,6 +14,7 @@ export const PAGES = [
   { slug: "quickstart-react", nav: "Quickstart: React", title: "Quickstart: React" },
   { slug: "relay", nav: "Relay", title: "The credential relay" },
   { slug: "desktop", nav: "Desktop apps", title: "Desktop apps: the WordInk gateway" },
+  { slug: "verify", nav: "Verify", title: "Verify your gateway" },
   { slug: "providers", nav: "Providers", title: "Providers" },
   { slug: "local", nav: "Local engine", title: "Local engine" },
   { slug: "transform", nav: "Post-processing", title: "Post-processing with transform" },
