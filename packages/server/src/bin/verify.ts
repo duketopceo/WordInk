@@ -38,15 +38,26 @@ function report(checks: Check[], name: string, status: Check["status"], detail?:
 function run(
   args: string[],
   env: NodeJS.ProcessEnv,
+  timeoutMs = 30_000,
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [BIN, ...args], { env });
     let stdout = "";
     let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`timed out after ${timeoutMs}ms: ${args.join(" ")}`));
+    }, timeoutMs);
     child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
     child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr });
+    });
   });
 }
 
@@ -56,6 +67,10 @@ function spawnServe(env: NodeJS.ProcessEnv): Promise<ChildProcess> {
   return new Promise((resolve, reject) => {
     let out = "";
     let err = "";
+    const onExit = () => {
+      clearTimeout(timer);
+      reject(new Error(`serve exited before listening; stderr: ${err}`));
+    };
     const timer = setTimeout(
       () => reject(new Error(`serve produced no listener line within 15s; stderr so far: ${err}`)),
       15_000,
@@ -65,13 +80,11 @@ function spawnServe(env: NodeJS.ProcessEnv): Promise<ChildProcess> {
       out += d.toString();
       if (/listening on/i.test(out)) {
         clearTimeout(timer);
+        child.removeListener("exit", onExit);
         resolve(child);
       }
     });
-    child.on("exit", () => {
-      clearTimeout(timer);
-      reject(new Error(`serve exited before listening; stderr: ${err}`));
-    });
+    child.on("exit", onExit);
   });
 }
 
@@ -125,13 +138,17 @@ function writeSandboxConfig(home: string, config: unknown): void {
   writeFileSync(join(dir, "gateway.json"), JSON.stringify(config));
 }
 
-async function mintToken(env: NodeJS.ProcessEnv, admin = false): Promise<string> {
+async function mintToken(
+  env: NodeJS.ProcessEnv,
+  admin = false,
+): Promise<{ token: string; id: string }> {
   const args = admin ? ["tokens", "create", "--admin", "verify"] : ["tokens", "create", "verify"];
   const r = await run(args, env);
   if (r.code !== 0) throw new CheckFailed(`tokens create exited ${r.code}: ${r.stderr.trim()}`);
   const token = r.stdout.match(TOKEN_RE)?.[0];
-  if (!token) throw new CheckFailed("tokens create printed no wdk_ token");
-  return token;
+  const id = r.stdout.match(TOKEN_ID_RE)?.[0];
+  if (!token || !id) throw new CheckFailed("tokens create printed no wdk_ token / id");
+  return { token, id };
 }
 
 async function fetchJson(url: string, init?: RequestInit): Promise<{ status: number; body: unknown }> {
@@ -199,7 +216,7 @@ export async function cmdVerify(args: string[]): Promise<number> {
 
     const base = `http://127.0.0.1:${port}`;
     const models = await fetchJson(`${base}/v1/models`, {
-      headers: { authorization: `Bearer ${device}` },
+      headers: { authorization: `Bearer ${device.token}` },
     });
     if (models.status !== 200) throw new CheckFailed(`/v1/models answered ${models.status}`);
     const modelIds = Array.isArray((models.body as { data?: { id: string }[] })?.data)
@@ -213,7 +230,7 @@ export async function cmdVerify(args: string[]): Promise<number> {
     const wav = readFileSync(FIXTURE);
     const tx = await fetchJson(`${base}/v1/audio/transcriptions`, {
       method: "POST",
-      headers: { authorization: `Bearer ${device}` },
+      headers: { authorization: `Bearer ${device.token}` },
       body: wavForm(wav, DEFAULT_MODELS.groq),
     });
     const text = (tx.body as { text?: string })?.text;
@@ -223,19 +240,19 @@ export async function cmdVerify(args: string[]): Promise<number> {
     report(checks, "POST /v1/audio/transcriptions", "PASS", `"${text}"`);
 
     const denied = await fetchJson(`${base}/v1/vocabulary`, {
-      headers: { authorization: `Bearer ${device}` },
+      headers: { authorization: `Bearer ${device.token}` },
     });
     if (denied.status !== 403) throw new CheckFailed(`device vocabulary GET answered ${denied.status}, want 403`);
     report(checks, "vocabulary scope gate", "PASS", "device token refused 403");
 
     const added = await fetchJson(`${base}/v1/vocabulary`, {
       method: "POST",
-      headers: { authorization: `Bearer ${admin}`, "content-type": "application/json" },
+      headers: { authorization: `Bearer ${admin.token}`, "content-type": "application/json" },
       body: JSON.stringify({ terms: ["WordInkVerify"] }),
     });
     if (added.status !== 200) throw new CheckFailed(`vocabulary POST answered ${added.status}`);
     const listed = await fetchJson(`${base}/v1/vocabulary`, {
-      headers: { authorization: `Bearer ${admin}` },
+      headers: { authorization: `Bearer ${admin.token}` },
     });
     const entries = (listed.body as { data?: { term: string }[] })?.data ?? [];
     if (listed.status !== 200 || !entries.some((e) => e.term === "WordInkVerify")) {
@@ -243,13 +260,10 @@ export async function cmdVerify(args: string[]): Promise<number> {
     }
     report(checks, "vocabulary write+read", "PASS", "term effective after POST");
 
-    const list = await run(["tokens", "list"], env);
-    const id = list.stdout.match(TOKEN_ID_RE)?.[0];
-    if (!id) throw new CheckFailed("tokens list produced no token id");
-    const revoked = await run(["tokens", "revoke", id], env);
+    const revoked = await run(["tokens", "revoke", device.id], env);
     if (revoked.code !== 0) throw new CheckFailed(`tokens revoke exited ${revoked.code}`);
     const after = await fetchJson(`${base}/v1/models`, {
-      headers: { authorization: `Bearer ${device}` },
+      headers: { authorization: `Bearer ${device.token}` },
     });
     if (after.status !== 401) throw new CheckFailed(`revoked token answered ${after.status}, want 401`);
     report(checks, "token revoke", "PASS", "next request refused 401");
@@ -326,7 +340,7 @@ async function liveEntry(
   const serveProc = await spawnServe(env);
   children.push(serveProc);
   try {
-    const token = await mintToken(env);
+    const { token } = await mintToken(env);
     const wav = readFileSync(FIXTURE);
     const res = await fetchJson(`http://127.0.0.1:${port}/v1/audio/transcriptions`, {
       method: "POST",

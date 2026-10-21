@@ -159,7 +159,7 @@ describe("verify", () => {
       join(home, "config", "wordink", "gateway.json"),
       JSON.stringify({
         providers: [
-          // A first healthy entry then the failing one: fallback must not mask entry 2.
+          // The single entry's upstream 500s: verify must report FAIL, not SKIP or pass.
           { provider: "openai", keyEnv: "WORDINK_OK", url: `http://127.0.0.1:${(fake.address() as AddressInfo).port}` },
         ],
       }),

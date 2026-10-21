@@ -191,7 +191,7 @@ flowchart LR
 3. Credential handling: provider keys are injected per-session from the operator's secret store, never written into the runbook, recorded command lines, or committed files; the log records `keyEnv` variable names, token ids/labels, and pass/fail — never values.
 4. Record per box: date, OS/arch, Node version, offline pass/fail, live pass/fail, anomalies → issues.
 
-**Test expectation: none — this is the verification itself; its evidence is the runbook log.** Plant one negative check per box: `tokens revoke` the minted id and confirm the next request 401s.
+**Test expectation: none — this is the verification itself; its evidence is the runbook log.** `verify` already covers revoke→401 in its sandbox; the extra negative check here is on the *durable* lane gateway (U3's serve): `tokens revoke` that box's minted id and confirm the next request 401s.
 
 **Verification:** each box's runbook entry shows offline PASS and Groq live PASS, or an open issue with the observed failure.
 
@@ -290,7 +290,7 @@ flowchart LR
 |---|---|---|
 | U1 code | `pnpm --filter @wordink/server build && pnpm --filter @wordink/server test` | green incl. new `verify.test.ts` |
 | U1 lint | `pnpm typecheck` | clean |
-| Per-OS | `wordink-gateway verify` (offline) then `verify --live` | exit 0 both, or issue filed |
+| Per-OS | `wordink-gateway verify` (offline) then `wordink-gateway verify --live` | exit 0 both, or issue filed |
 | Windows client | TypeWhisper real dictation → text | observed text, versions recorded |
 | macOS | gateway verify on mini + signed `WordInkRemote` archive | verify PASS + archive produced |
 | Device | onboarding → dictate → shortcuts → revoke/rotate checklist | all observed on hardware |
