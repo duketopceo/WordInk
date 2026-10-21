@@ -15,7 +15,11 @@ The gateway is a local service. It listens on `127.0.0.1:8941` by default.
 ```sh
 # @wordink/server isn't on npm yet; build the CLI from the repo:
 pnpm --filter @wordink/server build
+# Linux:
 install -Dm755 packages/server/dist/bin/wordink-gateway.js ~/.local/bin/wordink-gateway
+# macOS (BSD install has no -D — create the dir first):
+mkdir -p ~/.local/bin && install -m755 packages/server/dist/bin/wordink-gateway.js ~/.local/bin/wordink-gateway
+# Windows: skip the install step — invoke `node packages\server\dist\bin\wordink-gateway.js` directly
 # (once published: npm install -g @wordink/server)
 
 wordink-gateway check                 # which providers have keys (never prints them)
