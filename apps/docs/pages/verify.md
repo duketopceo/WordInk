@@ -28,7 +28,7 @@ Each check prints `PASS`, `FAIL` with the cause, or `SKIP`; exit code is 0 only 
 
 | Symptom | Cause |
 |---|---|
-| `FAIL check` | The `keyEnv` variable isn't set in the gateway's environment — see the env-var note below |
+| `FAIL check` | The sandbox's own fake key failed to resolve — report it; this is never caused by your real environment (offline `verify` injects its own). With `--live`, `FAIL live <provider>` instead means that provider's real key/model/endpoint failed |
 | Empty `/v1/models` | No provider entry had a usable key at serve time |
 | `401` | Missing, mistyped or revoked token (`tokens list` shows ids and revoked state, never values) |
 | `403` | Device token on an admin route (`/v1/vocabulary`) — mint with `--admin` |

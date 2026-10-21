@@ -71,10 +71,10 @@ function spawnServe(env: NodeJS.ProcessEnv): Promise<ChildProcess> {
       clearTimeout(timer);
       reject(new Error(`serve exited before listening; stderr: ${err}`));
     };
-    const timer = setTimeout(
-      () => reject(new Error(`serve produced no listener line within 15s; stderr so far: ${err}`)),
-      15_000,
-    );
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`serve produced no listener line within 15s; stderr so far: ${err}`));
+    }, 15_000);
     child.stderr.on("data", (d: Buffer) => (err += d.toString()));
     child.stdout.on("data", (d: Buffer) => {
       out += d.toString();
@@ -179,6 +179,10 @@ export async function cmdVerify(args: string[]): Promise<number> {
   });
   if (configIdx >= 0 && (configPath === undefined || configPath.startsWith("--"))) {
     console.error(`${PREFIX} usage: wordink-gateway verify [--live] [--config <path>]`);
+    return 1;
+  }
+  if (!live && configPath !== undefined) {
+    console.error(`${PREFIX} verify: --config only applies to --live runs (offline checks use a sandbox config)`);
     return 1;
   }
   if (rest.length > 0) {

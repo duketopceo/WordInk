@@ -29,8 +29,10 @@ beforeEach(() => {
 
 afterEach(async () => {
   for (const child of children.splice(0)) {
-    child.kill("SIGKILL");
-    await new Promise((r) => child.once("close", r));
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+      await new Promise((r) => child.once("close", r));
+    }
   }
   rmSync(home, { recursive: true, force: true });
 });
@@ -54,6 +56,7 @@ interface RunResult {
 function run(args: string[], env: Record<string, string> = {}): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn("node", [BIN, "verify", ...args], { env: baseEnv(env) });
+    children.push(child);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));

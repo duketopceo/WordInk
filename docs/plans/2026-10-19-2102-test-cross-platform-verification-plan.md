@@ -79,7 +79,7 @@ CI proves the code compiles and unit/e2e suites pass on GitHub runners. It does 
 ### Key Technical Decisions
 
 - KTD1. **`verify` is a `wordink-gateway` subcommand with an offline-first design.** It runs the full mechanics check against a loopback fake provider (`{"provider":"groq","keyEnv":"X","url":"http://127.0.0.1:<port>"}` — the config's own `url` override accepts http on loopback) so the check needs no secrets; `--live` opts into one real transcription per resolved provider entry. `packages/server/test/gateway/cli.test.ts` is the reference implementation for temp-XDG sandboxing, serve-spawn detection (`/listening on/`), and the fake-provider technique. (session-settled: user-approved — chosen over repo-local script: ships with the CLI and survives npm publish.)
-- KTD2. **Hermetic state via `XDG_*` temp dirs, on every OS including Windows.** `wordink-gateway` resolves config/state only through `XDG_CONFIG_HOME`/`XDG_STATE_HOME`/`homedir()`; setting the XDG pair to temp dirs makes runs identical on all three OSes and can never touch a live `gateway-tokens.json`. Windows has no POSIX omaseal wrapper — `keyEnv` vars are injected directly per process.
+- KTD2. **Hermetic state via `XDG_*` temp dirs, on every OS including Windows.** `wordink-gateway` resolves config/state only through `XDG_CONFIG_HOME`/`XDG_STATE_HOME`/`homedir()`; setting the XDG pair to temp dirs makes runs identical on all three OSes and can never touch a live `gateway-tokens.json`. Windows has no POSIX secret-store wrapper — `keyEnv` vars are injected directly per process.
 - KTD3. **Device reachability prefers `tailscale serve` over `allowInsecureRemote`.** The app accepts http on LAN/tailnet ranges and https anywhere; `tailscale serve --bg 8941` on the gateway host yields a TLS endpoint the phone trusts without weakening the gateway config. `allowInsecureRemote` + plain http is the fallback for same-LAN runs only. (apps/ios/README.md, Shared/GatewayConfig.swift URL policy.)
 - KTD4. **Sim gates stay in CI; the mini stages signing and produces the device-signed archive.** The CI ios job already runs on `macos-15` runners — real Apple Silicon — so the mini lane does not replay sim tests; it does what CI cannot: stage the operator's Apple ID/team and App Store Connect API key and produce a `xcodebuild archive -allowProvisioningUpdates` for device (testflight.sh pattern). WordInkRemote + WordInkWidgets need **no registered App Group** — the keychain-access-group is auto-provisioned and `StartDictationIntent` runs in-process (`group.io.wordink.shared` belongs to the deferred WordInkApp/Keyboard pair). Ordering mini-first keeps code work unblocked while credentials are staged.
 - KTD5. **Assertions fuzzy-match transcript content.** The `hello-world.wav` result varies by provider/model ("Hello, world" vs "Hello, world."); assert case-insensitive `hello`+`world`, never an exact string — the same lesson the e2e flake taught. (docs/solutions/test-failures/chromium-fake-mic-loops-from-launch.md.)
@@ -114,7 +114,7 @@ flowchart LR
 - At least one box besides this machine can run the lanes (cluster/VM/mini as described), each with Node 20+/pnpm provisioned; lanes stop individually if unreachable.
 - The Windows VM has TypeWhisper installed and a working audio capture path (mic passthrough, or a virtual audio device fed `hello-world.wav` as the dictated phrase).
 - Apple signing prerequisites (Apple ID in Xcode on the mini, App Store Connect API key `.p8`, a Developer Program membership adequate for device provisioning) are operator-staged before U5; `DEVELOPMENT_TEAM` is overridden if not `6BP7W45U55`.
-- A Groq key exists on at least two hosts (true on this machine today); if only one host carries it, R6's two-host leg is recorded deferred, not passed.
+- A Groq key is confirmed on this machine only; R6's second-host leg is deferred until a second host carries the key — never claimed early.
 - Lane boxes are single-operator machines; on any shared box, injected keyEnv vars and minted tokens are purged at lane end.
 
 ### Sources
@@ -124,7 +124,7 @@ flowchart LR
 - `docs/solutions/best-practices/operator-config-is-hostile-input.md` — assertable fail-closed checks for the verify tool (U1 test scenarios).
 - `docs/solutions/test-failures/chromium-fake-mic-loops-from-launch.md` — fuzzy transcript assertions; mechanism note: `fakeMicFromClip` now substitutes the AudioWorklet, not the learning's older BufferSource stub (KTD5).
 - `packages/server/test/gateway/cli.test.ts` — reference implementation for the verify recipe.
-- Planning dossiers: repo-research and learnings under `/tmp/compound-engineering-1000/ce-plan-research/ea5f47f2/` (scratch; key facts folded inline above).
+- Planning dossiers from this session were scratch artifacts; all key facts are folded inline above.
 
 ---
 
@@ -151,7 +151,7 @@ flowchart LR
 **Approach:**
 1. Reuse the cli.test.ts techniques: temp-dir `XDG_CONFIG_HOME`/`XDG_STATE_HOME` environment, write a minimal `gateway.json` whose provider entry points `url` at an ephemeral loopback stub (`node:http` server answering `{"text":"ok"}`) **on a probed free loopback port** (the `freePort()` pattern — never the 8941 default, so `verify` passes on a host already running a live gateway), spawn `serve`, wait for `wordink-gateway: listening on` on stdout with a bounded timeout.
 2. Checks, each reported `PASS`/`FAIL` + cause: config resolves; `check` exits 0; `serve` binds; `tokens create` mints a `wdk_` token (regex-extracted); `/v1/models` 200 with the provider's model id; `/v1/audio/transcriptions` multipart round-trip returns `{"text": …}` from the fake provider; admin token mints and POSTs one term to `/v1/vocabulary` with a following GET reporting it effective (the write path — `FileVocabularyStore` mkdir/tmp+rename/fsync — is the POSIX-flavored persistence the Windows lane exists to catch) while a device token gets 403; device token revoke yields 401 on the next request.
-3. `--live` mode: resolves provider entries from the operator's real `gateway.json` (default resolution path, or `--config <path>` — erroring clearly when absent), then for **each** entry that resolves a real key spawns an isolated single-provider `serve` (still against the temp state sandbox) and POSTs the bundled `hello-world.wav`, asserting fuzzy `hello`+`world` (KTD5). Per-entry isolation is required because the fallback chain always prefers the first healthy provider; the loopback fake is excluded from live runs so a real provider cannot be masked. Without `--live` and without keys the run is complete and green — that is the offline contract.
+3. `--live` mode: resolves provider entries from the operator's real `gateway.json` (default resolution path, or `--config <path>` — erroring clearly when absent), then for **each** entry that resolves a real key spawns an isolated single-provider `serve` (still against the temp state sandbox) and POSTs the bundled `hello-world.wav`, asserting fuzzy `hello`+`world` (KTD5). Per-entry isolation is required because the fallback chain always prefers the first healthy provider; the built-in offline fake never counts as live provider evidence (an operator-configured loopback `url` entry *is* treated as a real entry — that is how the test suite exercises the live path without keys). Without `--live` and without keys the run is complete and green — that is the offline contract.
 4. State discipline (R2): `XDG_STATE_HOME` is always a temp dir — tokens mint only there, never into an existing store. When a pre-existing `gateway-tokens.json` is detected in the resolved state dir, token-lifecycle checks report `SKIP`. A pre-seeded store file must be byte-identical after a verify run.
 5. Exit code: 0 when every attempted check passed; non-zero with a one-line failure summary. PASS/FAIL lines and failure summaries never contain token or provider-key material.
 
@@ -336,7 +336,7 @@ Five reviewers (coherence, feasibility, scope-guardian, security-lens, adversari
 | mac-mini double-owned by U2/U4 → U4 sole owner; U2 = Linux+Windows | scope-guardian, coherence | yes |
 | `hello-world.wav` unreachable on npm-installed CLI → bundled into `@wordink/server` files | adversarial, feasibility | yes |
 | Spawned serve could collide on :8941 → `freePort()` probe | adversarial | yes |
-| No durable OS coverage → CI matrix job (ubuntu/windows/macos, offline) in U1 | adversarial | yes |
+| No durable OS coverage → CI matrix job (ubuntu/windows/macOS, offline) in U1 | adversarial | yes |
 | App Group prereq misattributed to WordInkRemote → removed (belongs to deferred App/Keyboard pair) | adversarial, feasibility, coherence | yes |
 | U4 sim replay duplicated CI macos-15 → rescoped to verify + signing + device archive | adversarial | yes |
 | Windows VM audio/TypeWhisper prereqs unstated → Assumptions + U3 | adversarial | yes |
