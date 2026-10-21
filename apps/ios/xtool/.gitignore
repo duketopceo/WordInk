@@ -1,0 +1,4 @@
+.build/
+.bsp/
+xtool/
+*.app
