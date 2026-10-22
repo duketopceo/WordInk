@@ -23,7 +23,9 @@ def find_output(argv):
     for i, a in enumerate(argv):
         if a == "-o" and i + 1 < len(argv):
             out = argv[i + 1]
-        elif a.startswith("-o") and len(a) > 2:
+        elif a.startswith("-o") and len(a) > 2 and ("/" in a or a[2] == "."):
+            # Attached `-o<path>`: require a path-like value so real ld64
+            # flags like -order_file/-object_path_lto/-ObjC can't clobber it.
             out = a[2:]
     return out
 
@@ -43,23 +45,30 @@ def main():
         off = 32
         has_text = False
         has_sig = False
+        min_sect_off = None
         for _ in range(ncmds):
             cmd, cmdsize = struct.unpack("<II", d[off:off + 8])
             if cmd == LC_CODE_SIGNATURE:
                 has_sig = True
             if cmd == LC_SEGMENT_64:
-                if d[off + 8:off + 24] == b"__TEXT" + b"\0" * 10:
-                    nsects = struct.unpack("<I", d[off + 64:off + 68])[0]
-                    s = off + 72
-                    for _ in range(nsects):
+                nsects = struct.unpack("<I", d[off + 64:off + 68])[0]
+                s = off + 72
+                for _ in range(nsects):
+                    if d[off + 8:off + 24] == b"__TEXT" + b"\0" * 10:
                         if d[s:s + 16] == b"__text" + b"\0" * 10:
                             has_text = True
-                        s += 80
+                    # section_64.offset at +48; 0 = no file bytes (ZEROFILL)
+                    so = struct.unpack("<I", d[s + 48:s + 52])[0]
+                    if so and (min_sect_off is None or so < min_sect_off):
+                        min_sect_off = so
+                    s += 80
             off += cmdsize
         if has_text or has_sig:
             return
         end = 32 + sizeofcmds
-        if len(d) < end + 16:
+        # The new command must fit inside header padding before the first
+        # file-backed section — never overwrite section bytes.
+        if len(d) < end + 16 or (min_sect_off is not None and end + 16 > min_sect_off):
             return
         struct.pack_into("<IIII", d, end, LC_CODE_SIGNATURE, 16, len(d), 0)
         struct.pack_into("<II", d, 16, ncmds + 1, sizeofcmds + 16)
