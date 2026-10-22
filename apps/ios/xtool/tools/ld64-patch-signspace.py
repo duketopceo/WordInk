@@ -18,14 +18,18 @@ LC_CODE_SIGNATURE = 0x1D
 
 
 def find_output(argv):
+    # Handles both `-o <path>` and `-o<path>`; last flag wins, as ld64 treats it.
+    out = None
     for i, a in enumerate(argv):
         if a == "-o" and i + 1 < len(argv):
-            return argv[i + 1]
-    return None
+            out = argv[i + 1]
+        elif a.startswith("-o") and len(a) > 2:
+            out = a[2:]
+    return out
 
 
 def main():
-    path = find_output(sys.argv)
+    path = find_output(sys.argv[1:])
     if not path or not os.path.isfile(path):
         return
     with open(path, "r+b") as f:
@@ -44,11 +48,11 @@ def main():
             if cmd == LC_CODE_SIGNATURE:
                 has_sig = True
             if cmd == LC_SEGMENT_64:
-                if d[off + 8:off + 24].rstrip(b"\0") == b"__TEXT":
+                if d[off + 8:off + 24] == b"__TEXT" + b"\0" * 10:
                     nsects = struct.unpack("<I", d[off + 64:off + 68])[0]
                     s = off + 72
                     for _ in range(nsects):
-                        if d[s:s + 16].rstrip(b"\0") == b"__text":
+                        if d[s:s + 16] == b"__text" + b"\0" * 10:
                             has_text = True
                         s += 80
             off += cmdsize
