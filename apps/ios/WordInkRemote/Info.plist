@@ -26,6 +26,8 @@
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>WordInk Remote records your voice and sends it to your own WordInk gateway for transcription.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>WordInk Remote connects to a WordInk gateway on your local network for transcription.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

@@ -54,16 +54,25 @@ command into the stub's padding before zsign sees the file. When the command
 already exists, zsign skips the free-space check and writes the real signature
 at `dataoff` (= EOF), filling in `datasize` itself.
 
-The patch lives outside the repo as a post-link hook in the Darwin SDK's own
-`ld64.lld` wrapper (which xtool already replaces with a shell trampoline for
-`-r` object emission):
+The patch is a post-link hook in the Darwin SDK's own `ld64.lld` wrapper
+(which xtool already replaces with a shell trampoline for `-r` object
+emission). The script is vendored in this repo at
+`apps/ios/xtool/tools/ld64-patch-signspace.py`: it finds `-o <out>` in argv
+and, when the output is a Mach-O 64 `MH_EXECUTE` with no `__text`, no
+existing `LC_CODE_SIGNATURE`, and ≥16 bytes of padding after the load
+commands, appends the command and bumps `ncmds`/`sizeofcmds`.
 
-- `~/.config/swiftpm/swift-sdks/darwin.artifactbundle/toolset/bin/ld64.lld`
-  — after `orig/ld64.lld "$@"` succeeds, runs `python3 ld64-patch-signspace.py "$@"`.
-- `ld64-patch-signspace.py` — finds `-o <out>` in argv; if the output is a
-  Mach-O 64 `MH_EXECUTE` with no `__text` and no existing `LC_CODE_SIGNATURE`
-  and ≥16 bytes of padding after the load commands, appends the command and
-  bumps `ncmds`/`sizeofcmds`.
+Install on a fresh machine:
+
+```sh
+TOOLSET=~/.config/swiftpm/swift-sdks/darwin.artifactbundle/toolset/bin
+cp apps/ios/xtool/tools/ld64-patch-signspace.py "$TOOLSET/"
+# in $TOOLSET/ld64.lld, replace the final `exec "$bin_dir/orig/ld64.lld" "$@"` with:
+#   "$bin_dir/orig/ld64.lld" "$@"
+#   status=$?
+#   [ $status -eq 0 ] && python3 "$bin_dir/ld64-patch-signspace.py" "$@" || true
+#   exit $status
+```
 
 Result: both app and appex sign with real CMS blobs (verified 2026-10-21,
 xtool 1.21.0, personal team `6BP7W45U55`).
@@ -73,9 +82,11 @@ xtool 1.21.0, personal team `6BP7W45U55`).
 - The hook is machine-local and dies when the Swift SDK is reinstalled or
   updated — re-apply after `xtool sdk` changes. If `xtool dev build --sign`
   regresses to the free-space error, check the wrapper first.
-- `SwiftPM linkerSettings` / `-headerpad` flags do **not** reach xtool's
-  app/appex link step — xtool links its own product binaries; patching the
-  wrapper is the only injection point that works.
+- `SwiftPM linkerSettings` / `-headerpad` flags did **not** reach xtool's
+  app/appex link step in xtool 1.21.0 with this artifactbundle revision —
+  xtool links its own product binaries, so wrapper patching was the only
+  tested injection point. Recheck this behavior after any xtool or SDK
+  upgrade; the flag path may start working in a later release.
 - Upstream fix belongs in xtool/zsign (emit `__text` in the stub, or fall back
   to `__TEXT` segment end for the free-space calc). File it there, not here.
 - Adding a `LC_CODE_SIGNATURE` with `dataoff` at EOF is what zsign expects;
