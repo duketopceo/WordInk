@@ -55,6 +55,9 @@ enum GatewayConfig {
         if h == "localhost" || h.hasSuffix(".local") { return true }
         if h == "::1" { return true }
         if h.allSatisfy({ $0.isNumber || $0 == "." }) { return isLocalIPv4(h) }
+        // IPv6 literals contain ":" not "." — without this they'd fall through to
+        // the dotless-host rule and read as LAN (`::1` already returned above).
+        if h.contains(":") { return false }
         return !h.contains(".") // unqualified single-label host — LAN
     }
 

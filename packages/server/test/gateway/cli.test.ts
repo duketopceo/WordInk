@@ -219,6 +219,104 @@ describe("tokens", () => {
   });
 });
 
+describe("pair", () => {
+  it("mints a device token and prints a wordink-remote:// link; list never re-shows it", async () => {
+    const r = await run(["pair", "--url", "https://max.ts.net", "--label", "my iphone", "--no-qr"]);
+    expect(r.code).toBe(0);
+    const link = r.stdout.match(/wordink-remote:\/\/pair\?url=[^&\s]+&token=(wdk_[A-Za-z0-9_-]{43})/);
+    expect(link).toBeTruthy();
+    expect(decodeURIComponent(link![0])).toContain("url=https://max.ts.net");
+    expect(r.stdout).toContain('label="my iphone"');
+
+    const listed = await run(["tokens", "list"]);
+    expect(listed.stdout).toMatch(/device\s+my iphone/);
+    expect(listed.stdout).not.toContain(link![1]);
+    expect(listed.stdout).not.toContain(await hashToken(link![1]));
+  });
+
+  it("renders a QR block by default and skips it with --no-qr", async () => {
+    const qr = await run(["pair", "--url", "https://max.ts.net"]);
+    expect(qr.code).toBe(0);
+    expect(qr.stdout).toContain("█");
+    const bare = await run(["pair", "--url", "https://max.ts.net", "--no-qr"]);
+    expect(bare.stdout).not.toContain("█");
+  });
+
+  it("defaults --url to the config's publicUrl", async () => {
+    writeConfig({
+      providers: [{ provider: "groq", keyEnv: "WORDINK_TEST_KEY_A" }],
+      publicUrl: "https://gw.example.net",
+    });
+    const r = await run(["pair", "--no-qr"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("url=https%3A%2F%2Fgw.example.net");
+  });
+
+  it("fails with no --url and no config publicUrl", async () => {
+    writeConfig({ providers: [{ provider: "groq", keyEnv: "WORDINK_TEST_KEY_A" }] });
+    const r = await run(["pair", "--no-qr"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr + r.stdout).toMatch(/--url|publicUrl/);
+  });
+
+  it("surfaces a malformed config instead of treating it as absent", async () => {
+    writeConfig({
+      providers: [{ provider: "groq", keyEnv: "WORDINK_TEST_KEY_A" }],
+      publicUrl: "https://gw.example.net/path?q=1",
+    });
+    const r = await run(["pair", "--no-qr"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr + r.stdout).toContain("publicUrl");
+  });
+
+  it("rejects cleartext to non-LAN hosts and loopback endpoints; LAN http pairs", async () => {
+    const pub = await run(["pair", "--url", "http://203.0.113.5:8941", "--no-qr"]);
+    expect(pub.code).toBe(1);
+    expect(pub.stderr + pub.stdout).toMatch(/cleartext|LAN|Tailscale/i);
+
+    const lan = await run(["pair", "--url", "http://192.168.7.9:8941", "--no-qr"]);
+    expect(lan.code).toBe(0);
+    expect(lan.stdout).toContain("url=http%3A%2F%2F192.168.7.9%3A8941");
+
+    const loop = await run(["pair", "--url", "http://127.0.0.1:8941", "--no-qr"]);
+    expect(loop.code).toBe(1);
+    expect(loop.stderr + loop.stdout).toMatch(/not reachable/);
+  });
+
+  it("rejects http to IPv6 literals — link-local, ULA, and global are never LAN", async () => {
+    for (const v6 of ["http://[fe80::1]:8941", "http://[fd00::1]:8941", "http://[2606:4700::1]:8941"]) {
+      const r = await run(["pair", "--url", v6, "--no-qr"]);
+      expect(r.code).toBe(1);
+      expect(r.stderr + r.stdout).toMatch(/cleartext|LAN|Tailscale/i);
+    }
+    // Bare [::1] is also unreachable from a phone.
+    const v6loop = await run(["pair", "--url", "http://[::1]:8941", "--no-qr"]);
+    expect(v6loop.code).toBe(1);
+  });
+
+  it("rejects a --url carrying credentials, query, or path", async () => {
+    for (const bad of ["https://u:p@x.net", "https://x.net/?q=1", "https://x.net/v1"]) {
+      const r = await run(["pair", "--url", bad, "--no-qr"]);
+      expect(r.code).toBe(1);
+    }
+  });
+
+  it("rejects a flag-shaped or missing flag value instead of consuming the next flag", async () => {
+    for (const args of [
+      ["pair", "--url"],
+      ["pair", "--url", "--no-qr"],
+      ["pair", "--label"],
+      ["pair", "--label", "--no-qr", "--url", "https://max.ts.net"],
+    ]) {
+      const r = await run(args);
+      expect(r.code).toBe(1);
+      expect(r.stderr + r.stdout).toContain("usage");
+    }
+    const listed = await run(["tokens", "list"]);
+    expect(listed.stdout).not.toContain("--no-qr");
+  });
+});
+
 describe("vocabulary visibility (R11)", () => {
   const vocabDir = () => join(home, "state", "wordink");
 

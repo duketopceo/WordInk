@@ -29,7 +29,7 @@ struct OnboardingView: View {
                     .disabled(urlText.isEmpty || tokenText.isEmpty || validating)
             }
             Section {
-                Text("The gateway must be reachable over HTTPS, your LAN, or your tailnet — e.g. `tailscale serve --bg 8941` on the gateway host.")
+                Text("The gateway must be reachable over HTTPS, your LAN, or your tailnet — e.g. `tailscale serve --bg 8941` on the gateway host. One tap instead: run `wordink-gateway pair` there and scan the QR it prints.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -46,8 +46,7 @@ struct OnboardingView: View {
         Task {
             do {
                 let url = try GatewayConfig.normalizedEndpoint(urlText)
-                try await GatewayClient().validate(baseURL: url, token: tokenText)
-                KeychainStore.saveToken(tokenText)
+                try await GatewayClient.connect(baseURL: url, token: tokenText)
                 baseURL = url
             } catch let thrown {
                 error = GatewayError.wrap(thrown)

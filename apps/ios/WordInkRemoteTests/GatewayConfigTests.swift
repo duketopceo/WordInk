@@ -47,6 +47,15 @@ final class GatewayConfigTests: XCTestCase {
         XCTAssertThrowsError(try GatewayConfig.normalizedEndpoint("https://gw.ts.net/api"))
     }
 
+    func testHttpIpv6Rejected() {
+        // IPv6 literals must not fall through the single-label-host rule into "LAN":
+        // link-local, ULA, and global v6 all carry ":" — only ::1 is local.
+        XCTAssertThrowsError(try GatewayConfig.normalizedEndpoint("http://[fe80::1]:8941"))
+        XCTAssertThrowsError(try GatewayConfig.normalizedEndpoint("http://[fd00::1]:8941"))
+        XCTAssertThrowsError(try GatewayConfig.normalizedEndpoint("http://[2606:4700::1]:8941"))
+        XCTAssertNoThrow(try GatewayConfig.normalizedEndpoint("http://[::1]:8941"))
+    }
+
     func testLoopbackAccepted() {
         XCTAssertNoThrow(try GatewayConfig.normalizedEndpoint("http://127.0.0.1:8941"))
         XCTAssertNoThrow(try GatewayConfig.normalizedEndpoint("http://localhost:8941"))

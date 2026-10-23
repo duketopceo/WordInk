@@ -41,9 +41,14 @@ endpoints (loopback/RFC-1918 IPs, `.local`/unqualified hosts, and Tailscale's
 
 ## Setup
 
-1. Mint a device token on the gateway: `wordink-gateway tokens create`.
-2. In the app, enter the gateway URL and the token; it validates against `/v1/models`.
-3. Hold (or tap) the capture control, dictate, release — the transcript is on the clipboard.
+One tap (recommended): run `wordink-gateway pair --url https://<host>.<tailnet>.ts.net` on
+the gateway host and point the iPhone camera at the printed QR — the app opens, validates
+the embedded token against `/v1/models`, and stores it. `--url` defaults to `"publicUrl"`
+in `gateway.json`.
+
+Manual: mint a device token with `wordink-gateway tokens create`, enter the gateway URL
+and the token in the app (same validation), then hold (or tap) the capture control,
+dictate, release — the transcript is on the clipboard.
 
 ## Shortcuts, Siri, Action Button
 
