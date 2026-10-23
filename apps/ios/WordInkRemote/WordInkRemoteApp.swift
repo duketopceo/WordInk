@@ -36,10 +36,16 @@ struct ContentView: View {
             // Name the gateway — a hostile QR must not repoint the phone invisibly.
             Text("This iPhone is connected to \(baseURL?.host ?? "your gateway").")
         }
-        .alert("Pairing failed", item: $pairError) { _ in
+        // isPresented, not item: — the Xcode SDK resolves the item: alert
+        // overload only for Identifiable items and xtool's toolchain accepts
+        // it unconstrained, so the portable form is the Bool binding.
+        .alert("Pairing failed", isPresented: Binding(
+            get: { pairError != nil },
+            set: { if !$0 { pairError = nil } },
+        )) {
             Button("OK", role: .cancel) {}
-        } message: { err in
-            Text(err.message)
+        } message: {
+            Text(pairError?.message ?? "")
         }
     }
 
