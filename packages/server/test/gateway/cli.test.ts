@@ -230,8 +230,10 @@ describe("pair", () => {
 
     const listed = await run(["tokens", "list"]);
     expect(listed.stdout).toMatch(/device\s+my iphone/);
-    expect(listed.stdout).not.toContain(link![1]);
-    expect(listed.stdout).not.toContain(await hashToken(link![1]));
+    const token = link?.[1];
+    if (!token) throw new Error("pair link is missing its token");
+    expect(listed.stdout).not.toContain(token);
+    expect(listed.stdout).not.toContain(await hashToken(token));
   });
 
   it("renders a QR block by default and skips it with --no-qr", async () => {
