@@ -1,5 +1,14 @@
 # @wordink/server
 
+## 0.2.0
+
+### Minor Changes
+
+- 85cb48f: Add `wordink-gateway pair`: mints a device token and prints a `wordink-remote://pair?url=…&token=…` deep link (rendered as a camera-scannable terminal QR) so the iOS WordInk Remote app onboards in one tap — scan, validate, done. `--url` defaults to the new `publicUrl` gateway.json field; LAN/Tailscale transport policy is enforced at mint time.
+- 49725c7: The gateway CLI gains `wordink-gateway verify [--live] [--config <path>]` — a one-command smoke test that proves the mechanics (config, `check`, `serve` bind, token mint/scope/revoke, `/v1/models`, a multipart transcription, vocabulary write+read) against a loopback fake provider with no keys required, inside a temp XDG sandbox that never touches the operator's real config or token store. `--live` additionally transcribes the bundled `hello-world.wav` through each real provider entry that resolves a key — one isolated `serve` per entry, so the fallback chain can't mask a dead provider.
+- cb04d8f: The gateway gains a runtime vocabulary API — `GET|POST|DELETE {basePath}/v1/vocabulary` — so agents and operators can add, respell and remove shared ASR hint terms without editing `gateway.json` or restarting. Device tokens grow a scope (`device`|`admin`; admin is a superset that also transcribes): `tokens create --admin <label>` mints the admin token the vocabulary routes require, while a plain `tokens create` keeps minting device tokens. Runtime terms persist with provenance in `$XDG_STATE_HOME/wordink/vocabulary.json` (atomic 0600 file, tombstones for deletes) and join the config `vocabulary` on the next transcription — config terms first, runtime terms in insertion order, with a runtime case-variant acting as a spelling override that stays config-pinned. `VocabularyStore`/`VocabularyStoreError` and `FileVocabularyStore` are exported for embedders (`@wordink/server` and `@wordink/server/node` respectively); `GatewayConfig.vocabularyStore` opts the routes in.
+- 0ca399e: Add Wispr Flow deterministic post-processing (`stripFillers`, `resolveCourseCorrections`, `formatSpokenLists`, `expandSnippets`, `applyTonePreset`, `applyFlowCleanup`, `buildFlowCleanupPrompt`), post-insertion dictionary edit learning (`learnVocabularyFromEdit`), optional `GatewayConfig.flow` transcription cleanup, and the `WordInkIOS` Swift package (`sdks/ios/`).
+
 ## 0.1.0
 
 ### Minor Changes
