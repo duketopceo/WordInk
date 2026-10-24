@@ -8,6 +8,15 @@ struct GatewayClient {
         self.session = session
     }
 
+    /// The onboarding contract both entry points share: a token is stored only
+    /// after it proves it can list models against the gateway (R6).
+    static func connect(baseURL: URL, token: String) async throws {
+        try await GatewayClient().validate(baseURL: baseURL, token: token)
+        guard KeychainStore.saveToken(token) else {
+            throw GatewayError.invalidEndpoint("the keychain refused to store the device token")
+        }
+    }
+
     /// Onboarding check: a device token must be able to list models (R6).
     func validate(baseURL: URL, token: String) async throws {
         var req = URLRequest(url: baseURL.appendingPathComponent("v1/models"))

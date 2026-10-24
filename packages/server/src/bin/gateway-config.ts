@@ -19,6 +19,8 @@ export interface FileConfig {
   port?: number;
   /** Required to bind a non-loopback host: tokens and audio cross the network in cleartext. */
   allowInsecureRemote?: boolean;
+  /** The endpoint devices reach this gateway at (e.g. the tailnet name); `pair` uses it. */
+  publicUrl?: string;
   providers: ProviderEntry[];
   vocabulary?: string[];
   rateLimit?: RateLimitOptions;
@@ -76,7 +78,7 @@ function parseEntry(value: unknown, index: number): ProviderEntry {
     }
     // The resolved provider key is sent to this URL: https anywhere, cleartext only to
     // loopback (the local fakes the test suite and a dev's endpoint need).
-    const host = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
+    const host = urlHostname(url);
     if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(host))) {
       throw new UsageError(
         `${where}.url must be an https URL, or http to a loopback host — the provider key is sent to it`,
@@ -122,6 +124,12 @@ export async function loadConfig(path: string): Promise<FileConfig> {
     }
     config.allowInsecureRemote = value.allowInsecureRemote;
   }
+  if (value.publicUrl !== undefined) {
+    if (typeof value.publicUrl !== "string") {
+      throw new UsageError(`"publicUrl" must be a string`);
+    }
+    config.publicUrl = normalizePublicUrl(value.publicUrl);
+  }
   if (!Array.isArray(value.providers)) {
     throw new UsageError(`"providers" must be an array of {"provider","keyEnv"} entries`);
   }
@@ -150,6 +158,40 @@ export async function loadConfig(path: string): Promise<FileConfig> {
   if (upstreamTimeoutMs !== undefined) config.upstreamTimeoutMs = upstreamTimeoutMs;
   if (deadlineMs !== undefined) config.deadlineMs = deadlineMs;
   return config;
+}
+
+/** WHATWG hostname keeps [] on IPv6 literals; policy checks want the bare host. */
+export function urlHostname(url: URL): string {
+  return url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
+}
+
+/**
+ * The endpoint a remote device (phone, laptop) uses to reach the gateway —
+ * origin plus port only, matching the contract the iOS side enforces.
+ */
+export function normalizePublicUrl(input: string, name = "publicUrl"): string {
+  const s = input.trim();
+  if (s === "") throw new UsageError(`"${name}" must be a non-empty string`);
+  let url: URL;
+  try {
+    // Bare hosts default to https (the tailnet/TLS case); LAN operators write http://.
+    url = new URL(s.includes("://") ? s : `https://${s}`);
+  } catch {
+    throw new UsageError(`"${name}" must be an http(s) URL`);
+  }
+  if (url.username !== "" || url.password !== "") {
+    throw new UsageError(`"${name}" carries no credentials — tokens go in the token field`);
+  }
+  if (url.search !== "" || url.hash !== "") {
+    throw new UsageError(`"${name}" must not carry a query or fragment`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new UsageError(`"${name}" must be an http(s) URL`);
+  }
+  if (url.pathname !== "" && url.pathname !== "/") {
+    throw new UsageError(`"${name}" is origin plus port — no path`);
+  }
+  return url.origin;
 }
 
 export function isLoopback(host: string): boolean {

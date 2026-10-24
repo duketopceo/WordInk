@@ -4,13 +4,26 @@ import SwiftUI
 /// the app becomes usable (F1, R6). Revisiting this view rotates the token.
 struct OnboardingView: View {
     @AppStorage(GatewayDefaults.endpointKey) private var baseURL: URL?
+    @State private var linkText = ""
     @State private var urlText = ""
     @State private var tokenText = ""
     @State private var validating = false
     @State private var error: GatewayError?
 
+    private var pairLink: (endpoint: URL, token: String)? {
+        guard let url = URL(string: linkText.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let parsed = try? PairingLink.parse(url) else { return nil }
+        return parsed
+    }
+
     var body: some View {
         Form {
+            Section("Pair link") {
+                TextField("Paste the wordink-remote://pair link", text: $linkText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+            }
             Section("Gateway") {
                 TextField("Gateway URL (e.g. https://host.ts.net)", text: $urlText)
                     .textInputAutocapitalization(.never)
@@ -26,10 +39,10 @@ struct OnboardingView: View {
             }
             Section {
                 Button(validating ? "Checking..." : "Connect") { connect() }
-                    .disabled(urlText.isEmpty || tokenText.isEmpty || validating)
+                    .disabled((pairLink == nil && (urlText.isEmpty || tokenText.isEmpty)) || validating)
             }
             Section {
-                Text("The gateway must be reachable over HTTPS, your LAN, or your tailnet — e.g. `tailscale serve --bg 8941` on the gateway host.")
+                Text("The gateway must be reachable over HTTPS, your LAN, or your tailnet — e.g. `tailscale serve --bg 8941` on the gateway host. One tap instead: run `wordink-gateway pair` there and scan the QR it prints — or long-press the link text and paste it above.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -45,9 +58,15 @@ struct OnboardingView: View {
         error = nil
         Task {
             do {
-                let url = try GatewayConfig.normalizedEndpoint(urlText)
-                try await GatewayClient().validate(baseURL: url, token: tokenText)
-                KeychainStore.saveToken(tokenText)
+                // A pasted pair link wins over the manual fields — it carries both halves.
+                let url: URL, token: String
+                if let pairLink {
+                    (url, token) = pairLink
+                } else {
+                    url = try GatewayConfig.normalizedEndpoint(urlText)
+                    token = tokenText
+                }
+                try await GatewayClient.connect(baseURL: url, token: token)
                 baseURL = url
             } catch let thrown {
                 error = GatewayError.wrap(thrown)

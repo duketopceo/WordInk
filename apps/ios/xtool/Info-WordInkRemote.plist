@@ -6,6 +6,19 @@
 	<string>WordInk Remote</string>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.duketopceo.wordink.remote.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>wordink-remote</string>
+			</array>
+		</dict>
+	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
