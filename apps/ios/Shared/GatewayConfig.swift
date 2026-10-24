@@ -51,7 +51,8 @@ enum GatewayConfig {
     }
 
     static func isLocalNetworkHost(_ host: String) -> Bool {
-        let h = host.lowercased()
+        // URLComponents keeps brackets around IPv6 literals; strip them before checks.
+        let h = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
         if h == "localhost" || h.hasSuffix(".local") { return true }
         if h == "::1" { return true }
         if h.allSatisfy({ $0.isNumber || $0 == "." }) { return isLocalIPv4(h) }
