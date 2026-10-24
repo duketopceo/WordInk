@@ -173,7 +173,7 @@ Clients post the standard OpenAI multipart fields — `file`, `model`, `prompt`,
 | `upstreamTimeoutMs` | `15000` | Per-attempt timeout; the next entry is tried. |
 | `deadlineMs` | `30000` | Whole-chain bound; on expiry the client gets 504. |
 
-The gateway route needs no `authorize` hook and skips the browser Origin check — a `Bearer` device token is the credential. With `gateway` set and no `authorize`, the browser routes fail closed as usual and the startup log says so. The `wordink-gateway` CLI (`serve`, `tokens create|list|revoke`, `check`) wraps all of this with config-file key resolution; see `examples/gateway-systemd/`.
+The gateway route needs no `authorize` hook and skips the browser Origin check — a `Bearer` device token is the credential. With `gateway` set and no `authorize`, the browser routes fail closed as usual and the startup log says so. The `wordink-gateway` CLI (`serve`, `tokens create|list|revoke`, `check`, `verify`, `pair`) wraps all of this with config-file key resolution; see `examples/gateway-systemd/`. `pair [--url <endpoint>] [--label <name>] [--no-qr]` mints a device token and prints a `wordink-remote://pair?url=…&token=…` deep link plus a camera-scannable terminal QR — an iPhone running WordInk Remote scans it and onboards in one tap. `--url` defaults to the optional `publicUrl` key in `gateway.json` (the endpoint remote devices reach, e.g. the tailnet name); a bare host implies `https`.
 
 ### Runtime vocabulary
 

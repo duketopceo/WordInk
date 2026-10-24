@@ -14,6 +14,7 @@ import {
   resolveKeys,
 } from "./gateway-config.js";
 import { cmdVerify } from "./verify.js";
+import { cmdPair } from "./pair.js";
 
 const PREFIX = "wordink-gateway:";
 const DEFAULT_HOST = "127.0.0.1";
@@ -27,6 +28,10 @@ const USAGE = `Usage: wordink-gateway <command>
                          Prove the gateway's mechanics against a sandboxed fake
                          provider — no provider keys needed; --live also exercises
                          each real provider entry that resolves a key
+  pair [--url <endpoint>] [--label <name>] [--no-qr]
+                         Mint a device token and print a wordink-remote:// link
+                         (as a camera-scannable QR) for one-tap iPhone onboarding;
+                         --url defaults to "publicUrl" in gateway.json
   tokens create [--admin] <label>
                          Mint a device token (or an admin token with --admin);
                          the token is printed exactly once
@@ -64,6 +69,7 @@ async function cmdCheck(): Promise<number> {
     );
   }
   console.log(`tokens: ${defaultTokenPath()}`);
+  if (config.publicUrl !== undefined) console.log(`publicUrl: ${config.publicUrl}`);
   await warnIfNoAdmin(new FileTokenStore());
   if (config.vocabulary !== undefined) console.log(`vocabulary: ${config.vocabulary.length} config terms`);
   const vocabStore = new FileVocabularyStore();
@@ -222,6 +228,8 @@ async function main(argv: string[]): Promise<number> {
         return command === "serve" ? await cmdServe() : await cmdCheck();
       case "verify":
         return await cmdVerify(rest);
+      case "pair":
+        return await cmdPair(rest);
       case "tokens":
         return await cmdTokens(rest);
       case "help":

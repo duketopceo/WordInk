@@ -1,0 +1,10 @@
+version: 1
+bundleID: com.duketopceo.wordink
+product: WordInkRemote
+infoPath: Info-WordInkRemote.plist
+entitlementsPath: WordInkRemote.entitlements
+iconPath: ../WordInkRemote/Assets.xcassets/AppIcon.appiconset/appicon.png
+extensions:
+  - product: WordInkWidgets
+    bundleID: com.duketopceo.wordink.widgets
+    infoPath: Info-WordInkWidgets.plist

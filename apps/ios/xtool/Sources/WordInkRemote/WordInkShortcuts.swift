@@ -1,0 +1,1 @@
+../../../WordInkRemote/WordInkShortcuts.swift
