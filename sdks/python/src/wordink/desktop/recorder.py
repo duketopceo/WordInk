@@ -10,6 +10,7 @@ import wave
 from collections.abc import Callable
 
 from ..client import WordInkError
+from .interfaces import AudioSource
 
 SAMPLE_RATE = 16000
 SAMPLE_WIDTH = 2  # s16le, mono
@@ -44,36 +45,33 @@ def detect_backend(which: Callable[[str], str | None] = shutil.which) -> tuple[s
     raise RecorderError(f"no capture tool found: install pipewire (pw-record), or one of: {names}")
 
 
-class Recorder:
-    """One capture at a time. `start()` spawns the tool, `stop()` ends it and returns a WAV (or None).
-
-    `stop()` keeps listening for `tail_seconds` first so the last word is not clipped, then
-    discards anything shorter than `min_seconds` (an accidental tap on the key).
-    """
+class SubprocessSource:
+    """An `AudioSource` that reads raw s16 mono 16 kHz PCM from a capture tool's stdout (Linux)."""
 
     def __init__(
         self,
         command: tuple[str, ...] | None = None,
         *,
-        min_seconds: float = 0.3,
-        tail_seconds: float = 0.25,
         which: Callable[[str], str | None] = shutil.which,
     ) -> None:
         self._command = command
         self._which = which
-        self.min_seconds = min_seconds
-        self.tail_seconds = tail_seconds
         self._proc: asyncio.subprocess.Process | None = None
         self._reader: asyncio.Task[None] | None = None
         self._chunks: list[bytes] = []
 
     @property
-    def recording(self) -> bool:
+    def started(self) -> bool:
         return self._proc is not None
 
     @property
-    def captured_seconds(self) -> float:
-        return sum(len(c) for c in self._chunks) / (SAMPLE_RATE * SAMPLE_WIDTH)
+    def active(self) -> bool:
+        """True while the tool is still running (it may have exited on its own)."""
+        return self._proc is not None and self._proc.returncode is None
+
+    @property
+    def captured_bytes(self) -> int:
+        return sum(len(c) for c in self._chunks)
 
     async def _read(self, stream: asyncio.StreamReader) -> None:
         while chunk := await stream.read(4096):
@@ -115,22 +113,69 @@ class Recorder:
         await reader
         return proc.returncode if exited_early else None
 
-    async def stop(self) -> bytes | None:
-        """End the capture; WAV bytes, or None when it was too short to be speech."""
-        if self._proc is None:
-            return None
-        if self.tail_seconds > 0 and self._proc.returncode is None:
-            await asyncio.sleep(self.tail_seconds)
+    async def read_all(self) -> bytes:
+        """End the capture and return its PCM; raises when the tool died before recording anything."""
         code = await self._finish()
         pcm = b"".join(self._chunks)
         self._chunks = []
         if not pcm and code not in (None, 0):
             raise RecorderError(f"the capture tool exited with code {code} before recording anything (is a mic available?)")
+        return pcm
+
+    async def abort(self) -> None:
+        await self._finish()
+        self._chunks = []
+
+
+class Recorder:
+    """One capture at a time. `start()` opens the source, `stop()` ends it and returns a WAV (or None).
+
+    `stop()` keeps listening for `tail_seconds` first so the last word is not clipped, then
+    discards anything shorter than `min_seconds` (an accidental tap on the key).
+    The default source runs a PipeWire/Pulse/ALSA tool; pass `source=` to capture another way.
+    """
+
+    def __init__(
+        self,
+        command: tuple[str, ...] | None = None,
+        *,
+        min_seconds: float = 0.3,
+        tail_seconds: float = 0.25,
+        which: Callable[[str], str | None] = shutil.which,
+        source: AudioSource | None = None,
+    ) -> None:
+        self._source: AudioSource = source if source is not None else SubprocessSource(command, which=which)
+        self.min_seconds = min_seconds
+        self.tail_seconds = tail_seconds
+        self._recording = False
+
+    @property
+    def recording(self) -> bool:
+        return self._recording
+
+    @property
+    def captured_seconds(self) -> float:
+        return self._source.captured_bytes / (SAMPLE_RATE * SAMPLE_WIDTH)
+
+    async def start(self) -> None:
+        if self._recording:
+            raise RecorderError("already recording")
+        await self._source.start()
+        self._recording = True
+
+    async def stop(self) -> bytes | None:
+        """End the capture; WAV bytes, or None when it was too short to be speech."""
+        if not self._recording:
+            return None
+        if self.tail_seconds > 0 and self._source.active:
+            await asyncio.sleep(self.tail_seconds)
+        self._recording = False
+        pcm = await self._source.read_all()
         if len(pcm) < self.min_seconds * SAMPLE_RATE * SAMPLE_WIDTH:
             return None
         return pcm_to_wav(pcm)
 
     async def abort(self) -> None:
         """Drop an in-progress capture (shutdown)."""
-        await self._finish()
-        self._chunks = []
+        self._recording = False
+        await self._source.abort()

@@ -26,7 +26,12 @@ class AudioSource(Protocol):
     async def abort(self) -> None: ...
 
     @property
-    def active(self) -> bool: ...
+    def active(self) -> bool:
+        """True while samples are still arriving (the tail grace only waits on a live capture)."""
+        ...
+
+    @property
+    def captured_bytes(self) -> int: ...
 
 
 @runtime_checkable
