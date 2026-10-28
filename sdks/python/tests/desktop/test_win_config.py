@@ -62,3 +62,11 @@ def test_linux_loading_is_unchanged_and_rejects_windows_syntax(tmp_path):
     p.write_text('[hotkey]\nhold = "Ctrl+Alt+D"\n')
     with pytest.raises(WordInkError):
         load_config(p, {"HOME": str(tmp_path)})
+
+
+def test_default_runtime_dir_does_not_need_getuid(monkeypatch):
+    # Windows has no os.getuid; computing the Linux default must not raise there.
+    from wordink.desktop.config import default_runtime_dir
+
+    monkeypatch.delattr("os.getuid", raising=False)
+    assert default_runtime_dir({}).as_posix() == "/tmp/wordink-user"

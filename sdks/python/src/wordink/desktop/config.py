@@ -69,7 +69,9 @@ def default_runtime_dir(env: Mapping[str, str] | None = None) -> Path:
     base = e.get("XDG_RUNTIME_DIR")
     if base:
         return Path(base) / "wordink"
-    return Path(f"/tmp/wordink-{os.getuid()}")
+    # os.getuid does not exist on Windows; the Linux layout is still computed there when a test asks for it.
+    uid = os.getuid() if hasattr(os, "getuid") else "user"
+    return Path(f"/tmp/wordink-{uid}")
 
 
 def default_config_path(env: Mapping[str, str] | None = None) -> Path:
