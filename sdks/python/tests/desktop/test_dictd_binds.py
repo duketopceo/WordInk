@@ -51,3 +51,19 @@ def test_bind_lines_press_starts_release_stops_toggle_toggles():
 def test_bind_lines_honour_the_executable_path():
     lines = hyprland_bind_lines("SUPER SHIFT, V", "SUPER SHIFT, B", exe="/home/u/.local/bin/wordink-dictd")
     assert all("/home/u/.local/bin/wordink-dictd trigger" in line for line in lines)
+
+
+def test_lua_lines_use_omarchy_o_bind_with_an_absolute_exe_and_a_release_bind():
+    from wordink.desktop.binds import hyprland_lua_lines
+
+    lines = hyprland_lua_lines("SUPER ALT, D", "SUPER ALT, V", "/home/u/.local/bin/wordink-dictd")
+    assert lines[0] == 'o.bind("SUPER + ALT + D", "WordInk dictation (hold)", { launch = "/home/u/.local/bin/wordink-dictd trigger start" })'
+    assert lines[1].endswith('{ release = true })') and "trigger stop" in lines[1]
+    assert lines[2].startswith('o.bind("SUPER + ALT + V"') and "trigger toggle" in lines[2]
+
+
+def test_lua_lines_refuse_wisps_key():
+    from wordink.desktop.binds import hyprland_lua_lines
+
+    with pytest.raises(WordInkError, match="wisp"):
+        hyprland_lua_lines("SUPER, D", "SUPER ALT, V")
