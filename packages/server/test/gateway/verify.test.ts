@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -18,9 +18,10 @@ let stateDir: string;
 const children: ChildProcess[] = [];
 
 beforeAll(() => {
-  execFileSync("pnpm", ["build"], { cwd: PKG, stdio: "pipe" });
+  // dist is built once by vitest globalSetup — never rebuild here (parallel
+  // test files racing tsc emit caused children to read half-written output).
   expect(existsSync(BIN)).toBe(true);
-}, 60_000);
+});
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "wdk-verify-test-"));
