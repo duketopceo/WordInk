@@ -85,8 +85,8 @@ def test_cleanup_logs_token_counts_from_the_response():
     out = clean_transcript("hello there my friend", CleanupConfig(api_key=KEY), transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body)))
     assert out.used_llm
     (e,) = costs.read_entries()
-    assert (e["kind"], e["model"], e["prompt_tokens"], e["completion_tokens"]) == ("cleanup", "llama-3.1-8b-instant", 120, 8)
-    assert e["est_usd"] == pytest.approx(120 / 1e6 * 0.05 + 8 / 1e6 * 0.08, abs=1e-7)
+    assert (e["kind"], e["model"], e["prompt_tokens"], e["completion_tokens"]) == ("cleanup", "openai/gpt-oss-20b", 120, 8)
+    assert e["est_usd"] == pytest.approx(120 / 1e6 * 0.075 + 8 / 1e6 * 0.30, abs=1e-7)
     assert KEY not in costs.default_usage_path().read_text()
 
 

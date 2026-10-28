@@ -16,7 +16,11 @@ from .vocab import apply_vocabulary
 
 log = logging.getLogger("wordink.cleanup")
 
-DEFAULT_LLM_MODEL = "llama-3.1-8b-instant"
+#: Groq retired llama-3.1-8b-instant for developer accounts (404 on 2026-10-28); gpt-oss-20b is the cheapest
+#: current chat model ($0.075 / $0.30 per M tokens).
+DEFAULT_LLM_MODEL = "openai/gpt-oss-20b"
+#: gpt-oss models reason before answering; reasoning tokens count against max_tokens, so leave room.
+REASONING_HEADROOM = 256
 MIN_WORDS_FOR_LLM = 4
 #: A rewrite longer than this (relative to the transcript) is treated as the model going off-script.
 MAX_GROWTH = 1.5
@@ -112,7 +116,8 @@ def clean_transcript(
                 json={
                     "model": cfg.model,
                     "temperature": 0,
-                    "max_tokens": len(raw) // 2 + 64,
+                    "max_tokens": len(raw) // 2 + 64 + (REASONING_HEADROOM if "gpt-oss" in cfg.model else 0),
+                    **({"reasoning_effort": "low"} if "gpt-oss" in cfg.model else {}),
                     "messages": [
                         {"role": "system", "content": build_system_prompt(vocab, cfg.tone)},
                         {"role": "user", "content": f"<transcript>\n{raw}\n</transcript>"},
