@@ -19,11 +19,23 @@ Bench the genuinely lightweight open voice models against the current WordInk ga
 | Candidate | Size | Claim | Fits filter? |
 |---|---|---|---|
 | **Qwen3-ASR-0.6B** | 0.6B | 52 langs+dialects, streaming+offline unified, 2000× throughput @ conc-128, near-SOTA | Yes — flagship candidate |
-| **VibeVoice-ASR-BitNet** | ~1.58GB quant | realtime ASR on 3+ CPU threads, no GPU, heterogeneous I8_S+I2_S quant | Yes — built for CPU-only boxes like ours |
+| **VibeVoice-ASR-BitNet** | ~1.58GB quant artifact (parameter count and base revision recorded in the verdict table before benchmarking; the 7B exclusion applies to parameters, not artifact size) | realtime ASR on 3+ CPU threads, no GPU, heterogeneous I8_S+I2_S quant | Yes — built for CPU-only boxes like ours |
 | **VibeVoice-Realtime-0.5B** | 0.5B | real-time TTS, ~300ms first-audio latency | Yes (TTS side) |
-| Qwen3-ASR-1.7B | 1.7B | SOTA open ASR | Borderline — include only if 0.6B lands close-but-insufficient |
+| Qwen3-ASR-1.7B | 1.7B | SOTA open ASR | Borderline — include only if 0.6B meets the pre-registered inclusion gate below (set before any benchmark runs) |
 | ~~VibeVoice-ASR-Streaming-7B~~ | 7B | streaming+diarization | **No — fails lightweight filter** |
 | ~~VibeVoice-TTS-1.5B~~ | 1.5B | podcast-grade long TTS | **No — fails filter** |
+
+### Pre-registered measurement contract
+
+Every number below is a **proposed default**, fixed before any benchmark runs. Edit them here first; changing them after seeing results invalidates the run.
+
+- **Data boundary.** Benchmark audio and reference transcripts are synthetic (read from a written script) or explicitly approved by the owner. Real Voxtype captures are used only after approval, and never leave the machine unless the owner has approved the relay path for that sample. The relay is the owner's own gateway; state the token and access boundary and each configured provider's retention and deletion terms in the verdict doc, and do not assume a dedicated tenant.
+- **Corpus.** A published, immutable manifest (`docs/decisions/lightweight-voice-eval-corpus.json`) listing every sample: id, speaker, language, duration, segmentation (one utterance per file), and the reference transcript with its normalization rules (lowercase, strip punctuation, keep identifiers verbatim). At least 20 samples, 10 to 60 s each, mixed prose, code identifiers and proper nouns. The relay and every candidate process exactly these samples.
+- **Latency.** Measured from the end of the audio file read to the final transcript, per sample, warm model (cold start reported separately as model load to first transcript). Report p50 and p95 over at least 3 runs. Streaming candidates also report time to first partial; only the final result counts for WER. TTS: time to first audio chunk, p50 and p95.
+- **WER.** Computed on normalized text. "Competitive" means within 1.0 absolute point of the relay; "equal" means within 0.5. CPU configuration (threads, governor, quantization) is recorded per run.
+- **Qwen3-ASR-1.7B inclusion gate.** Run it only if Qwen3-ASR-0.6B has WER within 3.0 absolute points of the relay and misses either the latency or RAM bar below by no more than 50%.
+- **Memory.** Measured as peak process-tree RSS while the llama services are under their normal load. Bar: peak RSS at most 2 GB, and at least 1 GB of free memory remaining. Over the 10-minute sustained run, RSS growth must stay under 10%. Artifact size and peak RSS are reported separately.
+- **TTS rubric.** Dictation read-back: 5 sentences, intelligibility scored 1 to 5 by the owner blind to the model; adopt only at a mean of 4 or above.
 
 ### What "win" means
 
@@ -38,7 +50,7 @@ Bench the genuinely lightweight open voice models against the current WordInk ga
 
 ### Requirements
 
-1. Bench harness: fixed corpus of dictation samples (record or reuse real voxtype captures), timed end-to-end, WER computed against reference transcripts.
+1. Bench harness: fixed corpus of dictation samples (per the corpus manifest above), timed end-to-end, WER computed against reference transcripts.
 2. Qwen3-ASR-0.6B via their `qwen-asr` package or vLLM path — on CPU; note whether the 2000× claim survives CPU-only inference (it's a batch claim — dictation is single-stream, measure *streaming* latency).
 3. BitNet path: `microsoft/VibeASR.cpp` engine — custom inference stack; flag dependency weight in the verdict.
 4. Memory: measure RSS during inference — must fit alongside the llama services within headroom (oomd is watching).
