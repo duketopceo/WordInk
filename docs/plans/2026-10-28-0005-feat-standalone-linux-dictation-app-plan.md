@@ -187,6 +187,8 @@ flowchart LR
 
 ### U7. Omarchy installer, docs, hotkey wiring
 
+- **Status:** done in PR "feat(examples): Omarchy installer for wordink-dictd with a one-command Voxtype rollback (U7)". Docs live in `examples/omarchy-dictation/README.md` (a docs-site page needs generated HTML and can follow). `--switch` is the opt-in that disables Voxtype and writes `wordink-use-voxtype`; the default install still never touches Voxtype.
+
 - **Goal:** One command installs and one documented step switches over from Voxtype.
 - **Requirements:** R1, R9.
 - **Dependencies:** U1 to U6.
