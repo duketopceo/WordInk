@@ -93,6 +93,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @wordink/server build
       - run: node packages/server/dist/bin/wordink-gateway.js verify
+  # Python SDK (wordink CLI + wordink-mcp): U7 in the program plan. Mocked HTTP, no provider keys needed.
+  python-sdk:
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: sdks/python }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --frozen
+      - run: uv run pytest -q
   legacy:
     runs-on: ubuntu-latest
     defaults:
