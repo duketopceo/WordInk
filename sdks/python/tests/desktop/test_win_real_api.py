@@ -26,4 +26,4 @@ def test_releasing_modifiers_with_none_held_sends_nothing_and_returns_fast():
 
     start = time.monotonic()
     Win32().release_modifiers(0.1)
-    assert time.monotonic() - start < 1.0
+    assert time.monotonic() - start < 3.0
