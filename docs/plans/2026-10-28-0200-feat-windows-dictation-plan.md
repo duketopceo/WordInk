@@ -208,6 +208,8 @@ flowchart LR
 
 ### W7. Windows daemon wiring and IPC
 
+- **Status:** W7a (loopback TCP transport with a per-session token, `win/transport.py`) built; app wiring, doctor and CLI on Windows next.
+
 - **Goal:** One process that runs the pipeline with the Windows adapters, plus the CLI over loopback.
 - **Requirements:** R4, R11, R12.
 - **Dependencies:** W1 to W6.
