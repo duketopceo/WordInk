@@ -124,3 +124,52 @@ def test_starting_twice_is_an_error_and_abort_cleans_up():
         return await rec.stop()
 
     assert run(scenario()) is None
+
+
+def test_a_fake_audio_source_drives_the_recorder():
+    class FakeSource:
+        def __init__(self, pcm: bytes) -> None:
+            self.pcm, self.started, self.aborted, self.on = pcm, 0, 0, False
+
+        async def start(self) -> None:
+            self.started += 1
+            self.on = True
+
+        async def read_all(self) -> bytes:
+            self.on = False
+            return self.pcm
+
+        async def abort(self) -> None:
+            self.aborted += 1
+            self.on = False
+
+        @property
+        def active(self) -> bool:
+            return self.on
+
+        @property
+        def captured_bytes(self) -> int:
+            return len(self.pcm)
+
+    async def go() -> None:
+        long = FakeSource(b"\x01\x00" * 16000)  # 1 s
+        rec = Recorder(source=long, min_seconds=0.5, tail_seconds=0)
+        await rec.start()
+        assert rec.recording and long.started == 1 and rec.captured_seconds == 1.0
+        with pytest.raises(RecorderError, match="already recording"):
+            await rec.start()
+        wav = await rec.stop()
+        assert wav is not None and wav[:4] == b"RIFF" and not rec.recording
+        assert await rec.stop() is None  # nothing in progress
+
+        short = FakeSource(b"\x01\x00" * 800)  # 0.05 s: an accidental tap
+        rec = Recorder(source=short, min_seconds=0.3, tail_seconds=0)
+        await rec.start()
+        assert await rec.stop() is None
+
+        rec = Recorder(source=FakeSource(b""), tail_seconds=0)
+        await rec.start()
+        await rec.abort()
+        assert not rec.recording
+
+    asyncio.run(go())
