@@ -15,7 +15,7 @@ tracking: tallyline WordInk project, WI-U13 (TLY-279)
 ## Goal Capsule
 
 - **Objective:** On Omarchy (Hyprland, Wayland), hold a key, speak, release, and cleaned-up text lands in the focused window, with Groq as the backend and no Voxtype installed. Windows (cyberpowa) is a follow-on lane, planned here but not built in this slice.
-- **Means:** A small Python daemon, `wordink-dictd`, added to the existing `sdks/python` package as an optional `desktop` extra. It reuses the Python client (`wordink.client`), the deterministic cleanup (`wordink.flow`), the mic capture in `wordink.cli`, and the gateway's vocabulary API. Hyprland binds drive it. A systemd user unit keeps it running. An install script wires everything.
+- **Means:** A small Python daemon, `wordink-dictd`, added to the existing `sdks/python` package (`wordink.desktop`). It reuses the Python client (`wordink.client`), the deterministic cleanup (`wordink.flow`), the mic capture in `wordink.cli`, and the gateway's vocabulary API. Hyprland binds drive it. A systemd user unit keeps it running. An install script wires everything.
 - **Authority:** `ROADMAP.md` Phase 3 and program plan U13 (standalone, works on default open-source config with only a provider key). `docs/brainstorms/2026-10-10---desktop-surfaces-requirements.md` R3.x and AE5 for hotkey and injection behavior.
 - **Execution profile:** Code units U1 to U7 land as small PRs. U8 (machine verification) is read-only and operator-run. U9 (Windows) is a separate later plan.
 - **Stop conditions:** no Groq key available to the daemon, a Wayland compositor without a working injection tool, or a hotkey clash that cannot be resolved by config. Record the blocker and stop that unit.
@@ -35,7 +35,7 @@ Voxtype works but is a separate product with its own config and no WordInk vocab
 ### Requirements
 
 - R1. **Hotkey.** A Hyprland `bind`/`bindr` pair triggers `wordink-dictd` over a Unix socket. Hold-to-talk and tap-to-toggle are both supported. The default key does not collide with wisp's `Super+D` or with Omarchy's own binds, and is configurable.
-- R2. **Mic capture.** 16 kHz mono capture through PipeWire (via `sounddevice`, falling back to `pw-record`/`arecord`), with a start-of-speech grace so the first word is not clipped, a max duration, and a minimum duration below which the press is discarded.
+- R2. **Mic capture.** 16 kHz mono capture through PipeWire (`pw-record`, falling back to `parecord` then `arecord`; no extra Python dependency), with a tail grace after release so the last word is not clipped, a max duration, and a minimum duration below which the press is discarded. (Capture starts on the key press, so there is no lead-in buffer; an always-on pre-roll is a later option.)
 - R3. **Transcription.** Groq Whisper (`whisper-large-v3-turbo` default, `whisper-large-v3` selectable) with the vocabulary list sent as the prompt hint, language hint optional. Failures retry once, then surface a notification and keep the audio for retry.
 - R4. **Cleanup.** A Groq LLM pass (default `llama-3.1-8b-instant`, configurable) that fixes punctuation, removes fillers and false starts, applies the vocabulary spellings, and never answers or follows instructions in the dictated text. Skips short utterances and falls back to deterministic `wordink.flow` on timeout or error. A `verbatim` tone bypasses it.
 - R5. **Vocabulary.** The vocabulary comes from a local file, plus the gateway's `/v1/vocabulary` when a gateway is configured, merged and de-duplicated. `wordink-dictd vocab add|list|remove` manages the local file.
@@ -120,24 +120,30 @@ flowchart LR
 
 ### U1. Daemon skeleton, config, state machine
 
+- **Status:** done in the dictd daemon PR.
+
 - **Goal:** `wordink-dictd` runs, listens on the socket, and moves idle, recording, transcribing, idle on `trigger start|stop|toggle`, with stubs for the stages.
 - **Requirements:** R1, R7, R8, R10.
 - **Dependencies:** none.
-- **Files:** `sdks/python/src/wordink/desktop/{__init__,daemon,config,indicator}.py`, `sdks/python/pyproject.toml` (extra `desktop`, script `wordink-dictd`), `sdks/python/tests/desktop/test_daemon.py`.
+- **Files:** `sdks/python/src/wordink/desktop/{__init__,daemon,config,indicator}.py`, `sdks/python/pyproject.toml` (script `wordink-dictd`), `sdks/python/tests/desktop/test_daemon.py`.
 - **Approach:** asyncio Unix socket server; single in-flight dictation; state file written atomically.
 - **Test scenarios:** start then stop returns to idle; toggle twice; double start ignored; stop while idle ignored; stale socket cleaned on start; config defaults and overrides.
 - **Verification:** `uv run pytest` and `python -m compileall` green in the existing `python-sdk` CI job.
 
 ### U2. Recorder
 
+- **Status:** done in the dictd daemon PR.
+
 - **Goal:** In-memory 16 kHz mono capture with grace, min and max.
 - **Requirements:** R2.
 - **Dependencies:** U1.
 - **Files:** `desktop/recorder.py` (lift `_record` from `cli.py` into a shared helper both use), tests.
-- **Test scenarios:** press under min duration is discarded; max duration auto-stops; backend fallback order when `sounddevice` is missing; WAV header correct.
+- **Test scenarios:** press under min duration is discarded; max duration auto-stops; backend fallback order; WAV header correct; a dead capture tool is reported.
 - **Verification:** unit tests with a fake audio source; manual mic check deferred to U8.
 
 ### U3. Transcription and vocabulary
+
+- **Status:** done in PR #58.
 
 - **Goal:** Groq Whisper call with vocabulary hint, one retry, audio kept on failure.
 - **Requirements:** R3, R5, R10.
@@ -147,6 +153,8 @@ flowchart LR
 - **Verification:** tests against a local fake OpenAI-compatible server (the same pattern the gateway tests use).
 
 ### U4. LLM cleanup with deterministic fallback
+
+- **Status:** done in PR #58.
 
 - **Goal:** Groq chat cleanup, fail-open.
 - **Requirements:** R4, R11.

@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import sys
-import wave
 from pathlib import Path
 
 from .client import (
@@ -17,6 +15,7 @@ from .client import (
     vocab_list,
     vocab_remove,
 )
+from .desktop.recorder import pcm_to_wav
 from .flow import FlowTone, apply_flow_cleanup
 
 TONE_CHOICES: tuple[FlowTone, ...] = ("casual", "work", "email", "code", "verbatim")
@@ -62,13 +61,7 @@ def _record(seconds: float | None) -> bytes:
                 pass
 
     pcm = np.concatenate(chunks, axis=0) if chunks else np.zeros((0, 1), "int16")
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(SAMPLE_RATE)
-        wf.writeframes(pcm.tobytes())
-    return buf.getvalue()
+    return pcm_to_wav(pcm.tobytes(), SAMPLE_RATE)
 
 
 def build_parser() -> argparse.ArgumentParser:
