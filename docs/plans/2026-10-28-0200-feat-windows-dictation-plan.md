@@ -148,6 +148,8 @@ flowchart LR
 
 ### W2. Windows config, secrets, and chord parsing
 
+- **Status:** W2a (chord parser and reserved table) built; secrets and per-OS config next.
+
 - **Goal:** `dictate.toml` and secrets work on Windows paths; hotkey chords parse into key codes.
 - **Requirements:** R1, R2, R9.
 - **Dependencies:** W1.
