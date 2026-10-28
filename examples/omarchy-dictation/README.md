@@ -55,3 +55,18 @@ How text is inserted: `wtype`, then `ydotool` (ASCII only), then the clipboard w
 ## Troubleshooting
 
 `wordink-dictd doctor` names what is missing and the fix. Logs: `journalctl --user -u wordink-dictd`. If `hyprctl` cannot be reached from the service, make sure Hyprland's session environment is imported into `systemd --user` (UWSM does this).
+
+## Meeting mode
+
+Long-form transcription of the mic and the system audio, ported from Voxtype's `meeting` command. Speakers are labelled by source: the mic is `You`, the system loopback (the other side of a call) is `Remote`. That is the same as Voxtype's default `simple` diarization, needs no extra provider, and uses the same `GROQ_API_KEY` as dictation. Telling several remote people apart (Voxtype's experimental `ml` backend) is not included.
+
+```sh
+wordink-dictd meeting start --title "Weekly sync"   # --source mic|loopback|both (default both)
+wordink-dictd meeting pause; wordink-dictd meeting resume
+wordink-dictd meeting stop                           # waits for the last chunk to transcribe
+wordink-dictd meeting label latest Remote Alice      # rename a speaker
+wordink-dictd meeting export latest --format md      # md, txt or json
+wordink-dictd meeting list | show | delete
+```
+
+Meetings are stored in `~/.local/share/wordink/meetings/<id>/meeting.json` (0600). Audio is not kept. Audio is cut into 30 s chunks; silent chunks are skipped, the rest go to Groq Whisper. With speakers (not headphones) the mic hears the call too, so wear headphones for clean `You` / `Remote` separation.
