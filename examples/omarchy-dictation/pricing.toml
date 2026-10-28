@@ -1,0 +1,15 @@
+# Optional: copy to ~/.config/wordink/pricing.toml to override the built-in prices that
+# `wordink-dictd costs` uses. Groq's published prices, retrieved 2026-10-28 from
+# https://home.cloud.groq.io/pricing and https://console.groq.com/docs/models
+# Audio is billed per hour transcribed, with a 10 second minimum per request; LLMs per million tokens.
+as_of = "2026-10-28"
+
+[models."whisper-large-v3-turbo"]
+audio_per_hour = 0.04
+
+[models."whisper-large-v3"]
+audio_per_hour = 0.111
+
+[models."llama-3.1-8b-instant"]
+input_per_m = 0.05
+output_per_m = 0.08
