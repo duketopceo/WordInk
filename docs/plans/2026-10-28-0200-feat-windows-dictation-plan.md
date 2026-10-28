@@ -196,6 +196,8 @@ flowchart LR
 
 ### W6. Tray and notifications
 
+- **Status:** built (`win/tray.py`, tested against a fake `pystray`); the tray appearing on screen is a W10 check.
+
 - **Goal:** A visible indicator and menu.
 - **Requirements:** R7.
 - **Dependencies:** W1.
