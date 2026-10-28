@@ -19,6 +19,7 @@ from ..client import WordInkError
 from .cleanup import CleanupConfig, clean_transcript
 from .config import DictateConfig
 from .indicator import StateFile
+from .inject import Injector, inject_config_from
 from .recorder import Recorder
 from .transcribe import TranscriptionError, resolve_transcribe_config, transcribe_audio
 from .vocab import load_vocabulary
@@ -89,6 +90,19 @@ class LastTranscriptSink:
         except BaseException:
             Path(tmp).unlink(missing_ok=True)
             raise
+
+
+def make_sink(cfg: DictateConfig, injector: Injector | None = None) -> Sink:
+    """Keep every result in last.txt (so nothing is lost if insertion fails), then insert it."""
+    last = LastTranscriptSink(cfg.last_path)
+    inj = injector or Injector(inject_config_from(cfg.insert))
+
+    def sink(text: str) -> None:
+        last(text)
+        res = inj.insert(text)
+        log.info("inserted via %s%s", res.method, f" ({res.detail})" if res.detail else "")
+
+    return sink
 
 
 class Daemon:
@@ -172,7 +186,7 @@ class Daemon:
             result = await asyncio.to_thread(self.pipeline, wav)
             log.info("dictation done (llm=%s, reason=%s, chars=%d)", result.used_llm, result.reason, len(result.text))
             if result.text:
-                self.sink(result.text)
+                await asyncio.to_thread(self.sink, result.text)
             self._set("idle")
         except TranscriptionError as exc:
             saved = f" (audio kept at {exc.saved_audio})" if exc.saved_audio else ""

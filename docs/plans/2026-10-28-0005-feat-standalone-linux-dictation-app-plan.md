@@ -165,6 +165,8 @@ flowchart LR
 
 ### U5. Injection
 
+- **Status:** done in PR "feat(python): insert dictated text into the focused window (U5)".
+
 - **Goal:** Insert text into the focused window.
 - **Requirements:** R6, R11.
 - **Dependencies:** U1.
