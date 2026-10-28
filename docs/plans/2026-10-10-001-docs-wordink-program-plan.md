@@ -153,7 +153,7 @@ The most likely referent of the audit's `WF-WRITE` flag is `argus-mention.yml` (
 
 #### U7. Python SDK: CI and distribution
 
-- **Status:** built, not gated. Evidence: `sdks/python` (`client.py`, `cli.py`, `mcp_server.py`); its plan (KTD5) leaves CI as a follow-up; CI has no Python SDK job.
+- **Status:** built; CI-gated, distribution open. Evidence: `sdks/python` (`client.py`, `cli.py`, `mcp_server.py`); its plan (KTD5) left CI as a follow-up. CI now has a `python-sdk` job (`uv sync --frozen && uv run pytest`, 36 tests); PyPI distribution is still open.
 - **Dependencies:** none.
 - **Difficulty:** easy.
 - **Feasibility:** PyPI name availability for `wordink` is unchecked.
