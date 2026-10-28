@@ -27,7 +27,7 @@ Bench the genuinely lightweight open voice models against the current WordInk ga
 
 ### Pre-registered measurement contract
 
-Every number below is a **proposed default**, fixed before any benchmark runs. Edit them here first; changing them after seeing results invalidates the run.
+Every number below is **final as of 2026-10-28** (owner-approved), fixed before any benchmark runs. Changing a threshold after seeing results invalidates the run; record any change here first, with the date.
 
 - **Data boundary.** Benchmark audio and reference transcripts are synthetic (read from a written script) or explicitly approved by the owner. Real Voxtype captures are used only after approval, and never leave the machine unless the owner has approved the relay path for that sample. The relay is the owner's own gateway; state the token and access boundary and each configured provider's retention and deletion terms in the verdict doc, and do not assume a dedicated tenant.
 - **Corpus.** A published, immutable manifest (`docs/decisions/lightweight-voice-eval-corpus.json`) listing every sample: id, speaker, language, duration, segmentation (one utterance per file), and the reference transcript with its normalization rules (lowercase, strip punctuation, keep identifiers verbatim). At least 20 samples, 10 to 60 s each, mixed prose, code identifiers and proper nouns. The relay and every candidate process exactly these samples.
