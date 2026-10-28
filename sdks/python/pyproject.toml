@@ -16,6 +16,7 @@ mic = ["sounddevice>=0.5"]
 [project.scripts]
 wordink = "wordink.cli:main"
 wordink-mcp = "wordink.mcp_server:main"
+wordink-dictd = "wordink.desktop.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.25"]
