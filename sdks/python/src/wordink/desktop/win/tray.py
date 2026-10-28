@@ -129,6 +129,15 @@ class Tray:
         if icon is not None:
             icon.stop()
 
+    def notice(self, message: str) -> None:
+        """A one-off toast that is not an error (for example, a degraded mode)."""
+        icon = self._icon
+        if icon is not None:
+            try:
+                icon.notify(message, "WordInk")
+            except Exception as exc:
+                log.warning("tray notice failed: %s", type(exc).__name__)
+
     # -- Indicator ------------------------------------------------------------------------------
     def show(self, state: str, detail: str | None = None) -> None:
         if state not in STATES:
