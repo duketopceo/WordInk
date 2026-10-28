@@ -136,6 +136,8 @@ flowchart LR
 
 ### W1. Platform seams on Linux
 
+- **Status:** W1a (protocols and per-OS path layout, additive) built; W1b (Recorder on `AudioSource`, daemon on `Transport`) next.
+
 - **Goal:** Introduce `interfaces.py` and `platform.py`, move the current Linux code behind them, change nothing observable on Linux.
 - **Requirements:** R4, R12 (groundwork).
 - **Dependencies:** none (builds on the shipped Linux daemon).
