@@ -13,7 +13,7 @@ execution: code
 ## Goal Capsule
 
 - **Objective:** a single program-level view of what WordInk ships next, in Now / Next / Later order, with status, evidence, difficulty, feasibility and a simpler alternative for every unit. It sits above the per-phase plans in `docs/plans/` and does not replace them.
-- **Product authority:** Luke (`duketopceo`). Two decisions below are marked **owner decision** and this plan does not make them: whether to build a standalone desktop app (U9), and whether to merge the Argus reviewer PR (U4).
+- **Product authority:** Luke (`duketopceo`). One decision below remains marked **owner decision** and this plan does not make it: whether to merge the Argus reviewer PR (U4). The other — standalone desktop apps (U9) — was decided by the owner on Oct 24, 2026: standalone first-party apps on all four OSes.
 - **Evidence date:** 2026-10-10, from `master` at `7057304`, GitHub PR/issue state, `gh run list`, `npm view` and the repo's own checks (all green locally, see Verification Contract).
 - **Out of scope:** application code. This pass changes docs and brand assets only. Code lands from the units below.
 
@@ -36,13 +36,13 @@ Phases 0, 1, 2 (integration route) and 4 (Python) are merged to `master`. The do
 ### Requirements
 
 - R1. Every unit carries a stable U-ID, a status with evidence, Difficulty, Feasibility and a Simpler alternative.
-- R2. Phase 2 desktop options are recorded with difficulty and feasibility, and no option is selected here.
+- R2. Phase 2 desktop options are recorded with difficulty and feasibility (none was selected when written; the owner selected B + B′ extended to iOS on Oct 24, 2026).
 - R3. The `WF-WRITE` audit finding is resolved to a named workflow and a verdict, without changing any workflow.
 - R4. Landscape claims trace to `docs/research/2026-10-10-landscape.md`.
 
-### Phase 2 desktop options (owner decision, not made here)
+### Phase 2 desktop options (decided Oct 24, 2026 — see below)
 
-The repo's `ROADMAP.md` records Option A as chosen and shipped (the gateway and `/v1/models` are on `master` (PR #29), and Voxtype on the owner's machine dictates through it). The owner's own notes treat the desktop direction as still open, so this plan records the options and marks the remaining choice as the owner's.
+Historical context: when this plan was written, `ROADMAP.md` recorded Option A as chosen and shipped (the gateway and `/v1/models` are on `master` (PR #29), and Voxtype on the owner's machine dictates through it), while the owner's notes treated the wider desktop direction as open. The options are kept below for the record; the choice was made on Oct 24, 2026 (see the owner decision under the table).
 
 | Option | What it is | Difficulty | Feasibility and blockers |
 |---|---|---|---|
@@ -52,7 +52,7 @@ The repo's `ROADMAP.md` records Option A as chosen and shipped (the gateway and 
 | B'. Standalone Windows/macOS app (issue #14) | Same app elsewhere, replacing `legacy/`. | Hard | macOS accessibility permission flow and signed, notarized builds need an Apple Developer account; Windows signing costs money; competes with Wispr Flow, Superwhisper, TypeWhisper. |
 | C. Skip desktop | All effort into the SDK, Python, mobile and provider hardening. | Easy (it is a scope decision) | Drops the desktop story; the gateway stays as a supported but frozen surface. |
 
-**Owner decision (U9):** choose among A-only, A+, B, B' or C, or keep A and revisit on adoption data. Until then no desktop code is planned beyond A/A+.
+**Owner decision (U9), made Oct 24, 2026:** standalone first-party apps on all four OSes — options B + B′ extended to iOS (WordInk Remote becomes a standalone product, not BYO-gateway-only). Hard requirement stated with the decision: every app must work on default open-source configuration — BYO provider key or the bundled local engine, no required self-hosted gateway or third-party dictation app. Option A stays shipped and supported as an optional deployment mode.
 
 ### `WF-WRITE` audit finding
 
@@ -72,7 +72,7 @@ The most likely referent of the audit's `WF-WRITE` flag is `argus-mention.yml` (
 ### Scope Boundaries
 
 - No application code, workflow or lockfile changes in this pass.
-- Phase 3 (standalone Windows and macOS app) stays "dropped" in `ROADMAP.md` unless U9 reopens it.
+- Phase 3 (standalone Linux, Windows and macOS apps) is reopened — U9 decided Oct 24, 2026.
 
 ---
 
@@ -115,7 +115,7 @@ The most likely referent of the audit's `WF-WRITE` flag is `argus-mention.yml` (
 
 #### U3. Reconcile backlog and docs with reality
 
-- **Status:** open. Evidence: issues #4-#12 are U1-U9 tracking issues (only #8 still open though PR #19 merged); #13 and #14 describe a standalone app that `ROADMAP.md` says was not chosen or dropped; #15 mixes the built Python work with mobile. `README.md` says a desktop app comes "later"; `AGENTS.md` says "A desktop app comes later" and that `legacy/` stays until "WordInk Desktop" replaces it.
+- **Status:** open. Evidence: issues #4-#12 are U1-U9 tracking issues (only #8 still open though PR #19 merged); #14 describes a standalone desktop app — reconciled Oct 24, 2026 when U9 decided standalone (#14 stays open as the tracking issue; #13 stays closed); #15 mixes the built Python work with mobile. `README.md` says a desktop app comes "later"; `AGENTS.md` says "A desktop app comes later" and that `legacy/` stays until "WordInk Desktop" replaces it — now accurate under U13.
 - **Dependencies:** none (U9 may change the wording).
 - **Difficulty:** easy.
 - **Feasibility:** none; needs owner approval to close issues.
@@ -153,7 +153,7 @@ The most likely referent of the audit's `WF-WRITE` flag is `argus-mention.yml` (
 
 #### U7. Python SDK: CI and distribution
 
-- **Status:** built, not gated. Evidence: `sdks/python` (`client.py`, `cli.py`, `mcp_server.py`); its plan (KTD5) leaves CI as a follow-up; CI has no Python SDK job.
+- **Status:** built; CI-gated, distribution open. Evidence: `sdks/python` (`client.py`, `cli.py`, `mcp_server.py`); its plan (KTD5) left CI as a follow-up. CI now has a `python-sdk` job (`uv sync --frozen && uv run pytest`, 36 tests); PyPI distribution is still open.
 - **Dependencies:** none.
 - **Difficulty:** easy.
 - **Feasibility:** PyPI name availability for `wordink` is unchecked.
@@ -162,8 +162,8 @@ The most likely referent of the audit's `WF-WRITE` flag is `argus-mention.yml` (
 
 #### U8. Retire or freeze `legacy/`
 
-- **Status:** open. Evidence: `legacy/wordink/*.py` is about 2,000 lines of Windows-only Python; `AGENTS.md` keeps it "until WordInk Desktop replaces it"; Phase 3 is dropped, so that replacement is not coming unless U9 says so; CI runs a `legacy` job on every PR.
-- **Dependencies:** U9 (if the owner picks B or B', keep it until the replacement exists).
+- **Status:** open. Evidence: `legacy/wordink/*.py` is about 2,000 lines of Windows-only Python; `AGENTS.md` keeps it "until WordInk Desktop replaces it"; with U9 decided for standalone, `legacy/` stays until U13 ships the Windows replacement; CI runs a `legacy` job on every PR.
+- **Dependencies:** U9 (decided Oct 24, 2026 — B + B′, so keep `legacy/` until the standalone desktop app exists).
 - **Difficulty:** easy.
 - **Feasibility:** the legacy data directory `~/.groq_flow/` is user data and must not be renamed; the MIT credit to groq_flow must stay in `LICENSE`.
 - **Simpler alternative:** move it to a `legacy` branch/tag and delete the directory plus the `legacy` job; or just drop the CI job and mark the directory unmaintained.
@@ -171,12 +171,12 @@ The most likely referent of the audit's `WF-WRITE` flag is `argus-mention.yml` (
 
 #### U9. Desktop direction (owner decision)
 
-- **Status:** owner decision. Evidence: Phase 2 options table above; `ROADMAP.md` records A as decided.
-- **Dependencies:** U2 (adoption data needs a published package).
+- **Status:** decided Oct 24, 2026 — standalone first-party apps on Linux, Windows, macOS and iOS (B + B′ extended to iOS), each working on default open-source configuration. Evidence: recorded in `ROADMAP.md` Phase 2 note + Phase 3/4 rows; issue #14 stays open as the tracking issue (U3).
+- **Dependencies:** U2 (adoption data needs a published package) — unchanged for sequencing, not for the decision itself.
 - **Difficulty:** see the table.
 - **Feasibility:** see the table.
-- **Simpler alternative:** A+ (more client recipes) costs days; B costs months.
-- **Verification:** the chosen option is written into `ROADMAP.md` and issues #13/#14 are closed or rewritten (U3).
+- **Simpler alternative:** n/a — decided.
+- **Verification:** `ROADMAP.md` records the standalone direction; issue #14 rewritten or replaced with per-unit tracking issues when U13 gets its plan.
 
 ### Later
 
@@ -207,14 +207,14 @@ The most likely referent of the audit's `WF-WRITE` flag is `argus-mention.yml` (
 - **Simpler alternative:** none needed until requested; the web component already works in mobile browsers where `getUserMedia` does.
 - **Verification:** a sample app dictating into a text field on iOS and Android.
 
-#### U13. Standalone desktop app
+#### U13. Standalone desktop app (Linux + Windows + macOS)
 
-- **Status:** conditional on U9; not planned.
-- **Dependencies:** U9.
+- **Status:** planned — U9 decided Oct 24, 2026. Needs its own plan before code (issue #13's note: ce-brainstorm/ce-plan once the provider interface is stable — it is, so the plan can start).
+- **Dependencies:** none blocking now; `legacy/` stays until the Windows target ships.
 - **Difficulty:** hard.
-- **Feasibility:** see Option B/B'.
-- **Simpler alternative:** U9 option A+.
-- **Verification:** defined only if U9 selects it.
+- **Feasibility:** see Option B/B' — Wayland hotkey/injection fragmentation, macOS accessibility + notarized signing, Windows signing; mitigated by the requirement that everything works on default open-source config.
+- **Simpler alternative:** none selected — U9 decided.
+- **Verification:** each OS app dictates end-to-end on a clean install with only a provider key (or local engine) — no self-hosted gateway required; gateway pairing remains an optional extra.
 
 ### Simplifications found
 
