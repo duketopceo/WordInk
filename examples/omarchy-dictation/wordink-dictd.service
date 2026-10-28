@@ -1,0 +1,17 @@
+[Unit]
+Description=WordInk push-to-talk dictation daemon
+Documentation=https://github.com/duketopceo/WordInk/blob/master/examples/omarchy-dictation/README.md
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/wordink-dictd run
+# GROQ_API_KEY goes in this file (mode 0600), never in the unit. The leading "-" lets the unit start without the file so `wordink-dictd doctor` can explain.
+EnvironmentFile=-%h/.config/wordink/dictd.env
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=graphical-session.target

@@ -114,6 +114,7 @@ class Daemon:
         *,
         recorder: Recorder | None = None,
         indicator: StateFile | None = None,
+        notifier: Callable[[str], object] | None = None,
     ) -> None:
         self.cfg = cfg
         self.pipeline = pipeline
@@ -122,6 +123,7 @@ class Daemon:
             cfg.record_command, min_seconds=cfg.min_seconds, tail_seconds=cfg.tail_seconds
         )
         self.indicator = indicator or StateFile(cfg.state_path)
+        self.notifier = notifier
         self.state = "idle"
         self._job: asyncio.Task[None] | None = None
         self._limit: asyncio.TimerHandle | None = None
@@ -131,6 +133,8 @@ class Daemon:
     def _set(self, state: str, detail: str | None = None) -> None:
         self.state = state
         self.indicator.write(state, detail)
+        if state == "error" and self.notifier is not None:
+            self.notifier(f"Dictation failed: {detail}" if detail else "Dictation failed")
 
     def _reply(self, ok: bool = True, **extra: object) -> dict:
         return {"ok": ok, "state": self.state, **extra}

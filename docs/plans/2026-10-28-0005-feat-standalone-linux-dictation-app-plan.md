@@ -176,6 +176,8 @@ flowchart LR
 
 ### U6. Service, waybar module, notifications
 
+- **Status:** done in PR "feat(python): systemd unit, waybar module, notifications and doctor (U6)".
+
 - **Goal:** Always-on daemon with a visible indicator.
 - **Requirements:** R7, R8.
 - **Dependencies:** U1.
