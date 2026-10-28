@@ -16,6 +16,8 @@ from ctypes import wintypes
 from dataclasses import dataclass
 
 from ...client import WordInkError
+from .hook import HEARTBEAT_VK, KeyCallback
+from .hotkey import Chord
 from .insert import ClipboardBusy, ClipboardSnapshot, Event
 
 # -- constants -------------------------------------------------------------------------------------
@@ -317,3 +319,189 @@ class Win32:
             self.d.user32.EmptyClipboard()
         finally:
             self.d.user32.CloseClipboard()
+
+
+# -- keyboard hook (plan W4c) ------------------------------------------------------------------------
+WH_KEYBOARD_LL = 13
+HC_ACTION = 0
+WM_KEYDOWN, WM_SYSKEYDOWN = 0x0100, 0x0104
+WM_HOTKEY, WM_QUIT = 0x0312, 0x0012
+LLKHF_INJECTED = 0x10
+MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_NOREPEAT = 0x0001, 0x0002, 0x0004, 0x4000
+_MOD_FLAGS = {"Alt": MOD_ALT, "Ctrl": MOD_CONTROL, "Shift": MOD_SHIFT}
+
+
+class KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = (
+        ("vkCode", wintypes.DWORD),
+        ("scanCode", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    )
+
+
+def hotkey_modifiers(chord: Chord) -> int:
+    """`RegisterHotKey` modifier flags for a chord (with MOD_NOREPEAT: one event per press)."""
+    flags = MOD_NOREPEAT
+    for m in chord.modifiers:
+        flags |= _MOD_FLAGS[m]
+    return flags
+
+
+def _declare_hook(d: _Dlls) -> None:
+    u, k = d.user32, d.kernel32
+    H = ctypes.c_void_p
+    u.SetWindowsHookExW.argtypes = (ctypes.c_int, H, H, wintypes.DWORD)
+    u.SetWindowsHookExW.restype = H
+    u.UnhookWindowsHookEx.argtypes = (H,)
+    u.CallNextHookEx.argtypes = (H, ctypes.c_int, ctypes.c_size_t, ctypes.c_ssize_t)
+    u.CallNextHookEx.restype = ctypes.c_ssize_t
+    u.GetMessageW.argtypes = (ctypes.POINTER(wintypes.MSG), H, wintypes.UINT, wintypes.UINT)
+    u.GetMessageW.restype = ctypes.c_int
+    u.TranslateMessage.argtypes = (ctypes.POINTER(wintypes.MSG),)
+    u.DispatchMessageW.argtypes = (ctypes.POINTER(wintypes.MSG),)
+    u.PostThreadMessageW.argtypes = (wintypes.DWORD, wintypes.UINT, ctypes.c_size_t, ctypes.c_ssize_t)
+    u.RegisterHotKey.argtypes = (H, ctypes.c_int, wintypes.UINT, wintypes.UINT)
+    u.RegisterHotKey.restype = wintypes.BOOL
+    u.UnregisterHotKey.argtypes = (H, ctypes.c_int)
+    k.GetCurrentThreadId.restype = wintypes.DWORD
+    k.GetModuleHandleW.argtypes = (wintypes.LPCWSTR,)
+    k.GetModuleHandleW.restype = H
+
+
+def _winfunctype():
+    if sys.platform != "win32":
+        raise WordInkError("Windows input and clipboard APIs are only available on Windows")
+    return ctypes.WINFUNCTYPE  # type: ignore[attr-defined]
+
+
+class Win32Hook:
+    """`HookApi` over `WH_KEYBOARD_LL`. `dlls` and `functype` are injectable so the callback logic
+    is tested on Linux; on Windows both come from the real system."""
+
+    def __init__(self, dlls: _Dlls | None = None, functype=None) -> None:
+        self._dlls = dlls
+        self._functype = functype
+        self._thread_id = 0
+        self._proc = None  # keep the callback alive for as long as the hook is installed
+
+    @property
+    def d(self) -> _Dlls:
+        if self._dlls is None:
+            self._dlls = _load_dlls()
+            _declare_hook(self._dlls)
+        return self._dlls
+
+    def _callback(self, on_key: KeyCallback):
+        u = self.d.user32
+
+        def proc(n_code, w_param, l_param):
+            if n_code == HC_ACTION:
+                kb = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+                try:
+                    swallow = on_key(kb.vkCode, w_param in (WM_KEYDOWN, WM_SYSKEYDOWN), bool(kb.flags & LLKHF_INJECTED))
+                except Exception:  # never let an exception unwind into the OS
+                    swallow = False
+                if swallow:
+                    return 1
+            return u.CallNextHookEx(None, n_code, w_param, l_param)
+
+        return proc
+
+    def run_hook(self, on_key: KeyCallback, ready) -> None:
+        d = self.d
+        u, k = d.user32, d.kernel32
+        functype = self._functype or _winfunctype()
+        hookproc = functype(ctypes.c_ssize_t, ctypes.c_int, ctypes.c_size_t, ctypes.c_ssize_t)
+        self._proc = hookproc(self._callback(on_key))
+        self._thread_id = k.GetCurrentThreadId()
+        hook = u.SetWindowsHookExW(WH_KEYBOARD_LL, self._proc, k.GetModuleHandleW(None), 0)
+        if not hook:
+            self._thread_id = 0
+            raise OSError("SetWindowsHookExW refused the keyboard hook")
+        try:
+            ready()
+            msg = wintypes.MSG()
+            while u.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                u.TranslateMessage(ctypes.byref(msg))
+                u.DispatchMessageW(ctypes.byref(msg))
+        finally:
+            u.UnhookWindowsHookEx(hook)
+            self._thread_id = 0
+            self._proc = None
+
+    def stop_hook(self) -> None:
+        tid = self._thread_id
+        if tid:
+            self.d.user32.PostThreadMessageW(tid, WM_QUIT, 0, 0)
+
+    def send_heartbeat(self) -> None:
+        Win32()._send([_key(HEARTBEAT_VK, 0, KEYEVENTF_KEYUP)])
+
+    def probe_hotkey(self, chord: Chord) -> bool:
+        u = self.d.user32
+        ident = 0x5744  # arbitrary id, registered and released within this call
+        if not u.RegisterHotKey(None, ident, hotkey_modifiers(chord), chord.key):
+            return False
+        u.UnregisterHotKey(None, ident)
+        return True
+
+
+class RegisterHotKeySource:
+    """Toggle-only fallback when the low-level hook is blocked: both chords call `on_toggle` (no hold
+    semantics, because `RegisterHotKey` cannot see key releases). Implements `HotkeySource`."""
+
+    def __init__(self, hold: Chord, toggle: Chord, dlls: _Dlls | None = None) -> None:
+        self._chords = (hold, toggle)
+        self._dlls = dlls
+        self._thread = None
+        self._thread_id = 0
+
+    @property
+    def d(self) -> _Dlls:
+        if self._dlls is None:
+            self._dlls = _load_dlls()
+            _declare_hook(self._dlls)
+        return self._dlls
+
+    def start(self, on_hold_press, on_hold_release, on_toggle) -> None:
+        import threading
+
+        ready = threading.Event()
+        errors: list[str] = []
+
+        def loop() -> None:
+            d = self.d
+            u, k = d.user32, d.kernel32
+            self._thread_id = k.GetCurrentThreadId()
+            registered = []
+            for i, chord in enumerate(self._chords, start=1):
+                if u.RegisterHotKey(None, i, hotkey_modifiers(chord), chord.key):
+                    registered.append(i)
+                else:
+                    errors.append(chord.text)
+            ready.set()
+            try:
+                if registered:
+                    msg = wintypes.MSG()
+                    while u.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                        if msg.message == WM_HOTKEY:
+                            on_toggle()
+            finally:
+                for i in registered:
+                    u.UnregisterHotKey(None, i)
+
+        self._thread = threading.Thread(target=loop, name="wordink-hotkeys-fallback", daemon=True)
+        self._thread.start()
+        ready.wait(3.0)
+        if errors:
+            self.stop()
+            raise WordInkError(f"another application already uses {', '.join(errors)}; change [hotkey] in dictate.toml")
+
+    def stop(self) -> None:
+        if self._thread_id:
+            self.d.user32.PostThreadMessageW(self._thread_id, WM_QUIT, 0, 0)
+        if self._thread is not None:
+            self._thread.join(2.0)
+        self._thread, self._thread_id = None, 0
