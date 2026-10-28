@@ -64,7 +64,7 @@ Voxtype works but is a separate product with its own config and no WordInk vocab
 - **KTD4. Chosen default bind: `SUPER ALT, D`** (hold) and `SUPER ALT, S` (toggle), because wisp holds `SUPER, D` and Hyprland matches exact modifier masks. Both are written by the installer only after `hyprctl binds -j` shows no existing match, and are overridable. The chosen keys are provisional until U8 confirms against the live bind list. Governs R1.
 - **KTD5. Injection order: `wtype`, then `ydotool`, then clipboard.** `wtype` uses `zwp_virtual_keyboard_v1`, needs no daemon, and handles Unicode. `ydotool` needs `ydotoold` and uinput access, so it is the fallback. Clipboard-only is the last resort and is always reported. Terminal windows use paste-then-restore. Governs R6.
 - **KTD6. LLM cleanup is bounded and fail-open.** One chat completion with a fixed system prompt, a short timeout (default 3 s), and the raw transcript wrapped as data. On timeout, error, or a response that is much longer than the input, use the deterministic cleanup instead. The dictated text is never executed as instructions. Governs R4, R11.
-- **KTD7. State and IPC.** Socket at `$XDG_RUNTIME_DIR/wordink/dictd.sock`; state file `$XDG_RUNTIME_DIR/wordink/state` (JSON, one line) read by waybar's `exec` with `tail`-free polling or `signal`. Governs R7.
+- **KTD7. State and IPC.** Socket at `$XDG_RUNTIME_DIR/wordink/dictd.sock`; state file `$XDG_RUNTIME_DIR/wordink/state` (JSON, one line) read by a waybar `custom` module (`exec` with `interval`, or `signal` refresh). Governs R7.
 - **KTD8. Config.** `~/.config/wordink/dictate.toml` for hotkey, models, tone, injection order, window deny list. Secrets only in the environment. Governs R8, R11.
 
 ### Output Structure
