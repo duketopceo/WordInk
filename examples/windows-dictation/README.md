@@ -24,7 +24,7 @@ powershell -File "$env:LOCALAPPDATA\wordink\wordink-use-legacy.ps1"
 ```
 
 It disables the WordInk task, stops its process, restores `Groq Flow.lnk` and starts the legacy app.
-`.\install.ps1 -Switch` returns to WordInk (it re-enables nothing by magic: it registers and starts the task again).
+`.\install.ps1 -Switch` returns to WordInk: it re-enables the task, starts it, and moves the legacy app aside again.
 
 ## First run
 

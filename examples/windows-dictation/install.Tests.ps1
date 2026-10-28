@@ -5,7 +5,7 @@ BeforeAll {
     $script:Installer = Join-Path $PSScriptRoot 'install.ps1'
     # The Windows-only cmdlets do not exist when these tests run on Linux: stub them so Mock can replace them.
     foreach ($name in 'Get-ScheduledTask', 'Register-ScheduledTask', 'Unregister-ScheduledTask', 'Start-ScheduledTask',
-                      'Stop-ScheduledTask', 'Disable-ScheduledTask', 'New-ScheduledTaskAction', 'New-ScheduledTaskTrigger',
+                      'Stop-ScheduledTask', 'Disable-ScheduledTask', 'Enable-ScheduledTask', 'New-ScheduledTaskAction', 'New-ScheduledTaskTrigger',
                       'New-ScheduledTaskSettingsSet', 'New-ScheduledTaskPrincipal', 'Get-CimInstance') {
         if (-not (Get-Command $name -ErrorAction SilentlyContinue)) { Set-Item "function:global:$name" { } }
     }
@@ -94,6 +94,19 @@ Describe 'install.ps1' {
         Invoke-Install -Paths (New-Rig)
         Should -Invoke Register-WordInkTask -Times 0
         Should -Invoke Start-ScheduledTask -Times 0
+    }
+
+    It 'a task the rollback disabled is enabled again' {
+        . $script:Installer -Source 'wordink[windows]' -NoStart
+        Mock Test-UvInstalled { $true }
+        Mock Invoke-Uv { }
+        Mock Resolve-Launcher { $script:launcher }
+        Mock Get-WordInkTask { [pscustomobject]@{ State = 'Disabled'; Actions = @([pscustomobject]@{ Execute = 'C:\tools\bin\wordink-dictd-tray.exe'; Arguments = '' }) } }
+        Mock Register-WordInkTask { }
+        Mock Enable-ScheduledTask { }
+        Invoke-Install -Paths (New-Rig)
+        Should -Invoke Register-WordInkTask -Times 0
+        Should -Invoke Enable-ScheduledTask -Times 1
     }
 
     It 'a changed launcher re-registers the task' {

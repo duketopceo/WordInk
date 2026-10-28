@@ -201,6 +201,9 @@ function Invoke-Install {
         $launcher = Resolve-Launcher
         if (Test-TaskMatches -Task (Get-WordInkTask) -Launcher $launcher) {
             Write-Step "Task '$($script:TaskName)' is already registered for $($launcher.Execute): leaving it as is."
+            if ((Get-WordInkTask).State -eq 'Disabled') {
+                Invoke-Change "Re-enable the task (the rollback script had disabled it)" { Enable-ScheduledTask -TaskName $script:TaskName | Out-Null }
+            }
         } else {
             Invoke-Change "Register the logon task '$($script:TaskName)' running $($launcher.Execute) $($launcher.Arguments)" {
                 Register-WordInkTask -Launcher $launcher
