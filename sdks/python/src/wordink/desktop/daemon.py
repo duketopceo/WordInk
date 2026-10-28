@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import json
 import logging
 import os
-import socket
 import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -20,8 +17,10 @@ from .cleanup import CleanupConfig, clean_transcript
 from .config import DictateConfig
 from .indicator import StateFile
 from .inject import Injector, inject_config_from
+from .interfaces import Transport
 from .recorder import Recorder
 from .transcribe import TranscriptionError, resolve_transcribe_config, transcribe_audio
+from .transport import UnixTransport
 from .vocab import load_vocabulary
 
 log = logging.getLogger("wordink.dictd")
@@ -115,6 +114,7 @@ class Daemon:
         recorder: Recorder | None = None,
         indicator: StateFile | None = None,
         notifier: Callable[[str], object] | None = None,
+        transport: Transport | None = None,
     ) -> None:
         self.cfg = cfg
         self.pipeline = pipeline
@@ -124,10 +124,10 @@ class Daemon:
         )
         self.indicator = indicator or StateFile(cfg.state_path)
         self.notifier = notifier
+        self.transport: Transport = transport or UnixTransport(cfg.socket_path)
         self.state = "idle"
         self._job: asyncio.Task[None] | None = None
         self._limit: asyncio.TimerHandle | None = None
-        self._server: asyncio.Server | None = None
 
     # -- state ----------------------------------------------------------------------------------
     def _set(self, state: str, detail: str | None = None) -> None:
@@ -203,52 +203,18 @@ class Daemon:
             log.exception("unexpected dictation failure")
             self._set("error", f"unexpected {type(exc).__name__}")
 
-    # -- socket server --------------------------------------------------------------------------
-    async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        try:
-            line = await asyncio.wait_for(reader.readline(), timeout=5)
-            reply = await self.handle(line.decode("utf-8", "replace").strip().lower())
-            writer.write((json.dumps(reply) + "\n").encode())
-            await writer.drain()
-        except (asyncio.TimeoutError, ConnectionError):
-            pass
-        finally:
-            writer.close()
-            with contextlib.suppress(ConnectionError):
-                await writer.wait_closed()
-
-    def _claim_socket(self) -> None:
-        path = self.cfg.socket_path
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(path.parent, 0o700)
-        if path.exists():
-            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            probe.settimeout(1)
-            try:
-                probe.connect(str(path))
-            except OSError:
-                path.unlink(missing_ok=True)  # stale: nobody is listening
-            else:
-                raise WordInkError(f"wordink-dictd is already running (socket {path})")
-            finally:
-                probe.close()
-
+    # -- transport ------------------------------------------------------------------------------
     async def serve(self) -> None:
-        self._claim_socket()
-        self._server = await asyncio.start_unix_server(self._client, path=str(self.cfg.socket_path))
-        os.chmod(self.cfg.socket_path, 0o600)
+        await self.transport.serve(self.handle)
         self._set("idle")
 
     async def close(self) -> None:
         if self._limit is not None:
             self._limit.cancel()
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
+        await self.transport.close()
         await self.recorder.abort()
         if self._job is not None:
             await asyncio.gather(self._job, return_exceptions=True)
-        self.cfg.socket_path.unlink(missing_ok=True)
 
     async def wait_idle(self) -> None:
         """Wait for an in-flight dictation to finish (tests and shutdown)."""
@@ -258,18 +224,4 @@ class Daemon:
 
 async def send_command(socket_path: Path, command: str, timeout: float = 3.0) -> dict:
     """One request to a running daemon; raises WordInkError when none is listening."""
-    try:
-        reader, writer = await asyncio.wait_for(asyncio.open_unix_connection(str(socket_path)), timeout)
-    except (OSError, asyncio.TimeoutError) as exc:
-        raise WordInkError(f"wordink-dictd is not running (socket {socket_path}); start it with `wordink-dictd run`") from exc
-    try:
-        writer.write(f"{command}\n".encode())
-        await writer.drain()
-        line = await asyncio.wait_for(reader.readline(), timeout)
-        return json.loads(line)
-    except (asyncio.TimeoutError, ValueError, ConnectionError) as exc:
-        raise WordInkError("wordink-dictd did not answer") from exc
-    finally:
-        writer.close()
-        with contextlib.suppress(ConnectionError):
-            await writer.wait_closed()
+    return await UnixTransport(socket_path).request(command, timeout)
