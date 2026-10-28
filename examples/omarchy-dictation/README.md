@@ -91,7 +91,7 @@ Rough cost of one hour of meeting audio, 30 s chunks, silence skipped:
 | Mic only, speech the whole hour | $0.040 | $0.111 |
 | Mic and loopback, both talking all hour (worst case) | $0.080 | $0.222 |
 | Source diarization (You / Remote) | $0 | $0 |
-| LLM cleanup of the whole transcript (about 12k tokens each way, llama-3.1-8b-instant) | about $0.002 | about $0.002 |
+| LLM cleanup of the whole transcript (about 12k tokens each way, openai/gpt-oss-20b, plus reasoning tokens) | about $0.005 | about $0.005 |
 
 A short dictation is billed as 10 s, so a 3 s utterance costs about $0.00011 on turbo.
 ## Hyprland Lua configs
