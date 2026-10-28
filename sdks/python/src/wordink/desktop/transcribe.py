@@ -6,6 +6,7 @@ request to a wordink-gateway instead, which adds its own fallback chain and voca
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from collections.abc import Callable, Mapping
@@ -16,7 +17,10 @@ from pathlib import Path
 import httpx
 
 from ..client import WordInkError, resolve_config, transcribe
+from . import costs
 from .vocab import pack_prompt
+
+log = logging.getLogger("wordink.transcribe")
 
 #: Groq's OpenAI-compatible root; `client.transcribe` appends `/v1/audio/transcriptions`.
 GROQ_BASE = "https://api.groq.com/openai"
@@ -111,9 +115,11 @@ def transcribe_audio(
     """
     prompt = pack_prompt(vocabulary or []) or None
     last: WordInkError | None = None
+    seconds = costs.wav_seconds(wav)
+    started = time.monotonic()
     for attempt in range(2):
         try:
-            return transcribe(
+            text = transcribe(
                 wav,
                 filename="dictation.wav",
                 gateway=cfg.endpoint,
@@ -123,6 +129,9 @@ def transcribe_audio(
                 model=cfg.model,
                 transport=transport,
             ).strip()
+            costs.record("transcribe", cfg.model, latency_ms=(time.monotonic() - started) * 1000, audio_seconds=seconds)
+            log.debug("transcript (%d chars, %.1fs audio): %s", len(text), seconds, text)
+            return text
         except WordInkError as exc:
             last = exc
             if attempt == 0 and _retryable(exc):
@@ -130,6 +139,8 @@ def transcribe_audio(
                 continue
             break
     assert last is not None
+    costs.record("transcribe", cfg.model, latency_ms=(time.monotonic() - started) * 1000, ok=False, status=last.status,
+                 audio_seconds=seconds)
     message = str(last.args[0]) if last.args else "transcription failed"
     if cfg.token:
         message = message.replace(cfg.token, "***")
