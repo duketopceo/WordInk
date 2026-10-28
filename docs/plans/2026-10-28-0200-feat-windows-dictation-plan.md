@@ -220,6 +220,8 @@ flowchart LR
 
 ### W8. Installer and autostart (`install.ps1`)
 
+- **Status:** built (`examples/windows-dictation/install.ps1`, Pester tests, README, `windows-installer` CI job). Registers `wordink-dictd-tray` (W7b); only mocked Pester tests have run it, never a real machine.
+
 - **Goal:** One script to install, switch from legacy, and roll back. Not run on any machine as part of this plan.
 - **Requirements:** R8, R10.
 - **Dependencies:** W7.
