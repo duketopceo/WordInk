@@ -105,3 +105,57 @@ def test_run_serves_until_sigterm_then_cleans_up_the_socket(env):
 
     assert asyncio.run(scenario()) == 0
     assert not cfg.socket_path.exists()
+
+
+# --- Windows -------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def winenv(env, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(env / "AppData" / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(env / "AppData" / "Local"))
+    return env
+
+
+def test_windows_binds_print_the_chords_not_hyprland_lines(winenv, capsys):
+    assert main(["binds"], os_name="windows") == 0
+    out = capsys.readouterr().out
+    assert "Ctrl+Alt+D" in out and "Ctrl+Alt+S" in out and "bind" not in out
+
+
+def test_windows_waybar_is_refused_politely(winenv, capsys):
+    assert main(["waybar"], os_name="windows") == 1
+    assert "Linux only" in capsys.readouterr().err
+
+
+def test_set_key_on_linux_points_at_the_environment_file(winenv, capsys):
+    assert main(["set-key"], os_name="linux") == 1
+    assert "EnvironmentFile" in capsys.readouterr().err
+
+
+def test_windows_run_hands_over_to_the_tray_app(winenv, monkeypatch):
+    seen = {}
+    monkeypatch.setattr("wordink.desktop.win.app.run_configured", lambda cfg, debug=False: seen.setdefault("os", cfg.hold_bind) and 0)
+    assert main(["run"], os_name="windows") == 0
+    assert seen["os"] == "Ctrl+Alt+D"
+
+
+def test_windows_trigger_without_the_app_running_fails_with_a_hint(winenv, capsys):
+    assert main(["trigger", "start"], os_name="windows") == 1
+    assert "wordink-dictd" in capsys.readouterr().err
+
+
+def test_windows_set_key_stores_without_echo(winenv, monkeypatch, capsys):
+    called = []
+    monkeypatch.setattr("wordink.desktop.win.secrets.set_key_interactive", lambda *a, **k: called.append(1))
+    assert main(["set-key"], os_name="windows") == 0
+    assert called and "gsk_" not in capsys.readouterr().out
+
+
+def test_windows_doctor_runs_the_windows_checks(winenv, monkeypatch, capsys):
+    from wordink.desktop.win import doctor as wd
+
+    monkeypatch.setattr(wd, "real_probes", lambda cfg: wd.Probes())
+    code = main(["doctor", "--json"], os_name="windows")
+    assert code in (0, 1)
+    assert json.loads(capsys.readouterr().out)

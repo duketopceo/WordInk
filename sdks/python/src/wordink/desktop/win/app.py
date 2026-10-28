@@ -216,14 +216,17 @@ async def run_app(cfg: DictateConfig, adapters: Adapters, env: Mapping[str, str]
     return 0
 
 
+def run_configured(cfg: DictateConfig, debug: bool = False) -> int:
+    """Log to a file, take the key from Credential Manager, and run the tray app until Quit."""
+    setup_logging(cfg, debug)
+    env = env_with_stored_key(os.environ, KeyStore())
+    return asyncio.run(run_app(cfg, real_adapters(cfg), env))
+
+
 def main(argv: list[str] | None = None) -> int:
     """`wordink-dictd-tray`: run the dictation app with a tray icon. No console window."""
-    debug = os.environ.get("WORDINK_DEBUG") == "1"
     try:
-        cfg = load_config(os_name="windows")
-        setup_logging(cfg, debug)
-        env = env_with_stored_key(os.environ, KeyStore())
-        return asyncio.run(run_app(cfg, real_adapters(cfg), env))
+        return run_configured(load_config(os_name="windows"), os.environ.get("WORDINK_DEBUG") == "1")
     except WordInkError as exc:
         logging.getLogger("wordink.dictd").error("%s", exc)
         with contextlib.suppress(Exception):
