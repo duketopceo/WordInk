@@ -75,6 +75,8 @@ class WinApp:
         last = LastTranscriptSink(cfg.last_path)
 
         def sink(text: str) -> None:
+            # Deliberately BEFORE inserting: if typing or pasting fails, the transcript is still in
+            # last.txt (and the tray's "Copy last transcript"), so a dictation is never lost.
             last(text)
             res = adapters.inserter.insert(text)
             log.info("inserted via %s%s", res.method, f" ({res.detail})" if res.detail else "")
@@ -196,7 +198,7 @@ def real_adapters(cfg: DictateConfig) -> Adapters:
         inserter=WindowsInserter(api, win_insert_config_from(cfg.insert)),
         hotkeys=HookHotkeySource(hold, toggle, Win32Hook()),
         transport=LoopbackTransport(cfg.runtime_dir),
-        tray=Tray(TrayActions(*(lambda: None,) * 5)),
+        tray=Tray(),
         fallback_hotkeys=RegisterHotKeySource(hold, toggle),
         clipboard_set=api.clipboard_set,
         open_path=os.startfile if hasattr(os, "startfile") else None,  # type: ignore[attr-defined]

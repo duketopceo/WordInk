@@ -83,12 +83,12 @@ class Tray:
 
     def __init__(
         self,
-        actions: TrayActions,
+        actions: TrayActions | None = None,
         *,
         pystray: ModuleType | None = None,
         make_image: Callable[[bytes, int], object] | None = None,
     ) -> None:
-        self.actions = actions
+        self.actions = actions or TrayActions(*(lambda: None,) * 5)  # the app installs the real ones
         self._pystray = pystray
         self._make_image = make_image or _pil_image
         self._icon = None

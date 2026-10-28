@@ -286,3 +286,26 @@ def test_run_app_returns_when_asked_to_stop(tmp_path):
         assert not ad.transport.alive()  # the finally block closed everything
 
     asyncio.run(go())
+
+
+def test_the_transcript_is_kept_even_when_insertion_fails(tmp_path):
+    cfg, ad, ins, tray, _, _ = make(tmp_path)
+
+    def broken(text):
+        raise WordInkError("cannot insert text")
+
+    ins.insert = broken
+
+    async def go():
+        app = WinApp(cfg, ad, {"GROQ_API_KEY": "gsk_test"}, http=groq())
+        await app.start()
+        try:
+            await ad.transport.request("start")
+            await wait_until(lambda: app.daemon.state == "recording")
+            await ad.transport.request("stop")
+            await wait_until(lambda: app.daemon.state == "error")
+            assert cfg.last_path.read_text() == "Ship it on Windows today."  # recoverable
+        finally:
+            await app.close()
+
+    asyncio.run(go())
