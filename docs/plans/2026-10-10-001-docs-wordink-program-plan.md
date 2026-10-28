@@ -42,7 +42,7 @@ Phases 0, 1, 2 (integration route) and 4 (Python) are merged to `master`. The do
 
 ### Phase 2 desktop options (decided Oct 24, 2026 — see below)
 
-The repo's `ROADMAP.md` records Option A as chosen and shipped (the gateway and `/v1/models` are on `master` (PR #29), and Voxtype on the owner's machine dictates through it). The owner's own notes treat the desktop direction as still open, so this plan records the options and marks the remaining choice as the owner's.
+Historical context: when this plan was written, `ROADMAP.md` recorded Option A as chosen and shipped (the gateway and `/v1/models` are on `master` (PR #29), and Voxtype on the owner's machine dictates through it), while the owner's notes treated the wider desktop direction as open. The options are kept below for the record; the choice was made on Oct 24, 2026 (see the owner decision under the table).
 
 | Option | What it is | Difficulty | Feasibility and blockers |
 |---|---|---|---|
