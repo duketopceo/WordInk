@@ -118,6 +118,31 @@ jobs:
       - name: win/ tests (bash expands the glob)
         shell: bash
         run: uv run pytest -q tests/desktop/test_win_*.py tests/desktop/test_dictd_platform.py
+  # Windows installer (plan W8): parse, lint and Pester-test install.ps1 with every system change mocked.
+  windows-installer:
+    runs-on: windows-latest
+    defaults:
+      run: { working-directory: examples/windows-dictation, shell: pwsh }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Pester 5 and PSScriptAnalyzer
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -SkipPublisherCheck
+      - name: PSScriptAnalyzer
+        run: |
+          $r = Invoke-ScriptAnalyzer -Path ./install.ps1 -Settings ./PSScriptAnalyzerSettings.psd1 -Severity Error, Warning
+          $r | Format-Table RuleName, Severity, Line, Message -AutoSize
+          if ($r) { exit 1 }
+      - name: Pester
+        run: |
+          Import-Module Pester -MinimumVersion 5.5
+          $c = New-PesterConfiguration
+          $c.Run.Path = './install.Tests.ps1'
+          $c.Run.Exit = $true
+          $c.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $c
   legacy:
     runs-on: ubuntu-latest
     defaults:
