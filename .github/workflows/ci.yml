@@ -103,6 +103,18 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - run: uv sync --frozen
       - run: uv run pytest -q
+  # Windows dictation adapters (plan W9): the win/ tests on a real Windows runner with the `windows` extra,
+  # plus an import of every win/ module (declarations only: nothing is called at import).
+  python-sdk-windows:
+    runs-on: windows-latest
+    defaults:
+      run: { working-directory: sdks/python }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --frozen --extra windows
+      - run: uv run python -c "import wordink.desktop.win.win32, wordink.desktop.win.hotkey, wordink.desktop.win.insert, wordink.desktop.win.audio, wordink.desktop.win.tray, wordink.desktop.win.secrets, wordink.desktop.platform"
+      - run: uv run pytest -q tests/desktop/test_win_hotkey_chords.py tests/desktop/test_win_chord_tracker.py tests/desktop/test_win_insert.py tests/desktop/test_win_audio.py tests/desktop/test_win_tray.py tests/desktop/test_win_secrets.py tests/desktop/test_win_win32.py tests/desktop/test_dictd_platform.py
   legacy:
     runs-on: ubuntu-latest
     defaults:
