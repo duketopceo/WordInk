@@ -112,12 +112,27 @@ def _insert_table(ins: dict) -> dict[str, object]:
     return out
 
 
-def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) -> DictateConfig:
-    """Defaults, overridden by the TOML file when present. Bad keys and values fail loudly."""
+def load_config(
+    path: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    *,
+    os_name: str = "linux",
+) -> DictateConfig:
+    """Defaults, overridden by the TOML file when present. Bad keys and values fail loudly.
+
+    `os_name="windows"` uses the Windows file layout, `Ctrl+Alt+D` style hotkeys and chord validation.
+    """
     from .binds import validate_binds  # local import: binds imports nothing from config
 
     e = os.environ if env is None else env
-    cfg_path = path or default_config_path(e)
+    windows = os_name == "windows"
+    if windows:
+        from .platform import app_paths
+
+        layout = app_paths("windows", e)
+        cfg_path = path or Path(str(layout.config_file))
+    else:
+        cfg_path = path or default_config_path(e)
     data: dict = {}
     if cfg_path.exists():
         try:
@@ -161,6 +176,19 @@ def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) 
     for key in ("min_seconds", "max_seconds", "tail_seconds"):
         if key in rc:
             kw[key] = _number("record", key, rc[key], minimum=0.0 if key != "max_seconds" else 1.0)
+    if windows:
+        from .win.hotkey import DEFAULT_HOLD, DEFAULT_TOGGLE, parse_chords
+
+        kw.setdefault("hold_bind", DEFAULT_HOLD)
+        kw.setdefault("toggle_bind", DEFAULT_TOGGLE)
+        cfg = DictateConfig(
+            runtime_dir=Path(str(layout.runtime_dir)),
+            vocab_path=Path(str(layout.vocab_file)),
+            failed_dir=Path(str(layout.failed_dir)),
+            **kw,  # type: ignore[arg-type]
+        )
+        parse_chords(cfg.hold_bind, cfg.toggle_bind)
+        return cfg
     cfg = DictateConfig(
         runtime_dir=default_runtime_dir(e),
         vocab_path=default_vocab_path(dict(e)),
