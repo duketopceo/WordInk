@@ -84,13 +84,13 @@ function Get-DefaultSource {
 }
 
 function Get-Requirement {
-    param([string]$Source)
-    if (Test-Path $Source) {
-        $uri = [System.Uri]::new((Resolve-Path $Source).Path).AbsoluteUri
+    param([string]$Spec)
+    if (Test-Path $Spec) {
+        $uri = [System.Uri]::new((Resolve-Path $Spec).Path).AbsoluteUri
         return "wordink[windows] @ $uri"
     }
-    if ($Source -match '^(git\+|https?://)') { return "wordink[windows] @ $Source" }
-    return $Source  # a plain requirement such as "wordink[windows]==0.1.0"
+    if ($Spec -match '^(git\+|https?://)') { return "wordink[windows] @ $Spec" }
+    return $Spec  # a plain requirement such as "wordink[windows]==0.1.0"
 }
 
 # -- launcher ----------------------------------------------------------------------------------------
@@ -191,7 +191,7 @@ function Invoke-Install {
         throw "uv is not installed. Install it first: https://docs.astral.sh/uv/getting-started/installation/ (then re-run this script)."
     }
     $src = if ($Source) { $Source } else { Get-DefaultSource }
-    $req = Get-Requirement -Source $src
+    $req = Get-Requirement -Spec $src
     Invoke-Change "Install the tool: uv tool install --force --python 3.11 `"$req`"" {
         Invoke-Uv @('tool', 'install', '--force', '--python', '3.11', $req)
     }

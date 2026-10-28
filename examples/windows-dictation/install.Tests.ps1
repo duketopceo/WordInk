@@ -153,12 +153,12 @@ Describe 'install.ps1' {
         It 'turns a path into a file URL requirement' {
             . $script:Installer
             $dir = Join-Path $TestDrive 'pkg'; New-Item -ItemType Directory $dir | Out-Null
-            Get-Requirement -Source $dir | Should -BeLike 'wordink[[]windows] @ file:///*'
+            Get-Requirement -Spec $dir | Should -BeLike 'wordink[[]windows] @ file:///*'
         }
         It 'accepts git URLs and plain requirements' {
             . $script:Installer
-            Get-Requirement -Source 'git+https://example.com/r#subdirectory=x' | Should -Be 'wordink[windows] @ git+https://example.com/r#subdirectory=x'
-            Get-Requirement -Source 'wordink[windows]==1.0' | Should -Be 'wordink[windows]==1.0'
+            Get-Requirement -Spec 'git+https://example.com/r#subdirectory=x' | Should -Be 'wordink[windows] @ git+https://example.com/r#subdirectory=x'
+            Get-Requirement -Spec 'wordink[windows]==1.0' | Should -Be 'wordink[windows]==1.0'
         }
     }
 
