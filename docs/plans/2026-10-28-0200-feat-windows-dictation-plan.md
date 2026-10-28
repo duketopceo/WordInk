@@ -208,7 +208,7 @@ flowchart LR
 
 ### W7. Windows daemon wiring and IPC
 
-- **Status:** W7a (loopback transport) and W7b (`win/app.py`: adapters wired to the shared daemon, hotkey/tray/CLI channel, toggle-only fallback when the hook is blocked, rotating log, `wordink-dictd-tray` gui-script) built and tested end to end on Linux with fakes; Windows `doctor`, `set-key` and CLI `run`/`trigger` next (W7c).
+- **Status:** W7a (loopback transport) and W7b (`win/app.py`: adapters wired to the shared daemon, hotkey/tray/CLI channel, toggle-only fallback when the hook is blocked, rotating log, `wordink-dictd-tray` gui-script) built and tested end to end on Linux with fakes; W7c: Windows `doctor` (W7c-1) and the OS-aware CLI (`run`, `trigger`, `status`, `set-key`, `doctor`, `binds`) built.
 
 - **Goal:** One process that runs the pipeline with the Windows adapters, plus the CLI over loopback.
 - **Requirements:** R4, R11, R12.
