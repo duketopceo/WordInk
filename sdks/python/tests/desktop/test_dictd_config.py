@@ -28,7 +28,7 @@ def _write(tmp_path: Path, body: str) -> Path:
 def test_defaults_without_a_file(tmp_path):
     cfg = load_config(tmp_path / "missing.toml", _env(tmp_path))
     assert cfg.hold_bind == "SUPER ALT, D" and cfg.toggle_bind == "SUPER ALT, S"
-    assert cfg.whisper == "whisper-large-v3-turbo" and cfg.llm_model == "llama-3.1-8b-instant"
+    assert cfg.whisper == "whisper-large-v3-turbo" and cfg.llm_model == "openai/gpt-oss-20b"
     assert cfg.tone == "work" and cfg.record_command is None
     assert cfg.socket_path == tmp_path / "run" / "wordink" / "dictd.sock"
     assert cfg.state_path.name == "state" and cfg.last_path.name == "last.txt"

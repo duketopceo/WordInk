@@ -152,6 +152,12 @@ if [ -f "$LUA_MAIN" ]; then
     if [ "$DRY" = 0 ]; then
       [ ! -s "$host" ] || [ -z "$(tail -c1 "$host")" ] || printf '\n' >>"$host"
       printf '%s\ndo local p = (os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") .. "/.config")) .. "/hypr/wordink-dictd.lua"; local f = io.open(p, "r"); if f then f:close(); dofile(p) end end\n%s\n' "$LUA_BEGIN" "$LUA_END" >>"$host"
+      sleep 1  # some setups (a config-sync guard) quietly restore the file; say so instead of leaving dead binds
+      if ! grep -qF -- "$LUA_BEGIN" "$host"; then
+        say "!! $host was reverted right after the edit (a sync guard restores it). The binds are NOT persistent."
+        say "   Load them for this session:  hyprctl eval 'dofile(os.getenv(\"HOME\") .. \"/.config/hypr/wordink-dictd.lua\")'"
+        say "   To keep them, add the same guarded dofile block to the file your guard restores from."
+      fi
     fi
   fi
 else
