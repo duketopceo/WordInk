@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from ..client import WordInkError
-from .binds import hyprland_bind_lines
+from .binds import hyprland_bind_lines, hyprland_lua_lines
 from .config import DictateConfig, load_config
 from .daemon import Daemon, build_pipeline, make_sink, send_command
 from . import meeting_cli
@@ -35,7 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     d = sub.add_parser("doctor", help="read-only checks of tools, mic, key, binds and the daemon")
     d.add_argument("--json", action="store_true")
-    sub.add_parser("binds", help="print the Hyprland bind lines for the configured keys")
+    b = sub.add_parser("binds", help="print the Hyprland bind lines for the configured keys")
+    b.add_argument("--format", choices=("conf", "lua"), default="conf", help="hyprland.conf lines (default) or Hyprland Lua config lines")
+    b.add_argument("--exe", default="wordink-dictd", help="command the binds run (use an absolute path for Lua configs)")
     v = sub.add_parser("vocab", help="manage the local vocabulary file")
     vs = v.add_subparsers(dest="vocab_cmd", required=True)
     vs.add_parser("list")
@@ -89,7 +91,8 @@ def main(argv: list[str] | None = None) -> int:
             print(to_json(checks) if args.json else render(checks))
             return exit_code(checks)
         if args.cmd == "binds":
-            print("\n".join(hyprland_bind_lines(cfg.hold_bind, cfg.toggle_bind)))
+            make = hyprland_lua_lines if args.format == "lua" else hyprland_bind_lines
+            print("\n".join(make(cfg.hold_bind, cfg.toggle_bind, args.exe)))
             return 0
         if args.cmd == "meeting":
             return meeting_cli.handle(args)

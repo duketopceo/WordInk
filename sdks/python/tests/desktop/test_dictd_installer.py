@@ -35,7 +35,7 @@ exit 0''',
     "wtype": "exit 0",
     "wordink-dictd": r'''
 case "$1" in
-  binds) printf '%s\n' "bind = SUPER ALT, D, exec, wordink-dictd trigger start" "bindr = SUPER ALT, D, exec, wordink-dictd trigger stop" "bind = SUPER ALT, S, exec, wordink-dictd trigger toggle" ;;
+  binds) if [ "$2" = "--format" ] && [ "$3" = "lua" ]; then printf '%s\n' 'o.bind("SUPER + ALT + D", "WordInk dictation (hold)", { launch = "x trigger start" })'; else printf '%s\n' "bind = SUPER ALT, D, exec, wordink-dictd trigger start" "bindr = SUPER ALT, D, exec, wordink-dictd trigger stop" "bind = SUPER ALT, S, exec, wordink-dictd trigger toggle"; fi ;;
   doctor) if [ "$2" = "--json" ]; then cat "$FAKE/doctor.json"; else echo "doctor ok"; fi ;;
 esac''',
 }
@@ -235,3 +235,46 @@ def test_unknown_option_is_rejected(env):
 def test_script_is_executable_and_has_a_shebang():
     assert os.access(SCRIPT, os.X_OK)
     assert SCRIPT.read_text().startswith("#!/usr/bin/env bash\n")
+
+
+LUA_BEGIN = "-- >>> wordink-dictd (managed by examples/omarchy-dictation/install.sh) >>>"
+
+
+def _lua_env(env: Env) -> tuple[Path, Path]:
+    hypr = env.home / ".config" / "hypr"
+    (hypr / "hyprland.lua").write_text('require("hypr.bindings")\n')
+    bindings = hypr / "bindings.lua"
+    bindings.write_text('o.bind("SUPER + D", "Wisp", { launch = "wisp" })')  # no trailing newline, as people leave it
+    return hypr / "wordink-dictd.lua", bindings
+
+
+def test_a_hyprland_lua_config_gets_lua_binds_and_hyprland_conf_is_left_alone(env):
+    lua, bindings = _lua_env(env)
+    conf_before = env.path(".config/hypr/hyprland.conf").read_text()
+    r = env.run()
+    assert r.returncode == 0, r.stderr + r.stdout
+    assert 'o.bind("SUPER + ALT + D"' in lua.read_text()
+    text = bindings.read_text()
+    assert text.startswith('o.bind("SUPER + D", "Wisp", { launch = "wisp" })\n')
+    assert text.count(LUA_BEGIN) == 1 and "dofile(p)" in text and "/hypr/wordink-dictd.lua" in text
+    assert env.path(".config/hypr/hyprland.conf").read_text() == conf_before
+    assert not env.path(".config/hypr/wordink-dictd.conf").exists()
+
+
+def test_lua_install_is_idempotent_and_uninstall_restores_the_files(env):
+    lua, bindings = _lua_env(env)
+    env.run()
+    once = env.snapshot()
+    env.run()
+    assert env.snapshot() == once
+    r = env.run("--uninstall")
+    assert r.returncode == 0, r.stderr + r.stdout
+    assert not lua.exists()
+    assert bindings.read_text().strip() == 'o.bind("SUPER + D", "Wisp", { launch = "wisp" })'
+
+
+def test_lua_mode_falls_back_to_hyprland_lua_when_there_is_no_bindings_file(env):
+    lua, bindings = _lua_env(env)
+    bindings.unlink()
+    env.run()
+    assert LUA_BEGIN in (env.home / ".config" / "hypr" / "hyprland.lua").read_text()

@@ -45,6 +45,11 @@ def _bind_signature(bind: str) -> tuple[int, str]:
     return sum(_MOD_BITS[m] for m in parts[:-1]), parts[-1]
 
 
+def _is_ours(bind: dict) -> bool:
+    """A conf bind names the command in `arg`; a Lua bind only shows `__lua N`, so go by its description."""
+    return "wordink-dictd" in str(bind.get("arg", "")) or "wordink dictation" in str(bind.get("description", "")).lower()
+
+
 def run_checks(
     cfg: DictateConfig,
     env: Mapping[str, str] | None = None,
@@ -100,11 +105,11 @@ def run_checks(
         if not isinstance(binds, list):
             add("hyprland binds", "warn", "could not read `hyprctl binds -j`", "run inside the Hyprland session")
         else:
-            ours = [b for b in binds if isinstance(b, dict) and "wordink-dictd" in str(b.get("arg", ""))]
+            ours = [b for b in binds if isinstance(b, dict) and _is_ours(b)]
             for label, bind in (("hold", cfg.hold_bind), ("toggle", cfg.toggle_bind)):
                 mask, key = _bind_signature(bind)
                 same = [b for b in binds if isinstance(b, dict) and b.get("modmask") == mask and str(b.get("key", "")).upper() == key]
-                foreign = [b for b in same if "wordink-dictd" not in str(b.get("arg", ""))]
+                foreign = [b for b in same if not _is_ours(b)]
                 if foreign:
                     what = f"{foreign[0].get('dispatcher')} {foreign[0].get('arg')}".strip()
                     add(f"{label} bind", "fail", f"{bind} is already bound to: {what}", "choose another key in dictate.toml [hotkey] and re-run `wordink-dictd binds`")
