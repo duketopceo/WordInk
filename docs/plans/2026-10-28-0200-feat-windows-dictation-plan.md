@@ -182,7 +182,7 @@ flowchart LR
 
 ### W5. Text insertion
 
-- **Status:** W5a (insertion policy, `win/insert.py`, against an `InsertApi` protocol and a fake) built; the real ctypes layer is W5b with `win32.py`.
+- **Status:** W5a (insertion policy, `win/insert.py`) and W5b (`win/win32.py`, the real ctypes layer: SendInput, clipboard with history/cloud exclusion, process name and elevation) built; the layout is verified on the Windows CI job (W9) and the Notepad smoke test is W10.
 
 - **Goal:** Put text into the focused window safely.
 - **Requirements:** R5, R6.
