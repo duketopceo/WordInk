@@ -1,0 +1,10 @@
+// Add "custom/wordink" to modules-right in ~/.config/waybar/config.jsonc, and merge this block into it.
+{
+  "custom/wordink": {
+    "exec": "wordink-dictd waybar --follow",
+    "return-type": "json",
+    "format": "{}",
+    "tooltip": true,
+    "on-click": "wordink-dictd trigger toggle"
+  }
+}
