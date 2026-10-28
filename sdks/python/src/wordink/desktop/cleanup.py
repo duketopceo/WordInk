@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 from dataclasses import dataclass
 
 import httpx
 
 from ..flow import FlowTone, apply_flow_cleanup
+from . import costs
 from .transcribe import GROQ_BASE
 from .vocab import apply_vocabulary
+
+log = logging.getLogger("wordink.cleanup")
 
 DEFAULT_LLM_MODEL = "llama-3.1-8b-instant"
 MIN_WORDS_FOR_LLM = 4
@@ -98,6 +103,7 @@ def clean_transcript(
         return CleanupResult(fallback, False, "short")
     if not cfg.api_key:
         return CleanupResult(fallback, False, "no_key")
+    started = time.monotonic()
     try:
         with httpx.Client(transport=transport, timeout=cfg.timeout) as http:
             resp = http.post(
@@ -117,12 +123,21 @@ def clean_transcript(
         return CleanupResult(fallback, False, "timeout")
     except httpx.HTTPError:
         return CleanupResult(fallback, False, "http_error")
+    latency_ms = (time.monotonic() - started) * 1000
     if resp.status_code != 200:
+        costs.record("cleanup", cfg.model, latency_ms=latency_ms, ok=False, status=resp.status_code)
         return CleanupResult(fallback, False, "http_error")
     try:
-        content = resp.json()["choices"][0]["message"]["content"]
+        body = resp.json()
+        content = body["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError):
+        costs.record("cleanup", cfg.model, latency_ms=latency_ms, ok=False, status=200)
         return CleanupResult(fallback, False, "bad_response")
+    usage = body.get("usage") if isinstance(body, dict) else None
+    usage = usage if isinstance(usage, dict) else {}
+    costs.record("cleanup", cfg.model, latency_ms=latency_ms, status=200,
+                 prompt_tokens=int(usage.get("prompt_tokens") or 0), completion_tokens=int(usage.get("completion_tokens") or 0))
+    log.debug("cleanup %s: %r -> %r", cfg.model, raw, content)
     if not isinstance(content, str):
         return CleanupResult(fallback, False, "bad_response")
     cleaned, problem = _validate(raw, content)

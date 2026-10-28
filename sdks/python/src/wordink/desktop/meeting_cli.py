@@ -12,6 +12,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import costs
 from .meeting import (
     EXPORT_FORMATS, SOURCES, Meeting, MeetingError, MeetingRunner, MeetingStore, _clock, capture_commands,
     default_meetings_dir, export,
@@ -79,6 +80,7 @@ def _summary(m: Meeting) -> dict:
 
 async def _run(store: MeetingStore, meeting_id: str, chunk_seconds: float) -> int:
     meeting = store.get(meeting_id)
+    costs.session_var.set(meeting.id)  # every call from here on is billed to this meeting
     cfg = resolve_transcribe_config()
     vocab = read_terms(default_vocab_path())
     failed = default_failed_dir()

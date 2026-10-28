@@ -70,3 +70,27 @@ wordink-dictd meeting list | show | delete
 ```
 
 Meetings are stored in `~/.local/share/wordink/meetings/<id>/meeting.json` (0600). Audio is not kept. Audio is cut into 30 s chunks; silent chunks are skipped, the rest go to Groq Whisper. With speakers (not headphones) the mic hears the call too, so wear headphones for clean `You` / `Remote` separation.
+
+## Costs and debug logs
+
+Every Groq call (transcription and LLM cleanup, dictation and meetings) appends one JSON line to `~/.local/state/wordink/usage.jsonl` (0600): model, audio seconds, billed seconds (Groq bills at least 10 s per request), token counts, latency and estimated USD. It never holds a key or any transcript text.
+
+```sh
+wordink-dictd costs                      # last 7 days, per day and per session (a meeting id, or "dictation")
+wordink-dictd costs --days 1 --json
+wordink-dictd costs --session latest-meeting-id
+wordink-dictd --debug run                # or WORDINK_DEBUG=1; verbose logs, and only then transcript text, on stderr
+```
+
+Prices are Groq's published rates as of 2026-10-28 (see `pricing.toml` here to override them). Estimates, not an invoice. Calls through a gateway alias are counted as unpriced.
+
+Rough cost of one hour of meeting audio, 30 s chunks, silence skipped:
+
+| Capture | whisper-large-v3-turbo | whisper-large-v3 |
+|---|---|---|
+| Mic only, speech the whole hour | $0.040 | $0.111 |
+| Mic and loopback, both talking all hour (worst case) | $0.080 | $0.222 |
+| Source diarization (You / Remote) | $0 | $0 |
+| LLM cleanup of the whole transcript (about 12k tokens each way, llama-3.1-8b-instant) | about $0.002 | about $0.002 |
+
+A short dictation is billed as 10 s, so a 3 s utterance costs about $0.00011 on turbo.

@@ -14,7 +14,7 @@ from ..client import WordInkError
 from .binds import hyprland_bind_lines
 from .config import DictateConfig, load_config
 from .daemon import Daemon, build_pipeline, make_sink, send_command
-from . import meeting_cli
+from . import costs, meeting_cli
 from .doctor import exit_code, render, run_checks, to_json
 from .notify import notify
 from .vocab import add_terms, read_terms, remove_term
@@ -24,10 +24,15 @@ from .waybar import follow, snapshot
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="wordink-dictd", description="WordInk push-to-talk dictation daemon")
     p.add_argument("--config", type=Path, help="path to dictate.toml (default ~/.config/wordink/dictate.toml)")
+    p.add_argument("--debug", action="store_true", help="verbose logs, including transcript text (also WORDINK_DEBUG=1)")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("run", help="run the daemon in the foreground (the systemd unit does this)")
     t = sub.add_parser("trigger", help="tell the daemon to start, stop or toggle recording (what the Hyprland bind runs)")
     t.add_argument("action", choices=("start", "stop", "toggle"))
+    c = sub.add_parser("costs", help="usage and estimated Groq cost from the local log, per day and per session")
+    c.add_argument("--days", type=int, default=7, help="how many days back (default 7)")
+    c.add_argument("--session", help="only one session: a meeting id, or 'dictation'")
+    c.add_argument("--json", action="store_true")
     sub.add_parser("status", help="print the daemon's state as JSON")
     sub.add_parser("last", help="print the last cleaned transcript")
     sub.add_parser("waybar", help="print the waybar module JSON (use --follow as the module's exec)").add_argument(
@@ -62,7 +67,11 @@ async def _run(cfg: DictateConfig) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", stream=sys.stderr)
+    debug = args.debug or costs.debug_enabled()
+    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+    logging.getLogger().setLevel(logging.DEBUG if debug else logging.INFO)  # basicConfig is a no-op if a handler exists
+    for noisy in ("httpx", "httpcore", "hpack"):  # their debug lines can carry request headers
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     try:
         cfg = load_config(args.config)
         if args.cmd == "run":
@@ -90,6 +99,10 @@ def main(argv: list[str] | None = None) -> int:
             return exit_code(checks)
         if args.cmd == "binds":
             print("\n".join(hyprland_bind_lines(cfg.hold_bind, cfg.toggle_bind)))
+            return 0
+        if args.cmd == "costs":
+            summary = costs.summarize(costs.read_entries(), days=args.days, session=args.session)
+            print(json.dumps(summary, indent=2) if args.json else costs.render(summary))
             return 0
         if args.cmd == "meeting":
             return meeting_cli.handle(args)
