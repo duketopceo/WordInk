@@ -94,3 +94,6 @@ Rough cost of one hour of meeting audio, 30 s chunks, silence skipped:
 | LLM cleanup of the whole transcript (about 12k tokens each way, llama-3.1-8b-instant) | about $0.002 | about $0.002 |
 
 A short dictation is billed as 10 s, so a 3 s utterance costs about $0.00011 on turbo.
+## Hyprland Lua configs
+
+Hyprland 0.55 and later can run a Lua config (Omarchy's `~/.config/hypr/hyprland.lua`). When that file exists, `hyprland.conf` is not read, so `install.sh` writes `~/.config/hypr/wordink-dictd.lua` (Omarchy `o.bind` lines with an absolute path to `wordink-dictd`, since the compositor's PATH usually lacks `~/.local/bin`) and appends a guarded `dofile` block to `bindings.lua` (or `hyprland.lua` if there is no `bindings.lua`). `--uninstall` removes both. Print the lines yourself with `wordink-dictd binds --format lua --exe ~/.local/bin/wordink-dictd`.

@@ -278,3 +278,18 @@ def test_cli_doctor_and_waybar_commands(tmp_path, monkeypatch, capsys):
     assert main(["doctor", "--json"]) == 1
     names = {c["name"]: c["status"] for c in json.loads(capsys.readouterr().out)}
     assert names["credentials"] == "fail" and names["microphone tool"] == "fail"
+
+
+def test_doctor_recognises_lua_binds_by_description(tmp_path, monkeypatch):
+    """`hyprctl binds -j` shows a Lua bind's command as `__lua N`; the description is what identifies ours."""
+    binds = [
+        {"modmask": SUPER_ALT, "key": "D", "dispatcher": "__lua", "arg": "303", "description": "WordInk dictation (hold)"},
+        {"modmask": SUPER_ALT, "key": "S", "dispatcher": "__lua", "arg": "304", "description": "WordInk dictation (toggle)"},
+    ]
+    bin_dir, cfg = _doctor_rig(tmp_path, monkeypatch, binds)
+    checks = _by_name(run_checks(cfg, GOOD_ENV, path=str(bin_dir)))
+    assert checks["hold bind"].status == "ok" and checks["toggle bind"].status == "ok"
+    other = [{"modmask": SUPER_ALT, "key": "D", "dispatcher": "__lua", "arg": "9", "description": "Something else"}]
+    (tmp_path / "two").mkdir()
+    bin_dir, cfg = _doctor_rig(tmp_path / "two", monkeypatch, other)
+    assert _by_name(run_checks(cfg, GOOD_ENV, path=str(bin_dir)))["hold bind"].status == "fail"
