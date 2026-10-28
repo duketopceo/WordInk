@@ -158,6 +158,8 @@ flowchart LR
 
 ### W3. Windows microphone source
 
+- **Status:** built (`win/audio.py`, `SoundDeviceSource`, tested against a fake `sounddevice`); the real-device smoke test is left for W10.
+
 - **Goal:** Capture from the default input device as s16 mono 16 kHz.
 - **Requirements:** R3.
 - **Dependencies:** W1.
