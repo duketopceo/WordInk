@@ -14,6 +14,7 @@ from ..client import WordInkError
 from .binds import hyprland_bind_lines
 from .config import DictateConfig, load_config
 from .daemon import Daemon, build_pipeline, make_sink, send_command
+from . import meeting_cli
 from .doctor import exit_code, render, run_checks, to_json
 from .notify import notify
 from .vocab import add_terms, read_terms, remove_term
@@ -42,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     va.add_argument("terms", nargs="+")
     vr = vs.add_parser("remove")
     vr.add_argument("term")
+    meeting_cli.add_parser(sub)
     return p
 
 
@@ -89,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "binds":
             print("\n".join(hyprland_bind_lines(cfg.hold_bind, cfg.toggle_bind)))
             return 0
+        if args.cmd == "meeting":
+            return meeting_cli.handle(args)
         if args.cmd == "vocab":
             if args.vocab_cmd == "list":
                 print("\n".join(read_terms(cfg.vocab_path)))
