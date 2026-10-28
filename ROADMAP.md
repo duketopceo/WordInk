@@ -2,16 +2,16 @@
 
 **Program plan (start here):** [`docs/plans/2026-10-10-001-docs-wordink-program-plan.md`](docs/plans/2026-10-10-001-docs-wordink-program-plan.md) — Now / Next / Later units with status, difficulty, feasibility and simpler alternatives, the Phase 2 desktop options (owner decision), and the `WF-WRITE` workflow-permission review. Research: [`docs/research/2026-10-10-landscape.md`](docs/research/2026-10-10-landscape.md). Design: [`DESIGN.md`](DESIGN.md).
 
-**Now:** U1 green `master` CI (e2e demo test failing), U2 npm go-live (operator), U3 reconcile issues and docs, U4 Argus reviewer PR (owner decision). **Next:** U5 live OpenAI/Deepgram checks, U6 browser handcheck, U7 Python SDK CI, U8 retire `legacy/`, U9 desktop direction (owner decision). **Later:** U10 cleanup presets, U11 stronger local engine, U12 mobile (iOS remote mic in progress — see Phase 4), U13 standalone desktop.
+**Now:** U1 green `master` CI (e2e demo test failing), U2 npm go-live (operator), U3 reconcile issues and docs, U4 Argus reviewer PR (owner decision). **Next:** U5 live OpenAI/Deepgram checks, U6 browser handcheck, U7 Python SDK CI, U8 retire `legacy/` (held until U13 ships), U13 standalone desktop — U9 decided Oct 24, 2026: first-party standalone apps on Linux, Windows, macOS and iOS. **Later:** U10 cleanup presets, U11 stronger local engine, U12 mobile beyond iOS.
 
-**Phase 2 note:** this file records Option A (integrate) as decided and shipped. The program plan lists the remaining desktop options with difficulty and feasibility and leaves any further choice to the owner.
+**Phase 2 note:** Option A (integrate) was decided and shipped — the gateway, `/v1/models`, Voxtype and TypeWhisper recipes stay supported as an optional deployment mode. On Oct 24, 2026 the owner revisited U9 and chose standalone first-party apps as the product direction; integration is no longer the only path.
 
 **`WF-WRITE`:** `release.yml` (`version` and `publish` jobs) and `docs.yml` (`deploy`) request write scopes they need. The only optional write scope is `contents: write` in `argus-mention.yml`, which is in open PR #35, not on `master`. Details in the program plan.
 
-**WordInk is dictation as a component.** It's one open-source, provider-agnostic core that turns speech into finished text. It ships as a drop-in SDK for any app, and it reaches the desktop by integrating with the dictation apps people already use (Phase 2).
+**WordInk is dictation as a component.** It's one open-source, provider-agnostic core that turns speech into finished text. It ships as a drop-in SDK for any app, and it reaches users through first-party standalone apps on Linux, Windows, macOS and iOS (Phase 3/4) that work on default open-source config — plus a self-hostable gateway for anyone who wants to integrate their own dictation app or device (Phase 2).
 
 - **Open source (MIT), bring your own key.** Use Groq, OpenAI or Deepgram with your own key, or a local model. No WordInk account, no WordInk servers.
-- **SDK first.** The SDK is the product. The desktop dictation apps people already use are its flagship consumers.
+- **SDK first.** The SDK is the product. The first-party apps are its flagship consumers, alongside third-party dictation apps pointed at a self-hosted gateway.
 - **Wayland is first-class.** The desktop app treats Linux/Hyprland as a primary platform, not an afterthought.
 
 Detailed plans: [`docs/plans/2026-10-04-1757-feat-wordink-web-sdk-plan.md`](docs/plans/2026-10-04-1757-feat-wordink-web-sdk-plan.md) (Phase 1), [`docs/plans/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md`](docs/plans/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md) (Phase 2 gateway), [`docs/plans/2026-10-06-1603-feat-phase-1-closeout-plan.md`](docs/plans/2026-10-06-1603-feat-phase-1-closeout-plan.md) (closeout).
@@ -22,9 +22,9 @@ Detailed plans: [`docs/plans/2026-10-04-1757-feat-wordink-web-sdk-plan.md`](docs
 |---|---|---|
 | **0. Foundation** | Repo cleanup: archive the legacy Python app under `legacy/`, monorepo tooling, CI, positioning | Done (PRs #16–#17) |
 | **1. Core + Web SDK** | `@wordink/core` (provider-agnostic engine), `<wordink-mic>` web component, `useDictation` React hook, Groq/OpenAI/Deepgram + local engine, reference credential server, docs site with live demo | Done — merged to master; docs live on Pages; npm publish gated on org setup |
-| **2. Desktop** | Integrate with existing apps: `wordink-gateway`, an OpenAI-compatible transcription endpoint with provider fallback and per-device tokens. Voxtype on Linux verified; TypeWhisper via its bundled OpenAI-compatible engine + `GET /v1/models` | Done — gateway + docs + `/v1/models` shipped |
-| **3. WordInk Desktop: Windows + macOS** | Was contingent on Phase 2 picking a standalone app | Dropped — Phase 2 chose integration |
-| **4. More SDKs** | Python tooling for agents and CLIs: `wordink` CLI + `wordink-mcp` MCP server over the gateway (`sdks/python`); then mobile — first an iOS remote-mic companion (`apps/ios/`, native Swift, BYO gateway) per `docs/plans/2026-10-13-1640-feat-ios-remote-mic-plan.md` | Built; iOS companion in progress |
+| **2. Desktop integration** | `wordink-gateway`, an OpenAI-compatible transcription endpoint with provider fallback and per-device tokens. Voxtype on Linux verified; TypeWhisper via its bundled OpenAI-compatible engine + `GET /v1/models` | Done — gateway + docs + `/v1/models` shipped; supported as an optional deployment mode |
+| **3. Standalone desktop: Linux + Windows + macOS** | First-party dictation app hosting the Rust core: global shortcut (portal/compositor binds, platform hotkey APIs), text injection with clipboard fallback, tray, local-engine default so it works on open-source config with zero self-hosting. Replaces `legacy/` and is the Windows successor to it. Tracked in issue #14; Linux per closed issue #13 | Reopened — U9 decided Oct 24, 2026; needs its own plan |
+| **4. More SDKs + mobile** | Python tooling for agents and CLIs: `wordink` CLI + `wordink-mcp` MCP server over the gateway (`sdks/python`); mobile — iOS app (`apps/ios/`, native Swift) that must work standalone on default config: usable out of the box with a provider key, no self-hosted gateway required; pairing with a personal gateway stays an option per `docs/plans/2026-10-13-1640-feat-ios-remote-mic-plan.md` | Built; iOS app in progress |
 
 ### Phase 2 decision (Oct 2026)
 
@@ -41,7 +41,9 @@ A standalone WordInk Desktop would be a fourth app chasing two good, free, open-
 | **B. Standalone Linux app** | The original Phase 2: a native host for the Rust core with portal shortcuts and virtual-keyboard injection. | Full control, but it competes head-on with Voxtype on its home turf. |
 | **C. Skip desktop** | Put everything into the SDK: Python bindings, mobile, more providers, the live-API hardening below. | Tightest focus. It drops the desktop story entirely. |
 
-**Decided: Option A.** The gateway shipped on `feat/p2-gateway` (PR #27), and Voxtype on omarchy-max already dictates through it with provider fallback. Phase 1 closeout is in flight under [`docs/plans/2026-10-06-1603-feat-phase-1-closeout-plan.md`](docs/plans/2026-10-06-1603-feat-phase-1-closeout-plan.md): the stacked PR chain, npm publish with trusted publishing, GitHub Pages, and the PR #26 residuals. Still deferred (no provider keys on this machine): live-API checks for OpenAI (GA session shape, `gpt-live-transcribe`, `ek_` auth) and Deepgram (`token` vs `bearer`), plus the manual cross-browser blur/permission handcheck.
+**Decided: Option A** — then **revisited and superseded on Oct 24, 2026 (U9).** The owner chose standalone first-party apps on all four OSes — Linux, Windows, macOS and iOS (options B + B′ extended to mobile) — working on default open-source configuration: BYO provider key or the bundled local engine, no required self-hosted gateway, no third-party dictation app. The gateway and client integrations stay shipped and supported as an optional deployment mode.
+
+Original Option A record: the gateway shipped on `feat/p2-gateway` (PR #27), and Voxtype on omarchy-max already dictates through it with provider fallback. Phase 1 closeout is in flight under [`docs/plans/2026-10-06-1603-feat-phase-1-closeout-plan.md`](docs/plans/2026-10-06-1603-feat-phase-1-closeout-plan.md): the stacked PR chain, npm publish with trusted publishing, GitHub Pages, and the PR #26 residuals. Still deferred (no provider keys on this machine): live-API checks for OpenAI (GA session shape, `gpt-live-transcribe`, `ek_` auth) and Deepgram (`token` vs `bearer`), plus the manual cross-browser blur/permission handcheck.
 
 ### Phase 1 milestones (Core + Web SDK)
 
@@ -93,5 +95,5 @@ Pricing comes mostly from aggregator sites. Treat it as approximate.
 ### Where WordInk fits
 
 - **No open, vendor-neutral drop-in dictation component exists.** That's Phase 1.
-- **Cross-platform apps with good Wayland support are rare.** Linux-first tools are Linux-only, and cross-platform tools have weak Wayland support. That's why Phase 2 integrates with them instead of building another app.
-- **The open-source desktop field is crowded** (Handy, OpenWhispr, Voxtype), so WordInk reaches the desktop through those apps rather than competing with them — the gateway centralizes provider keys, fallback and vocabulary for any OpenAI-compatible client.
+- **Cross-platform apps with good Wayland support are rare.** Linux-first tools are Linux-only, and cross-platform tools have weak Wayland support — the gap the standalone apps fill on all four OSes.
+- **The open-source desktop field is crowded** (Handy, OpenWhispr, Voxtype) — that was the original argument for integrating instead of competing. The Oct 24, 2026 U9 decision reversed it: none of those apps is a single codebase covering all four OSes on open-source defaults, so WordInk ships its own standalone apps and keeps the gateway as the integration surface for third-party clients.
