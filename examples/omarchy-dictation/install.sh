@@ -36,8 +36,26 @@ ENV_FILE="$CFG/wordink/dictd.env"
 ROLLBACK="$BIN/wordink-use-voxtype"
 MARK_BEGIN="# >>> wordink-dictd (managed by examples/omarchy-dictation/install.sh) >>>"
 MARK_END="# <<< wordink-dictd <<<"
+# Hyprland 0.55+ can run a Lua config (Omarchy's hyprland.lua). When it does, hyprland.conf is
+# not read at all, so the binds go through Omarchy's `o.bind` instead.
+LUA_MAIN="$CFG/hypr/hyprland.lua"
+LUA_BINDS="$CFG/hypr/wordink-dictd.lua"
+LUA_BEGIN="-- >>> wordink-dictd (managed by examples/omarchy-dictation/install.sh) >>>"
+LUA_END="-- <<< wordink-dictd <<<"
 PY_SRC="git+https://github.com/duketopceo/WordInk#subdirectory=sdks/python"
 [ -f "$REPO/sdks/python/pyproject.toml" ] && PY_SRC="$REPO/sdks/python"
+
+strip_block() { # strip_block <file> <begin> <end>: drop the managed block, keep everything else
+  local file="$1" tmp
+  [ -f "$file" ] && grep -qF -- "$2" "$file" || return 0
+  act "remove the managed block from $file"
+  if [ "$DRY" = 0 ]; then
+    tmp="$(mktemp)"
+    awk -v b="$2" -v e="$3" '$0==b{skip=1} !skip{print} $0==e{skip=0}' "$file" >"$tmp"
+    cat "$tmp" >"$file"; rm -f "$tmp"
+  fi
+}
+lua_host() { if [ -f "$CFG/hypr/bindings.lua" ]; then say "$CFG/hypr/bindings.lua"; else say "$LUA_MAIN"; fi; }
 
 say() { printf '%s\n' "$*"; }
 act() { if [ "$DRY" = 1 ]; then say "[dry-run] $*"; else say "+ $*"; fi; }
@@ -66,17 +84,11 @@ if [ "$UNINSTALL" = 1 ]; then
   if [ "$DRY" = 1 ]; then act "systemctl --user disable --now $UNIT"
   elif user_ctl disable --now "$UNIT" 2>/dev/null; then say "+ disabled $UNIT"
   else say "= $UNIT was not enabled"; fi
-  for f in "$UNIT_DIR/$UNIT" "$BINDS_CONF" "$ROLLBACK"; do
+  for f in "$UNIT_DIR/$UNIT" "$BINDS_CONF" "$LUA_BINDS" "$ROLLBACK"; do
     if [ -e "$f" ]; then run rm -f "$f"; else say "= $f (absent)"; fi
   done
-  if [ -f "$HYPR_CONF" ] && grep -qF "$MARK_BEGIN" "$HYPR_CONF"; then
-    act "remove the managed block from $HYPR_CONF"
-    if [ "$DRY" = 0 ]; then
-      tmp="$(mktemp)"
-      awk -v b="$MARK_BEGIN" -v e="$MARK_END" '$0==b{skip=1} !skip{print} $0==e{skip=0}' "$HYPR_CONF" >"$tmp"
-      cat "$tmp" >"$HYPR_CONF"; rm -f "$tmp"
-    fi
-  fi
+  strip_block "$HYPR_CONF" "$MARK_BEGIN" "$MARK_END"
+  for f in "$CFG/hypr/bindings.lua" "$LUA_MAIN"; do strip_block "$f" "$LUA_BEGIN" "$LUA_END"; done
   [ "$DRY" = 1 ] || user_ctl daemon-reload 2>/dev/null || true
   if have uv; then run uv tool uninstall wordink || true; fi
   have hyprctl && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && run hyprctl reload || true
@@ -129,15 +141,30 @@ for c in checks:
     exit 1
   fi
 fi
-if [ "$DRY" = 1 ]; then act "write $BINDS_CONF (from: wordink-dictd binds)"
-else wordink-dictd binds | write_file "$BINDS_CONF" 644; fi
-if [ -f "$HYPR_CONF" ] && grep -qF "$MARK_BEGIN" "$HYPR_CONF"; then say "= $HYPR_CONF (already sources the binds)"
+if [ -f "$LUA_MAIN" ]; then
+  say "   (Hyprland Lua config found at $LUA_MAIN)"
+  host="$(lua_host)"
+  if [ "$DRY" = 1 ]; then act "write $LUA_BINDS (from: wordink-dictd binds --format lua)"
+  else wordink-dictd binds --format lua --exe "$BIN/wordink-dictd" | write_file "$LUA_BINDS" 644; fi
+  if [ -f "$host" ] && grep -qF -- "$LUA_BEGIN" "$host"; then say "= $host (already loads the binds)"
+  else
+    act "append a guarded dofile of $LUA_BINDS to $host"
+    if [ "$DRY" = 0 ]; then
+      [ ! -s "$host" ] || [ -z "$(tail -c1 "$host")" ] || printf '\n' >>"$host"
+      printf '%s\ndo local p = (os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") .. "/.config")) .. "/hypr/wordink-dictd.lua"; local f = io.open(p, "r"); if f then f:close(); dofile(p) end end\n%s\n' "$LUA_BEGIN" "$LUA_END" >>"$host"
+    fi
+  fi
 else
-  act "append a source line for $BINDS_CONF to $HYPR_CONF"
-  if [ "$DRY" = 0 ]; then
-    mkdir -p "$(dirname "$HYPR_CONF")"
-    [ ! -s "$HYPR_CONF" ] || [ -z "$(tail -c1 "$HYPR_CONF")" ] || printf '\n' >>"$HYPR_CONF"
-    printf '%s\nsource = %s\n%s\n' "$MARK_BEGIN" "$BINDS_CONF" "$MARK_END" >>"$HYPR_CONF"
+  if [ "$DRY" = 1 ]; then act "write $BINDS_CONF (from: wordink-dictd binds)"
+  else wordink-dictd binds | write_file "$BINDS_CONF" 644; fi
+  if [ -f "$HYPR_CONF" ] && grep -qF "$MARK_BEGIN" "$HYPR_CONF"; then say "= $HYPR_CONF (already sources the binds)"
+  else
+    act "append a source line for $BINDS_CONF to $HYPR_CONF"
+    if [ "$DRY" = 0 ]; then
+      mkdir -p "$(dirname "$HYPR_CONF")"
+      [ ! -s "$HYPR_CONF" ] || [ -z "$(tail -c1 "$HYPR_CONF")" ] || printf '\n' >>"$HYPR_CONF"
+      printf '%s\nsource = %s\n%s\n' "$MARK_BEGIN" "$BINDS_CONF" "$MARK_END" >>"$HYPR_CONF"
+    fi
   fi
 fi
 have hyprctl && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && run hyprctl reload || true

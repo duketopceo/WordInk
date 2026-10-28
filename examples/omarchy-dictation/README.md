@@ -70,3 +70,7 @@ wordink-dictd meeting list | show | delete
 ```
 
 Meetings are stored in `~/.local/share/wordink/meetings/<id>/meeting.json` (0600). Audio is not kept. Audio is cut into 30 s chunks; silent chunks are skipped, the rest go to Groq Whisper. With speakers (not headphones) the mic hears the call too, so wear headphones for clean `You` / `Remote` separation.
+
+## Hyprland Lua configs
+
+Hyprland 0.55 and later can run a Lua config (Omarchy's `~/.config/hypr/hyprland.lua`). When that file exists, `hyprland.conf` is not read, so `install.sh` writes `~/.config/hypr/wordink-dictd.lua` (Omarchy `o.bind` lines with an absolute path to `wordink-dictd`, since the compositor's PATH usually lacks `~/.local/bin`) and appends a guarded `dofile` block to `bindings.lua` (or `hyprland.lua` if there is no `bindings.lua`). `--uninstall` removes both. Print the lines yourself with `wordink-dictd binds --format lua --exe ~/.local/bin/wordink-dictd`.
