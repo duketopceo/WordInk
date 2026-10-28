@@ -20,12 +20,27 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.duketopceo.wordink.remote.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>wordink-remote</string>
+			</array>
+		</dict>
+	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>WordInk Remote records your voice and sends it to your own WordInk gateway for transcription.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>WordInk Remote connects to a WordInk gateway on your local network for transcription.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

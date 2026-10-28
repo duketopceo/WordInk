@@ -76,6 +76,23 @@ jobs:
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink
       - run: pnpm test:e2e
+  # wordink-gateway verify's offline pass proves the CLI's mechanics on each OS —
+  # the durable half of the per-OS verification lanes.
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @wordink/server build
+      - run: node packages/server/dist/bin/wordink-gateway.js verify
   legacy:
     runs-on: ubuntu-latest
     defaults:
