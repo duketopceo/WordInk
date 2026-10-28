@@ -13,7 +13,7 @@ from pathlib import Path
 from ..client import WordInkError
 from .binds import hyprland_bind_lines
 from .config import DictateConfig, load_config
-from .daemon import Daemon, LastTranscriptSink, build_pipeline, send_command
+from .daemon import Daemon, build_pipeline, make_sink, send_command
 from .vocab import add_terms, read_terms, remove_term
 
 
@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def _run(cfg: DictateConfig) -> int:
-    daemon = Daemon(cfg, build_pipeline(cfg), LastTranscriptSink(cfg.last_path))
+    daemon = Daemon(cfg, build_pipeline(cfg), make_sink(cfg))
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):  # before serve(): an early signal must still stop us cleanly

@@ -23,7 +23,9 @@ _SCHEMA: dict[str, set[str]] = {
     "transcribe": {"model", "language"},
     "cleanup": {"model", "tone", "timeout", "min_words"},
     "record": {"command", "min_seconds", "max_seconds", "tail_seconds"},
+    "insert": {"order", "terminals", "deny", "paste_delay", "notify"},
 }
+INSERT_TOOLS = ("wtype", "ydotool")
 
 
 @dataclass(frozen=True)
@@ -43,7 +45,7 @@ class DictateConfig:
     min_seconds: float = 0.3
     max_seconds: float = 60.0
     tail_seconds: float = 0.25
-    extras: Mapping[str, object] = field(default_factory=dict)
+    insert: Mapping[str, object] = field(default_factory=dict)
 
     @property
     def socket_path(self) -> Path:
@@ -88,6 +90,28 @@ def _string(section: str, key: str, value: object) -> str:
     return value.strip()
 
 
+def _insert_table(ins: dict) -> dict[str, object]:
+    out: dict[str, object] = {}
+    if "order" in ins:
+        order = ins["order"]
+        if not isinstance(order, list) or not order or any(t not in INSERT_TOOLS for t in order):
+            raise WordInkError(f"dictate.toml [insert] order must be a non-empty list drawn from {', '.join(INSERT_TOOLS)}")
+        out["order"] = list(order)
+    for key in ("terminals", "deny"):
+        if key in ins:
+            val = ins[key]
+            if not isinstance(val, list) or not all(isinstance(v, str) and v.strip() for v in val):
+                raise WordInkError(f"dictate.toml [insert] {key} must be a list of window class names")
+            out[key] = [v.strip() for v in val]
+    if "paste_delay" in ins:
+        out["paste_delay"] = _number("insert", "paste_delay", ins["paste_delay"], minimum=0.0)
+    if "notify" in ins:
+        if not isinstance(ins["notify"], bool):
+            raise WordInkError("dictate.toml [insert] notify must be true or false")
+        out["notify"] = ins["notify"]
+    return out
+
+
 def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) -> DictateConfig:
     """Defaults, overridden by the TOML file when present. Bad keys and values fail loudly."""
     from .binds import validate_binds  # local import: binds imports nothing from config
@@ -106,8 +130,10 @@ def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) 
         for key in body:
             if key not in _SCHEMA[section]:
                 raise WordInkError(f"dictate.toml [{section}]: unknown key {key!r}")
-    hk, tr, cl, rc = (data.get(s, {}) for s in ("hotkey", "transcribe", "cleanup", "record"))
+    hk, tr, cl, rc, ins = (data.get(s, {}) for s in ("hotkey", "transcribe", "cleanup", "record", "insert"))
     kw: dict[str, object] = {}
+    if ins:
+        kw["insert"] = _insert_table(ins)
     if "hold" in hk:
         kw["hold_bind"] = _string("hotkey", "hold", hk["hold"])
     if "toggle" in hk:
