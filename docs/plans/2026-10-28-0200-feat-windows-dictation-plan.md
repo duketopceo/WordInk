@@ -172,6 +172,8 @@ flowchart LR
 
 ### W4. Global hotkey hook
 
+- **Status:** W4a (pure `ChordTracker` state machine) built; W4b (hook thread, hook declarations in `win32.py`, watchdog, probe) next.
+
 - **Goal:** Hold-to-talk and toggle from anywhere, with the chord swallowed.
 - **Requirements:** R1, R2.
 - **Dependencies:** W1, W2.

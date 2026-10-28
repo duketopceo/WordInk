@@ -107,3 +107,88 @@ def parse_chords(hold: str, toggle: str) -> tuple[Chord, Chord]:
     if (h.modifiers, h.key) == (t.modifiers, t.key):
         raise WordInkError("the hold and toggle hotkeys must be different keys")
     return h, t
+
+
+# -- key-event state machine (W4a) ------------------------------------------------------------------
+
+# Low-level hooks report the left/right modifier codes.
+_MOD_BY_VK = {
+    0x10: "Shift", 0xA0: "Shift", 0xA1: "Shift",
+    0x11: "Ctrl", 0xA2: "Ctrl", 0xA3: "Ctrl",
+    0x12: "Alt", 0xA4: "Alt", 0xA5: "Alt",
+}  # fmt: skip
+
+HOLD_PRESS, HOLD_RELEASE, TOGGLE = "hold_press", "hold_release", "toggle"
+
+
+@dataclass(frozen=True)
+class KeyResult:
+    swallow: bool = False
+    events: tuple[str, ...] = ()
+
+
+_PASS = KeyResult()
+
+
+class ChordTracker:
+    """Turns raw key events into hold press/release and toggle events, and says which to swallow.
+
+    Pure: no OS calls and no clock, so the hook callback can feed it and test code can too.
+    Only the chord's main key is ever swallowed, never a modifier. Injected events (our own
+    typing) are ignored entirely so dictation cannot retrigger itself.
+    """
+
+    def __init__(self, hold: Chord, toggle: Chord) -> None:
+        self.hold, self.toggle = hold, toggle
+        self.reset()
+
+    def reset(self) -> None:
+        """Forget everything (after the hook was reinstalled, keys may have changed unseen)."""
+        self._down_mods: dict[int, str] = {}  # vk -> canonical name, so two Ctrl keys count once
+        self._hold_active = False
+        self._swallowed: set[int] = set()  # main keys whose key-down we ate; their key-up goes too
+
+    @property
+    def holding(self) -> bool:
+        return self._hold_active
+
+    def _mods(self) -> tuple[str, ...]:
+        return tuple(sorted(set(self._down_mods.values())))
+
+    def feed(self, vk: int, down: bool, injected: bool = False) -> KeyResult:
+        if injected:
+            return _PASS
+        mod = _MOD_BY_VK.get(vk)
+        if mod is not None:
+            return self._modifier(vk, mod, down)
+        return self._main(vk, down)
+
+    def _modifier(self, vk: int, mod: str, down: bool) -> KeyResult:
+        if down:
+            self._down_mods[vk] = mod
+            return _PASS
+        self._down_mods.pop(vk, None)
+        if self._hold_active and mod in self.hold.modifiers and mod not in self._down_mods.values():
+            self._hold_active = False
+            return KeyResult(False, (HOLD_RELEASE,))
+        return _PASS
+
+    def _main(self, vk: int, down: bool) -> KeyResult:
+        if not down:
+            ate = vk in self._swallowed
+            self._swallowed.discard(vk)
+            if self._hold_active and vk == self.hold.key:
+                self._hold_active = False
+                return KeyResult(True, (HOLD_RELEASE,))
+            return KeyResult(ate)
+        if vk in self._swallowed:  # auto-repeat of a key we already own
+            return KeyResult(True)
+        mods = self._mods()
+        if vk == self.hold.key and mods == self.hold.modifiers and not self._hold_active:
+            self._hold_active = True
+            self._swallowed.add(vk)
+            return KeyResult(True, (HOLD_PRESS,))
+        if vk == self.toggle.key and mods == self.toggle.modifiers:
+            self._swallowed.add(vk)
+            return KeyResult(True, (TOGGLE,))
+        return _PASS
