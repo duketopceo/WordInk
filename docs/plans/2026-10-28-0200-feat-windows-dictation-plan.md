@@ -172,7 +172,7 @@ flowchart LR
 
 ### W4. Global hotkey hook
 
-- **Status:** W4a (pure `ChordTracker` state machine) built; W4b (hook thread, hook declarations in `win32.py`, watchdog, probe) next.
+- **Status:** W4a (pure `ChordTracker`) and W4b (`win/hook.py`: hook thread, dispatcher, heartbeat watchdog with reinstall, `RegisterHotKey` clash probe, `HookUnavailable`) built against a fake `HookApi`; the real `WH_KEYBOARD_LL` binding in `win32.py` and the toggle-only fallback are W4c.
 
 - **Goal:** Hold-to-talk and toggle from anywhere, with the chord swallowed.
 - **Requirements:** R1, R2.
