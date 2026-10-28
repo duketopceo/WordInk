@@ -218,8 +218,10 @@ Describe 'install.ps1' {
             Mock Stop-ScheduledTask { }
             Mock Unregister-ScheduledTask { }
             Mock Invoke-Uv { }
+            Mock Stop-WordInkProcess { }
             Invoke-Uninstall -Paths $p
             Should -Invoke Unregister-ScheduledTask -Times 1
+            Should -Invoke Stop-WordInkProcess -Times 1
             Should -Invoke Invoke-Uv -Times 1 -ParameterFilter { $Arguments -contains 'uninstall' -and $Arguments -contains 'wordink' }
             Test-Path $p.Rollback | Should -BeFalse
             Test-Path $vocab | Should -BeTrue

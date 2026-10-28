@@ -3,8 +3,8 @@
 Hold a hotkey, speak, release: cleaned text appears in the focused window. Same Groq Whisper + LLM
 cleanup pipeline as the Linux daemon. Plan: `docs/plans/2026-10-28-0200-feat-windows-dictation-plan.md`.
 
-> Status: the installer is ready ahead of the app. It expects `wordink-dictd-tray` (plan W7), so do not
-> run it on a real machine until the plan's W7 is merged. Nothing here runs by itself.
+> Status: nothing here runs by itself and it has not been run on a real machine. The installer registers
+> `wordink-dictd-tray` (the app wiring from plan W7b); read the plan's W10 checks before the first real run.
 
 ## What `install.ps1` does
 

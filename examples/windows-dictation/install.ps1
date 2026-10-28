@@ -218,6 +218,13 @@ function Invoke-Install {
     Write-Step 'Next: run `wordink-dictd set-key` to store your Groq key in Windows Credential Manager, then `wordink-dictd doctor`.'
 }
 
+function Stop-WordInkProcess {
+    # The tray app, whether launched by the task or by hand (exe launcher or pythonw -m).
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -eq 'wordink-dictd-tray.exe' -or ($_.CommandLine -and $_.CommandLine -match 'wordink\.desktop\.win\.app') } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
 function Invoke-Uninstall {
     param($Paths)
     if (Get-WordInkTask) {
@@ -226,6 +233,7 @@ function Invoke-Uninstall {
             Unregister-ScheduledTask -TaskName $script:TaskName -Confirm:$false
         }
     } else { Write-Step "Task '$($script:TaskName)' is not registered." }
+    Invoke-Change "Stop any running WordInk tray process" { Stop-WordInkProcess }
     if (Test-Path -LiteralPath $Paths.Rollback) {
         Invoke-Change "Remove $($Paths.Rollback)" { Remove-Item -LiteralPath $Paths.Rollback -Force }
     }
