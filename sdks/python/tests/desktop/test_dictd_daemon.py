@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import os
 import stat
@@ -19,7 +20,7 @@ from wordink.desktop.indicator import StateFile
 from wordink.desktop.recorder import Recorder
 from wordink.desktop.vocab import add_terms
 
-from dictd_helpers import BROKEN_MIC, FAKE_MIC, short_tmp
+from dictd_helpers import BROKEN_MIC, FAKE_MIC, captured, short_tmp, wait_for_state, wait_until
 
 KEY = "gsk_test_secret_key"
 ENV = {"GROQ_API_KEY": KEY}
@@ -88,7 +89,7 @@ def test_hold_to_talk_round_trip_writes_cleaned_text_and_walks_the_states():
         try:
             assert (await cmd(cfg, "start"))["state"] == "recording"
             assert StateFile(cfg.state_path).read()["state"] == "recording"
-            await asyncio.sleep(0.5)
+            await captured(daemon)
             assert (await cmd(cfg, "stop"))["state"] == "transcribing"
             await daemon.wait_idle()
             assert (await cmd(cfg, "status"))["state"] == "idle"
@@ -120,7 +121,7 @@ def test_the_transcription_request_carries_the_vocabulary_hint():
         daemon = await started(cfg, build_pipeline(cfg, ENV, transport=httpx.MockTransport(handler)))
         try:
             await cmd(cfg, "start")
-            await asyncio.sleep(0.4)
+            await captured(daemon)
             await cmd(cfg, "stop")
             await daemon.wait_idle()
         finally:
@@ -140,7 +141,7 @@ def test_double_start_stop_while_idle_and_toggle():
             assert (await cmd(cfg, "stop"))["note"] == "not recording"
             assert (await cmd(cfg, "toggle"))["state"] == "recording"
             assert (await cmd(cfg, "start"))["note"] == "already recording"
-            await asyncio.sleep(0.4)
+            await captured(daemon)
             assert (await cmd(cfg, "toggle"))["state"] == "transcribing"
             await daemon.wait_idle()
             return (await cmd(cfg, "status"))["state"]
@@ -154,14 +155,14 @@ def test_double_start_stop_while_idle_and_toggle():
 def test_a_quick_tap_is_discarded_without_calling_groq():
     root = short_tmp()
     cfg = make_cfg(root)
-    cfg = DictateConfig(**{**cfg.__dict__, "min_seconds": 10.0})
+    cfg = dataclasses.replace(cfg, min_seconds=10.0)
     calls: list[str] = []
 
     async def scenario():
         daemon = await started(cfg, build_pipeline(cfg, ENV, transport=groq(calls=calls)))
         try:
             await cmd(cfg, "start")
-            await asyncio.sleep(0.2)
+            await captured(daemon, 0.1)
             await cmd(cfg, "stop")
             await daemon.wait_idle()
             return StateFile(cfg.state_path).read()
@@ -179,14 +180,14 @@ def test_start_is_refused_while_transcribing():
     gate = threading.Event()
 
     def slow(wav: bytes) -> PipelineResult:
-        gate.wait(5)
+        assert gate.wait(10), 'test never released the pipeline'
         return PipelineResult("done", False, "x")
 
     async def scenario():
         daemon = await started(cfg, slow)
         try:
             await cmd(cfg, "start")
-            await asyncio.sleep(0.4)
+            await captured(daemon)
             await cmd(cfg, "stop")
             busy = await cmd(cfg, "start")
             gate.set()
@@ -209,7 +210,7 @@ def test_transcription_failure_sets_error_keeps_audio_and_leaks_no_key():
         daemon = await started(cfg, build_pipeline(cfg, ENV, transport=down))
         try:
             await cmd(cfg, "start")
-            await asyncio.sleep(0.4)
+            await captured(daemon)
             await cmd(cfg, "stop")
             await daemon.wait_idle()
             after = await cmd(cfg, "status")
@@ -236,7 +237,7 @@ def test_a_missing_groq_key_surfaces_an_actionable_error():
         daemon = await started(cfg, build_pipeline(cfg, {}, transport=groq()))
         try:
             await cmd(cfg, "start")
-            await asyncio.sleep(0.4)
+            await captured(daemon)
             await cmd(cfg, "stop")
             await daemon.wait_idle()
             return StateFile(cfg.state_path).read()
@@ -249,13 +250,13 @@ def test_a_missing_groq_key_surfaces_an_actionable_error():
 
 def test_a_broken_microphone_reports_an_error_state():
     root = short_tmp()
-    cfg = DictateConfig(**{**make_cfg(root).__dict__, "record_command": BROKEN_MIC})
+    cfg = dataclasses.replace(make_cfg(root), record_command=BROKEN_MIC)
 
     async def scenario():
         daemon = await started(cfg, lambda wav: PipelineResult("x", False, "x"))
         try:
             await cmd(cfg, "start")
-            await asyncio.sleep(0.5)
+            await wait_until(lambda: daemon.recorder._proc is not None and daemon.recorder._proc.returncode is not None)
             await cmd(cfg, "stop")
             await daemon.wait_idle()
             return StateFile(cfg.state_path).read()
@@ -268,13 +269,13 @@ def test_a_broken_microphone_reports_an_error_state():
 
 def test_max_duration_stops_the_recording_on_its_own():
     root = short_tmp()
-    cfg = DictateConfig(**{**make_cfg(root).__dict__, "max_seconds": 1.0})
+    cfg = dataclasses.replace(make_cfg(root), max_seconds=1.0)
 
     async def scenario():
         daemon = await started(cfg, lambda wav: PipelineResult("auto stopped", False, "x"))
         try:
             await cmd(cfg, "start")
-            await asyncio.sleep(1.4)
+            await wait_until(lambda: daemon.state == "transcribing" or daemon.state == "idle" and daemon._job is not None)
             await daemon.wait_idle()
             return (await cmd(cfg, "status"))["state"]
         finally:

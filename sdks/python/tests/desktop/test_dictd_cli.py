@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import threading
 
 import pytest
 
@@ -13,7 +12,7 @@ from wordink.desktop.daemon import Daemon, LastTranscriptSink, PipelineResult
 from wordink.desktop.config import load_config
 from wordink.desktop.recorder import Recorder
 
-from dictd_helpers import FAKE_MIC, short_tmp
+from dictd_helpers import FAKE_MIC, captured, short_tmp, wait_until
 
 
 @pytest.fixture
@@ -64,17 +63,6 @@ def test_trigger_status_and_last_against_a_running_daemon(env, capsys):
     cfg = load_config()
     results: dict = {}
 
-    def drive():
-        # the CLI is synchronous (it runs asyncio itself), so drive it from a worker thread
-        results["start"] = main(["trigger", "start"])
-        import time
-
-        time.sleep(0.5)
-        results["stop"] = main(["trigger", "stop"])
-        time.sleep(0.8)
-        results["status"] = main(["status"])
-        results["last"] = main(["last"])
-
     async def scenario():
         daemon = Daemon(
             cfg,
@@ -83,13 +71,37 @@ def test_trigger_status_and_last_against_a_running_daemon(env, capsys):
             recorder=Recorder(FAKE_MIC, min_seconds=0.2, tail_seconds=0.05),
         )
         await daemon.serve()
-        worker = threading.Thread(target=drive)
-        worker.start()
-        while worker.is_alive():
-            await asyncio.sleep(0.05)
-        await daemon.wait_idle()
-        await daemon.close()
+        loop = asyncio.get_running_loop()
+        try:
+            # main() runs its own event loop, so call it from a worker thread
+            results["start"] = await loop.run_in_executor(None, main, ["trigger", "start"])
+            await captured(daemon, 0.3)
+            results["stop"] = await loop.run_in_executor(None, main, ["trigger", "stop"])
+            await wait_until(lambda: daemon._job is not None)
+            await daemon.wait_idle()
+            results["status"] = await loop.run_in_executor(None, main, ["status"])
+            results["last"] = await loop.run_in_executor(None, main, ["last"])
+        finally:
+            await daemon.close()
 
     asyncio.run(scenario())
     assert results == {"start": 0, "stop": 0, "status": 0, "last": 0}
     assert "hello from the daemon" in capsys.readouterr().out
+
+
+def test_run_serves_until_sigterm_then_cleans_up_the_socket(env):
+    import os
+    import signal
+
+    from wordink.desktop.cli import _run
+
+    cfg = load_config()
+
+    async def scenario():
+        task = asyncio.create_task(_run(cfg))
+        await wait_until(lambda: cfg.socket_path.exists())
+        os.kill(os.getpid(), signal.SIGTERM)
+        return await asyncio.wait_for(task, 10)
+
+    assert asyncio.run(scenario()) == 0
+    assert not cfg.socket_path.exists()

@@ -39,11 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def _run(cfg: DictateConfig) -> int:
     daemon = Daemon(cfg, build_pipeline(cfg), LastTranscriptSink(cfg.last_path))
-    await daemon.serve()
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
+    for sig in (signal.SIGINT, signal.SIGTERM):  # before serve(): an early signal must still stop us cleanly
         loop.add_signal_handler(sig, stop.set)
+    await daemon.serve()
     logging.getLogger("wordink.dictd").info("listening on %s", cfg.socket_path)
     await stop.wait()
     await daemon.close()
