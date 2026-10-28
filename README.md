@@ -7,7 +7,7 @@
 
 # WordInk
 
-**Dictation as a component.** An open-source, provider-agnostic engine that turns speech into finished text: a drop-in `<wordink-mic>` for any web app, and an OpenAI-compatible gateway so desktop dictation apps can use your keys and fallback rules.
+**Dictation as a component.** An open-source, provider-agnostic engine that turns speech into finished text: a drop-in `<wordink-mic>` for any web app, first-party standalone apps for Linux, Windows, macOS and iOS that work on default config, and an OpenAI-compatible gateway so third-party dictation apps can use your keys and fallback rules.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 

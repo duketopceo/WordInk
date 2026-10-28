@@ -11,6 +11,8 @@ deepened: 2026-10-13
 
 # iOS Remote Mic - Plan
 
+> **Superseded in part (Oct 24, 2026).** The U9 owner decision (`ROADMAP.md`, program plan U9) makes the iOS app a standalone product that works on default open-source configuration: usable with a provider key and no required self-hosted gateway. The "gateway-only transcription path" decision and the exclusion of direct-provider mode below no longer govern; BYO-gateway pairing stays as an optional mode. This plan still describes the gateway-pairing flow accurately. A follow-up plan is needed for the direct-provider path.
+
 ## Goal Capsule
 
 - **Objective:** An iPhone user who runs a WordInk gateway dictates anywhere on the device and gets text back from their own transcription pipeline — Groq-backed, with their live runtime vocabulary — on the clipboard in seconds, ready to paste into any app. The operator's daily driver is SSH/agent dictation from Termius; a public user's install-to-first-dictation takes under five minutes.
