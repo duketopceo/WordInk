@@ -83,12 +83,12 @@ class Tray:
 
     def __init__(
         self,
-        actions: TrayActions,
+        actions: TrayActions | None = None,
         *,
         pystray: ModuleType | None = None,
         make_image: Callable[[bytes, int], object] | None = None,
     ) -> None:
-        self.actions = actions
+        self.actions = actions or TrayActions(*(lambda: None,) * 5)  # the app installs the real ones
         self._pystray = pystray
         self._make_image = make_image or _pil_image
         self._icon = None
@@ -128,6 +128,15 @@ class Tray:
         icon, self._icon = self._icon, None
         if icon is not None:
             icon.stop()
+
+    def notice(self, message: str) -> None:
+        """A one-off toast that is not an error (for example, a degraded mode)."""
+        icon = self._icon
+        if icon is not None:
+            try:
+                icon.notify(message, "WordInk")
+            except Exception as exc:
+                log.warning("tray notice failed: %s", type(exc).__name__)
 
     # -- Indicator ------------------------------------------------------------------------------
     def show(self, state: str, detail: str | None = None) -> None:
