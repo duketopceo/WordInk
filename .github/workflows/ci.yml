@@ -103,6 +103,21 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - run: uv sync --frozen
       - run: uv run pytest -q
+  # Windows dictation adapters (plan W9): the win/ tests on a real Windows runner with the `windows` extra,
+  # plus an import of every win/ module (declarations only: nothing is called at import).
+  python-sdk-windows:
+    runs-on: windows-latest
+    defaults:
+      run: { working-directory: sdks/python }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --frozen --extra windows
+      - name: Import every win/ module with the real ctypes (declarations only: nothing is called at import)
+        run: uv run python -c "import importlib, pkgutil, wordink.desktop.platform, wordink.desktop.win as w; [importlib.import_module(m.name) for m in pkgutil.iter_modules(w.__path__, w.__name__ + '.')]"
+      - name: win/ tests (bash expands the glob)
+        shell: bash
+        run: uv run pytest -q tests/desktop/test_win_*.py tests/desktop/test_dictd_platform.py
   legacy:
     runs-on: ubuntu-latest
     defaults:
