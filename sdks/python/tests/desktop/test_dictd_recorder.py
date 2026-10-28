@@ -86,7 +86,7 @@ def test_stop_ends_the_capture_process():
     async def scenario():
         rec = Recorder(FAKE_MIC, min_seconds=0, tail_seconds=0)
         await rec.start()
-        proc = rec._proc
+        proc = rec._source._proc
         await asyncio.sleep(0.2)
         await rec.stop()
         return proc.returncode

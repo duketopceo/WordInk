@@ -150,17 +150,12 @@ class Recorder:
         self._recording = False
 
     @property
-    def _proc(self) -> asyncio.subprocess.Process | None:
-        """The capture process of a subprocess source (None for other sources)."""
-        return getattr(self._source, "_proc", None)
-
-    @property
     def recording(self) -> bool:
         return self._recording
 
     @property
     def captured_seconds(self) -> float:
-        return getattr(self._source, "captured_bytes", 0) / (SAMPLE_RATE * SAMPLE_WIDTH)
+        return self._source.captured_bytes / (SAMPLE_RATE * SAMPLE_WIDTH)
 
     async def start(self) -> None:
         if self._recording:

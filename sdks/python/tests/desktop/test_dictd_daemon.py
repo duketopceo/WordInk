@@ -256,7 +256,7 @@ def test_a_broken_microphone_reports_an_error_state():
         daemon = await started(cfg, lambda wav: PipelineResult("x", False, "x"))
         try:
             await cmd(cfg, "start")
-            await wait_until(lambda: daemon.recorder._proc is not None and daemon.recorder._proc.returncode is not None)
+            await wait_until(lambda: daemon.recorder._source._proc is not None and daemon.recorder._source._proc.returncode is not None)
             await cmd(cfg, "stop")
             await daemon.wait_idle()
             return StateFile(cfg.state_path).read()
