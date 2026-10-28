@@ -1,0 +1,17 @@
+# A workflow file that does not parse never runs, so CI goes red with a 0s "workflow file issue"
+# and nothing says why. This lives in its own file so it still runs when ci.yml is the broken one.
+name: Workflow lint
+on:
+  push: { branches: [master], paths: [".github/workflows/**"] }
+  pull_request: { paths: [".github/workflows/**"] }
+permissions:
+  contents: read
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
