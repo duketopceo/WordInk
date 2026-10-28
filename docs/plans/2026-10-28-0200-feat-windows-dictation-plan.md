@@ -182,6 +182,8 @@ flowchart LR
 
 ### W5. Text insertion
 
+- **Status:** W5a (insertion policy, `win/insert.py`, against an `InsertApi` protocol and a fake) built; the real ctypes layer is W5b with `win32.py`.
+
 - **Goal:** Put text into the focused window safely.
 - **Requirements:** R5, R6.
 - **Dependencies:** W1, W4 (injected-flag handling).
