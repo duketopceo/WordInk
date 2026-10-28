@@ -219,6 +219,8 @@ flowchart LR
 
 ### U9. Windows lane for cyberpowa (planned only, separate plan before code)
 
+- **Status:** planned in `docs/plans/2026-10-28-0200-feat-windows-dictation-plan.md`; the notes below are the summary it expands.
+
 - **Goal:** Record what carries over so the Windows build does not restart from zero.
 - **Reuses unchanged:** `wordink.client`, `wordink.flow`, `cleanup.py`, `transcribe.py`, the vocabulary files, and the config schema.
 - **Replaces:** the Hyprland bind with `RegisterHotKey` (a low-level keyboard hook is needed for true hold-to-talk); `wtype`/`ydotool` with Win32 `SendInput` using `KEYEVENTF_UNICODE`, falling back to clipboard plus `Ctrl+V`; waybar with a tray icon (`pystray`); the systemd unit with a Startup-folder shortcut or a Task Scheduler logon task; the install script with a PowerShell script.
