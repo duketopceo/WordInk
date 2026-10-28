@@ -41,7 +41,7 @@ _FKEYS = {
     11: 0x67, 12: 0x6F, 13: 0x69, 14: 0x6B, 15: 0x71, 16: 0x6A, 17: 0x40, 18: 0x4F, 19: 0x50, 20: 0x5A,
 }  # fmt: skip
 _NAMED = {
-    "RETURN": (0x24, "Return"), "ENTER": (0x24, "Return"), "TAB": (0x30, "Tab"), "SPACE": (0x31, "Space"),
+    "RETURN": (0x24, "Return"), "ENTER": (0x4C, "Enter"),  # Enter is the keypad key "TAB": (0x30, "Tab"), "SPACE": (0x31, "Space"),
     "BACKSPACE": (0x33, "Delete"), "DELETE": (0x33, "Delete"), "ESC": (0x35, "Esc"), "ESCAPE": (0x35, "Esc"),
     "LEFT": (0x7B, "Left"), "RIGHT": (0x7C, "Right"), "DOWN": (0x7D, "Down"), "UP": (0x7E, "Up"),
 }  # fmt: skip

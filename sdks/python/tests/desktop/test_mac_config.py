@@ -167,3 +167,10 @@ def test_mac_set_key_stores_in_the_keychain_without_echo(macenv, capsys, monkeyp
     assert "macOS Keychain" in out.out
     assert "gsk_mac_secret_9" not in out.out + out.err
     assert backend.data[(secrets.SERVICE, secrets.KEY_NAME)] == "gsk_mac_secret_9"
+
+
+def test_return_and_keypad_enter_are_different_keys():
+    from wordink.desktop.mac.hotkey import parse_chord
+
+    assert parse_chord("Ctrl+Option+Return").key == 0x24
+    assert parse_chord("Ctrl+Option+Enter").key == 0x4C
