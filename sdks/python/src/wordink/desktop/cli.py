@@ -14,7 +14,10 @@ from ..client import WordInkError
 from .binds import hyprland_bind_lines
 from .config import DictateConfig, load_config
 from .daemon import Daemon, build_pipeline, make_sink, send_command
+from .doctor import exit_code, render, run_checks, to_json
+from .notify import notify
 from .vocab import add_terms, read_terms, remove_term
+from .waybar import follow, snapshot
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,6 +29,11 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("action", choices=("start", "stop", "toggle"))
     sub.add_parser("status", help="print the daemon's state as JSON")
     sub.add_parser("last", help="print the last cleaned transcript")
+    sub.add_parser("waybar", help="print the waybar module JSON (use --follow as the module's exec)").add_argument(
+        "--follow", action="store_true"
+    )
+    d = sub.add_parser("doctor", help="read-only checks of tools, mic, key, binds and the daemon")
+    d.add_argument("--json", action="store_true")
     sub.add_parser("binds", help="print the Hyprland bind lines for the configured keys")
     v = sub.add_parser("vocab", help="manage the local vocabulary file")
     vs = v.add_subparsers(dest="vocab_cmd", required=True)
@@ -38,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def _run(cfg: DictateConfig) -> int:
-    daemon = Daemon(cfg, build_pipeline(cfg), make_sink(cfg))
+    daemon = Daemon(cfg, build_pipeline(cfg), make_sink(cfg), notifier=notify)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):  # before serve(): an early signal must still stop us cleanly
@@ -68,6 +76,16 @@ def main(argv: list[str] | None = None) -> int:
                 print("wordink-dictd: no dictation yet", file=sys.stderr)
                 return 1
             return 0
+        if args.cmd == "waybar":
+            if args.follow:
+                follow(cfg.state_path, cfg.socket_path)
+            else:
+                print(json.dumps(snapshot(cfg.state_path, cfg.socket_path), ensure_ascii=False))
+            return 0
+        if args.cmd == "doctor":
+            checks = run_checks(cfg)
+            print(to_json(checks) if args.json else render(checks))
+            return exit_code(checks)
         if args.cmd == "binds":
             print("\n".join(hyprland_bind_lines(cfg.hold_bind, cfg.toggle_bind)))
             return 0

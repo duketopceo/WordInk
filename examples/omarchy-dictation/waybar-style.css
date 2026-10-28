@@ -1,0 +1,6 @@
+/* Append to ~/.config/waybar/style.css */
+#custom-wordink { padding: 0 8px; opacity: 0.6; }
+#custom-wordink.recording { opacity: 1; color: #f7768e; }
+#custom-wordink.transcribing { opacity: 1; color: #e0af68; }
+#custom-wordink.error { opacity: 1; color: #f7768e; }
+#custom-wordink.off { opacity: 0.3; }
