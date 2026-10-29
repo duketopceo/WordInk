@@ -16,7 +16,7 @@ function runWrapper(
   map: string | null,
   gatewayMode = 0o755,
   gatewayScript = NODE_GATEWAY_SCRIPT,
-  prependEmptyDir = false,
+  opts: { prependEmptyDir?: boolean; gatewayInCwd?: boolean } = {},
 ): { stdout: string; stderr: string; status: number | null } {
   const dir = mkdtempSync(join(tmpdir(), "wordink-run-"));
   try {
@@ -31,22 +31,26 @@ function runWrapper(
     );
     // A package bin can be a non-executable JS file behind a symlink.
     writeFileSync(
-      join(binDir, "wordink-gateway"),
+      join(opts.gatewayInCwd ? dir : binDir, "wordink-gateway"),
       gatewayScript,
       { mode: gatewayMode },
     );
     writeFileSync(join(binDir, "node"), `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, { mode: 0o755 });
     let searchPath = `${binDir}:/usr/bin:/bin`;
-    if (prependEmptyDir) {
+    if (opts.prependEmptyDir) {
       const emptyDir = join(dir, "empty");
       mkdirSync(emptyDir, { recursive: true });
       searchPath = `${emptyDir}:${searchPath}`;
+    }
+    if (opts.gatewayInCwd) {
+      searchPath = `${binDir}:/usr/bin:`;
     }
     if (map !== null) {
       mkdirSync(join(configDir, "wordink"), { recursive: true });
       writeFileSync(join(configDir, "wordink", "gateway-keys"), map);
     }
     const r = spawnSync("sh", [WRAPPER], {
+      cwd: dir,
       env: {
         PATH: searchPath,
         HOME: dir,
@@ -91,7 +95,13 @@ describe("wordink-gateway-run", () => {
   });
 
   it("resolves the gateway from a later PATH directory", () => {
-    const r = runWrapper(null, 0o755, undefined, true);
+    const r = runWrapper(null, 0o755, undefined, { prependEmptyDir: true });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain("ARGV=serve");
+  });
+
+  it("resolves the gateway from the current directory for a trailing PATH colon", () => {
+    const r = runWrapper(null, 0o755, undefined, { gatewayInCwd: true });
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain("ARGV=serve");
   });

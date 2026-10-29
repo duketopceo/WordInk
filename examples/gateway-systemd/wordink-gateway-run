@@ -29,7 +29,10 @@ resolve_bin() {
   old_ifs=$IFS
   IFS=:
   first_file=
-  for dir in $PATH; do
+  # The appended colon keeps a trailing PATH ':' meaningful — it produces an
+  # interior empty field, which the dir=. guard turns into the current directory.
+  path_list=$PATH:
+  for dir in $path_list; do
     [ -n "$dir" ] || dir=.
     candidate="$dir/$BIN"
     if [ -f "$candidate" ] && [ -x "$candidate" ]; then
