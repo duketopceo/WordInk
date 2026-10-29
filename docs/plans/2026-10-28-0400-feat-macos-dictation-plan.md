@@ -175,6 +175,7 @@ flowchart LR
 
 ### M5. Menu bar and notifications
 
+- **Status:** built (`mac/menubar.py`, `MenuBar` over `rumps`, tested against a fake; the daemon side only enqueues and a main-thread timer applies updates). The icon appearing on screen is the M9 check.
 - **Goal:** A status item with state and a small menu.
 - **Requirements:** R7, KTD4
 - **Dependencies:** M1.
