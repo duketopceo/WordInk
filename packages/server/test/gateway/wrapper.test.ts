@@ -9,9 +9,14 @@ import { join } from "node:path";
 // (and skipped) observable.
 const WRAPPER = join(import.meta.dirname, "../../../../examples/gateway-systemd/wordink-gateway-run");
 
+const NODE_GATEWAY_SCRIPT =
+  '#!/usr/bin/env node\nconsole.log(`ARGV=${process.argv.slice(2).join(" ")}`);\nfor (const name of ["GROQ_API_KEY", "OPENAI_API_KEY", "NODE_OPTIONS", "LD_PRELOAD", "XDG_HACK", "PATH"]) console.log(`${name}=${process.env[name] ?? ""}`);\n';
+
 function runWrapper(
   map: string | null,
   gatewayMode = 0o755,
+  gatewayScript = NODE_GATEWAY_SCRIPT,
+  prependEmptyDir = false,
 ): { stdout: string; stderr: string; status: number | null } {
   const dir = mkdtempSync(join(tmpdir(), "wordink-run-"));
   try {
@@ -27,17 +32,23 @@ function runWrapper(
     // A package bin can be a non-executable JS file behind a symlink.
     writeFileSync(
       join(binDir, "wordink-gateway"),
-      '#!/usr/bin/env node\nconsole.log(`ARGV=${process.argv.slice(2).join(" ")}`);\nfor (const name of ["GROQ_API_KEY", "OPENAI_API_KEY", "NODE_OPTIONS", "LD_PRELOAD", "XDG_HACK", "PATH"]) console.log(`${name}=${process.env[name] ?? ""}`);\n',
+      gatewayScript,
       { mode: gatewayMode },
     );
     writeFileSync(join(binDir, "node"), `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, { mode: 0o755 });
+    let searchPath = `${binDir}:/usr/bin:/bin`;
+    if (prependEmptyDir) {
+      const emptyDir = join(dir, "empty");
+      mkdirSync(emptyDir, { recursive: true });
+      searchPath = `${emptyDir}:${searchPath}`;
+    }
     if (map !== null) {
       mkdirSync(join(configDir, "wordink"), { recursive: true });
       writeFileSync(join(configDir, "wordink", "gateway-keys"), map);
     }
     const r = spawnSync("sh", [WRAPPER], {
       env: {
-        PATH: `${binDir}:/usr/bin:/bin`,
+        PATH: searchPath,
         HOME: dir,
         XDG_CONFIG_HOME: configDir,
       },
@@ -71,6 +82,18 @@ describe("wordink-gateway-run", () => {
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain("ARGV=serve");
     expect(r.stdout).toContain("GROQ_API_KEY=key-for-groq-default");
+  });
+
+  it("executes a non-JavaScript executable gateway directly, not through Node", () => {
+    const r = runWrapper(null, 0o755, '#!/bin/sh\necho "ARGV=$*"\n');
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain("ARGV=serve");
+  });
+
+  it("resolves the gateway from a later PATH directory", () => {
+    const r = runWrapper(null, 0o755, undefined, true);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain("ARGV=serve");
   });
 
   it("skips comments, blanks, invalid names and refused runtime names without aborting", () => {

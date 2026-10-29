@@ -22,14 +22,19 @@ resolve_bin() {
       ;;
   esac
 
+  # IFS-split $PATH with globbing off so entries containing * ? [ are taken literally;
+  # both IFS and the -f state are restored on every exit path.
+  case $- in *f*) noglob_set=1 ;; *) noglob_set= ;; esac
+  set -f
   old_ifs=$IFS
   IFS=:
   first_file=
   for dir in $PATH; do
     [ -n "$dir" ] || dir=.
     candidate="$dir/$BIN"
-    if [ -x "$candidate" ]; then
+    if [ -f "$candidate" ] && [ -x "$candidate" ]; then
       IFS=$old_ifs
+      [ -n "$noglob_set" ] || set +f
       printf '%s\n' "$candidate"
       return 0
     fi
@@ -38,6 +43,7 @@ resolve_bin() {
     fi
   done
   IFS=$old_ifs
+  [ -n "$noglob_set" ] || set +f
 
   [ -n "$first_file" ] || return 127
   printf '%s\n' "$first_file"
@@ -71,7 +77,10 @@ if [ -f "$MAP" ]; then
 fi
 
 if ! BIN_PATH=$(resolve_bin); then
-  echo "wordink-gateway-run: could not find '$BIN' on PATH" >&2
+  case "$BIN" in
+    */*) echo "wordink-gateway-run: '$BIN' does not exist or is not a regular file" >&2 ;;
+    *)   echo "wordink-gateway-run: could not find '$BIN' on PATH" >&2 ;;
+  esac
   exit 127
 fi
 
