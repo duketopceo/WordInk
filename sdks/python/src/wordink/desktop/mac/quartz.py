@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import logging
 import sys
 import threading
 from collections.abc import Callable
@@ -18,6 +19,8 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from .hotkey import Chord
+
+log = logging.getLogger("wordink.dictd")
 
 #: called on the API's thread: (hotkey id given to `register`, True for press / False for release)
 KeyHandler = Callable[[int, bool], None]
@@ -131,7 +134,7 @@ class CarbonApi:
             if status == 0 and hk.signature == _SIGNATURE and self._handler is not None:
                 self._handler(hk.id, lib.GetEventKind(event) == _K_EVENT_HOT_KEY_PRESSED)
         except Exception:  # an exception must never unwind into Carbon
-            pass
+            log.exception("hotkey event handler failed")
         return 0
 
     def run(self, ready: Callable[[], None]) -> None:
