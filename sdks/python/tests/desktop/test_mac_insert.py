@@ -104,6 +104,7 @@ def test_chunks_never_split_a_surrogate_pair():
     for batch in chunks(ev, 20):
         assert not (batch[-1][0] == "unit" and 0xD800 <= batch[-1][1] <= 0xDBFF)
     assert sum(len(b) for b in chunks(ev, 20)) == len(ev)
+    assert all(len(b) <= 20 for b in chunks(ev, 20))  # the pair moves to the next batch, never a 21st unit
 
 
 def test_every_newline_form_is_one_return():
@@ -114,7 +115,7 @@ def test_a_long_text_is_pasted_then_the_pasteboard_is_restored():
     ins, api, later, _ = make()
     text = "x" * 201
     r = ins.insert(text)
-    assert r.method == "pasted" and api.kinds() == ["set", "release", "paste"] and api.board == text
+    assert r.method == "pasted" and api.kinds() == ["release", "set", "paste"] and api.board == text
     later.run_all()
     assert api.board == "old" and api.typed() == ""
 
@@ -250,3 +251,14 @@ def test_the_native_api_loads_off_a_mac_and_only_fails_when_called():
     api = NativeInsertApi()
     with pytest.raises((OSError, ImportError)):
         api.secure_input_enabled()
+
+
+def test_a_busy_pasteboard_on_handover_keeps_the_pending_restore_armed():
+    ins, api, later, _ = make()
+    ins.insert("x" * 201)  # pasted: the user's "old" is pending restore
+    api.busy_times = 99
+    with pytest.raises(Exception, match="pasteboard is busy"):
+        ins._hand_over("secret", "why")
+    api.busy_times = 0
+    later.run_all()
+    assert api.board == "old"

@@ -119,9 +119,12 @@ def chunks(events: list[Event], size: int) -> list[list[Event]]:
     out: list[list[Event]] = []
     cur: list[Event] = []
     for ev in events:
-        if len(cur) >= size and not (cur[-1][0] == "unit" and 0xD800 <= cur[-1][1] <= 0xDBFF):
+        if len(cur) >= size:
+            carry: list[Event] = []
+            if cur[-1][0] == "unit" and 0xD800 <= cur[-1][1] <= 0xDBFF:
+                carry = [cur.pop()]  # the pair moves whole into the next batch, so no batch exceeds `size`
             out.append(cur)
-            cur = []
+            cur = carry
         cur.append(ev)
     if cur:
         out.append(cur)
@@ -205,8 +208,8 @@ class MacInserter:
                 if self._pending_restore is None:  # else the pasteboard holds our previous text, not the user's
                     self._pending_restore = snap  # type: ignore[assignment]
                 self._our_text = text
+                self.api.release_modifiers(0.3)  # wait first: keeps the window between the write and Cmd+V short
                 self._retry(lambda: self.api.pasteboard_set(text))
-                self.api.release_modifiers(0.3)
                 self.api.send_paste()
             except PasteboardBusy:
                 self._pending_restore = self._our_text = None
@@ -227,12 +230,12 @@ class MacInserter:
 
     def _hand_over(self, text: str, why: str, *, notify: bool = True) -> InsertResult:
         with self._lock:
-            self._generation += 1  # cancel any pending restore: this text must stay on the pasteboard
-            self._pending_restore = self._our_text = None
             try:
                 self._retry(lambda: self.api.pasteboard_set(text))
-            except PasteboardBusy as exc:
+            except PasteboardBusy as exc:  # the pending restore stays armed: the user's clipboard still comes back
                 raise WordInkError("cannot insert text: the pasteboard is busy; the text is in `wordink-dictd last`") from exc
+            self._generation += 1  # cancel any pending restore: this text must stay on the pasteboard
+            self._pending_restore = self._our_text = None
         if notify:
             self.notify(why)
         return InsertResult("clipboard", why)
@@ -301,7 +304,8 @@ class NativeInsertApi:
         return PasteboardSnapshot(text, other)
 
     def pasteboard_set(self, text: str) -> None:
-        self._appkit.pasteboard_set(text)
+        if not self._appkit.pasteboard_set(text):
+            raise PasteboardBusy("AppKit refused the pasteboard write")
 
     def pasteboard_clear(self) -> None:
         self._appkit.pasteboard_clear()

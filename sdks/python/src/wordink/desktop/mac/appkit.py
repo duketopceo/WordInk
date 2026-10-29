@@ -44,14 +44,21 @@ def pasteboard_snapshot() -> tuple[str | None, bool]:
     return (str(text) if text is not None else None), has_other_formats(types)
 
 
-def pasteboard_set(text: str) -> None:
-    """Text only, flagged concealed and transient so clipboard managers skip it."""
+def pasteboard_set(text: str) -> bool:
+    """Text only, flagged concealed and transient so clipboard managers skip it.
+
+    False when AppKit refused any of the writes (the caller treats that as a busy pasteboard).
+    """
     ak = _appkit()
     pb = ak.NSPasteboard.generalPasteboard()
     pb.declareTypes_owner_([ak.NSPasteboardTypeString, CONCEALED, TRANSIENT], None)
-    pb.setString_forType_(text, ak.NSPasteboardTypeString)
-    pb.setString_forType_("", CONCEALED)
-    pb.setString_forType_("", TRANSIENT)
+    return all(
+        (
+            pb.setString_forType_(text, ak.NSPasteboardTypeString),
+            pb.setString_forType_("", CONCEALED),
+            pb.setString_forType_("", TRANSIENT),
+        )
+    )
 
 
 def pasteboard_clear() -> None:
