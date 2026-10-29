@@ -174,3 +174,87 @@ class CarbonApi:
     def stop(self) -> None:
         if self._lib is not None and self._installed:
             self._lib.QuitApplicationEventLoop()
+
+
+# -- keyboard events, secure input and Accessibility (plan M4) ----------------------------------------
+# Functions here import Quartz or call into system frameworks only when invoked, so the module
+# still loads everywhere. None of it has run on a Mac yet (plan M9).
+
+KVK_ANSI_V = 0x09
+_FLAG_MASKS = {"Shift": 0x20000, "Ctrl": 0x40000, "Option": 0x80000, "Cmd": 0x100000}
+
+
+def _framework(name: str) -> ctypes.CDLL:
+    if sys.platform != "darwin":
+        raise OSError(f"{name} exists only on macOS")
+    return ctypes.CDLL(ctypes.util.find_library(name))
+
+
+def secure_input_enabled() -> bool:
+    lib = _framework("Carbon")
+    lib.IsSecureEventInputEnabled.restype = ctypes.c_ubyte
+    return bool(lib.IsSecureEventInputEnabled())
+
+
+def accessibility_trusted() -> bool:
+    lib = _framework("ApplicationServices")
+    lib.AXIsProcessTrusted.restype = ctypes.c_ubyte
+    return bool(lib.AXIsProcessTrusted())
+
+
+def units_to_text(units: list[int]) -> str:
+    return b"".join(u.to_bytes(2, "little") for u in units).decode("utf-16-le", "surrogatepass")
+
+
+def split_batch(events: list[tuple[str, int]]) -> list[tuple[str, object]]:
+    """Group consecutive UTF-16 units into one string; key codes stay single. Pure."""
+    out: list[tuple[str, object]] = []
+    run: list[int] = []
+    for kind, value in events:
+        if kind == "unit":
+            run.append(value)
+            continue
+        if run:
+            out.append(("text", units_to_text(run)))
+            run = []
+        out.append(("vk", value))
+    if run:
+        out.append(("text", units_to_text(run)))
+    return out
+
+
+def _post(keycode: int, flags: int, text: str | None = None) -> None:
+    import Quartz  # noqa: PLC0415
+
+    for down in (True, False):
+        ev = Quartz.CGEventCreateKeyboardEvent(None, keycode, down)
+        Quartz.CGEventSetFlags(ev, flags)  # 0 clears Ctrl/Option still held from the hotkey
+        if text is not None:
+            Quartz.CGEventKeyboardSetUnicodeString(ev, len(text.encode("utf-16-le")) // 2, text)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
+
+
+def post_events(events: list[tuple[str, int]]) -> None:
+    for kind, value in split_batch(list(events)):
+        if kind == "text":
+            _post(0, 0, str(value))
+        else:
+            _post(int(value), 0)  # type: ignore[arg-type]
+
+
+def post_paste() -> None:
+    _post(KVK_ANSI_V, _FLAG_MASKS["Cmd"])
+
+
+def wait_modifiers_up(wait: float) -> None:
+    """Block up to `wait` seconds until no modifier key is physically held."""
+    import time  # noqa: PLC0415
+
+    import Quartz  # noqa: PLC0415
+
+    mask = sum(_FLAG_MASKS.values())
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        if not Quartz.CGEventSourceFlagsState(Quartz.kCGEventSourceStateCombinedSessionState) & mask:
+            return
+        time.sleep(0.01)
