@@ -10,7 +10,7 @@ from wordink.client import WordInkError
 from wordink.desktop.mac.appkit import has_other_formats
 from wordink.desktop.mac.insert import (
     KVK_RETURN, MacInserter, MacInsertConfig, NativeInsertApi, PasteboardBusy, PasteboardSnapshot, chunks,
-    mac_insert_config_from, plan_events,
+    events_to_text, mac_insert_config_from, plan_events,
 )
 from wordink.desktop.mac.quartz import split_batch, units_to_text
 
@@ -262,3 +262,38 @@ def test_a_busy_pasteboard_on_handover_keeps_the_pending_restore_armed():
     api.busy_times = 0
     later.run_all()
     assert api.board == "old"
+
+
+def test_events_to_text_inverts_plan_events():
+    text = "ab😀\ncd\n\n"
+    assert events_to_text(plan_events(text)) == text
+
+
+def test_typing_that_stops_partway_hands_over_only_the_rest():
+    api = FakeApi()
+    real = api.send_events
+    sent = []
+
+    def flaky(events):
+        if len(sent) == 1:
+            raise OSError("blocked")
+        sent.append(events)
+        real(events)
+
+    api.send_events = flaky
+    ins, _, _, notes = make(api)
+    text = "0123456789" * 5  # three batches of at most 20 units
+    r = ins.insert(text)
+    assert r.method == "clipboard" and api.board == text[20:] and "partway" in notes[0]
+
+
+def test_the_accessibility_explanation_repeats_until_a_copy_succeeds():
+    api = FakeApi(ax=False)
+    ins, _, _, notes = make(api)
+    api.busy_times = 99
+    with pytest.raises(WordInkError):
+        ins.insert("one")
+    api.busy_times = 0
+    ins.insert("two")
+    ins.insert("three")
+    assert len(notes) == 1 and "Accessibility" in notes[0]

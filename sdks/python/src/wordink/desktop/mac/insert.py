@@ -114,6 +114,35 @@ def plan_events(text: str) -> list[Event]:
     return events
 
 
+def _units_to_text(units: list[int]) -> str:
+    return b"".join(u.to_bytes(2, "little") for u in units).decode("utf-16-le", "surrogatepass")
+
+
+def events_to_text(events: Sequence[Event]) -> str:
+    """The inverse of `plan_events`: UTF-16 units back to text, Return back to a newline."""
+    out: list[str] = []
+    units: list[int] = []
+    for kind, value in events:
+        if kind == "unit":
+            units.append(value)
+            continue
+        if units:
+            out.append(_units_to_text(units))
+            units = []
+        out.append("\n")
+    if units:
+        out.append(_units_to_text(units))
+    return "".join(out)
+
+
+class _TypingStopped(Exception):
+    """Typing failed after some text was already typed; `remainder` is the text that was not."""
+
+    def __init__(self, remainder: str) -> None:
+        super().__init__("typing stopped partway")
+        self.remainder = remainder
+
+
 def chunks(events: list[Event], size: int) -> list[list[Event]]:
     """Batches of at most `size` events that never split a surrogate pair."""
     out: list[list[Event]] = []
@@ -223,9 +252,16 @@ class MacInserter:
 
     # -- typing ---------------------------------------------------------------------------------
     def _type(self, text: str) -> None:
+        """Type `text`. On a failure after some batches posted, raise `_TypingStopped` with what is left."""
         self.api.release_modifiers(0.3)
-        for batch in chunks(plan_events(text), CHUNK_UNITS):
-            self.api.send_events(batch)
+        batches = chunks(plan_events(text), CHUNK_UNITS)
+        for i, batch in enumerate(batches):
+            try:
+                self.api.send_events(batch)
+            except Exception as exc:
+                if i == 0:
+                    raise
+                raise _TypingStopped(events_to_text([ev for b in batches[i:] for ev in b])) from exc
             self._sleep(0.002)
 
     def _hand_over(self, text: str, why: str, *, notify: bool = True) -> InsertResult:
@@ -251,19 +287,27 @@ class MacInserter:
         if self.api.secure_input_enabled():
             return self._hand_over(text, "Copied to the pasteboard: a secure field has focus. Paste it with Cmd+V.")
         if not self.api.accessibility_trusted():
-            first, self._ax_notified = not self._ax_notified, True  # explain how to fix it once
-            return self._hand_over(
+            first = not self._ax_notified  # explain how to fix it once, and only once the copy worked
+            result = self._hand_over(
                 text,
                 "Copied to the pasteboard: grant Accessibility in System Settings, Privacy & Security, "
                 "to let WordInk type. Paste it with Cmd+V.",
                 notify=first,
             )
+            self._ax_notified = True
+            return result
         terminal = bundle in self.cfg.terminals
         if terminal or len(text) > self.cfg.long_text:
             if self._paste(text):
                 return InsertResult("pasted", bundle or "long text")
         try:
             self._type(text)
+        except _TypingStopped as stopped:  # the typed prefix is already in the app: hand over only the rest
+            log.warning("typing stopped partway: %s", type(stopped.__cause__).__name__)
+            return self._hand_over(
+                stopped.remainder,
+                "Typing stopped partway. The rest of the text is on the pasteboard: paste it with Cmd+V.",
+            )
         except Exception as exc:
             log.warning("typing failed: %s", type(exc).__name__)
             return self._hand_over(text, "Copied to the pasteboard: typing failed. Paste it with Cmd+V.")
