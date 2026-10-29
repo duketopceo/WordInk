@@ -187,6 +187,7 @@ flowchart LR
 
 ### M6. Daemon wiring, doctor and CLI
 
+- **Status:** built (`mac/app.py`: daemon on a worker thread under the main-thread menu loop, startup failures raised before the menu opens; `mac/doctor.py` over injectable probes; macOS `run` and `doctor` in the CLI; the `wordink-dictd-mac` entry). Nothing has run on a Mac: the real adapters and probes are the M9 check.
 - **Goal:** One process that runs the pipeline with the macOS adapters, plus `doctor` and the CLI.
 - **Requirements:** R4, R11, R12
 - **Dependencies:** M1 to M5.

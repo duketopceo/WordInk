@@ -87,6 +87,14 @@ def _windows_doctor(cfg: DictateConfig, as_json: bool) -> int:
     return exit_code(checks)
 
 
+def _mac_doctor(cfg: DictateConfig, as_json: bool) -> int:
+    from .mac import doctor as md
+
+    checks = md.run_checks(cfg, os.environ, md.real_probes(cfg))
+    print(to_json(checks) if as_json else render(checks))
+    return exit_code(checks)
+
+
 def main(argv: list[str] | None = None, *, os_name: OSName | None = None) -> int:
     args = build_parser().parse_args(argv)
     debug = args.debug or costs.debug_enabled()
@@ -111,13 +119,15 @@ def main(argv: list[str] | None = None, *, os_name: OSName | None = None) -> int
             set_key_interactive()
             print(f"wordink-dictd: key stored in {where}")
             return 0
-        if args.cmd == "run" and os_name == "macos":
-            raise WordInkError("the macOS app is not wired up yet (macOS plan M6); `set-key`, `binds` and `trigger` already work")
         if args.cmd == "run":
             if os_name == "windows":
                 from .win.app import run_configured
 
                 return run_configured(cfg, debug)
+            if os_name == "macos":
+                from .mac.app import run_configured as run_mac
+
+                return run_mac(cfg, debug)
             return asyncio.run(_run(cfg))
         if args.cmd in ("trigger", "status"):
             reply = asyncio.run(_request(cfg, os_name, args.action if args.cmd == "trigger" else "status"))
@@ -135,7 +145,7 @@ def main(argv: list[str] | None = None, *, os_name: OSName | None = None) -> int
         if args.cmd == "waybar" and os_name == "macos":
             raise WordInkError("waybar is Linux only; the macOS app shows its state in the menu bar")
         if args.cmd == "doctor" and os_name == "macos":
-            raise WordInkError("doctor for macOS is not built yet (macOS plan M6)")
+            return _mac_doctor(cfg, args.json)
         if args.cmd == "waybar":
             if args.follow:
                 follow(cfg.state_path, cfg.socket_path)

@@ -33,6 +33,7 @@ wordink-dictd = "wordink.desktop.cli:main"
 
 [project.gui-scripts]
 wordink-dictd-tray = "wordink.desktop.win.app:main"
+wordink-dictd-mac = "wordink.desktop.mac.app:main"
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.25"]

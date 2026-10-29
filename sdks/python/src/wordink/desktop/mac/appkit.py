@@ -61,5 +61,23 @@ def pasteboard_set(text: str) -> bool:
     )
 
 
+def pasteboard_copy(text: str) -> None:
+    """A normal copy (clipboard managers may keep it), for the menu's "Copy last transcript"."""
+    ak = _appkit()
+    pb = ak.NSPasteboard.generalPasteboard()
+    pb.clearContents()
+    pb.setString_forType_(text, ak.NSPasteboardTypeString)
+
+
+def microphone_access() -> str | None:
+    """granted, denied or undetermined; None when AVFoundation is not installed or the state is unknown."""
+    try:
+        import AVFoundation as av  # noqa: PLC0415
+    except ImportError:
+        return None
+    status = int(av.AVCaptureDevice.authorizationStatusForMediaType_(av.AVMediaTypeAudio))
+    return {0: "undetermined", 2: "denied", 3: "granted"}.get(status)  # 1 is restricted by policy: unknown
+
+
 def pasteboard_clear() -> None:
     _appkit().NSPasteboard.generalPasteboard().clearContents()
