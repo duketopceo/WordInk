@@ -1,4 +1,7 @@
-"""`wordink-dictd doctor` on macOS (plan M6). Read-only; never prints a key, only whether one exists.
+"""`wordink-dictd doctor` on macOS (plan M6). Never prints a key, only whether one exists.
+
+Read-only except one brief probe: when the daemon is not running, it registers the hotkeys for a moment
+to see whether macOS or another app already owns them, then releases them.
 
 Every system query is a field of `Probes`, so the checks are tested on Linux with fakes.
 `real_probes()` builds the macOS implementations lazily. None of it has run on a Mac yet (plan M9).

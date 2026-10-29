@@ -115,7 +115,7 @@ class MacApp:
             return
         try:
             self.ad.clipboard_set(self.cfg.last_path.read_text(encoding="utf-8"))
-        except OSError:
+        except (OSError, ValueError):  # no transcript yet, or an unreadable file
             log.info("no last transcript to copy yet")
 
     def _open(self, path: Path) -> None:
@@ -171,7 +171,9 @@ def setup_logging(debug: bool = False, env: Mapping[str, str] | None = None) -> 
 
 
 def _open_with_finder(path: Path) -> None:
-    subprocess.run(["open", str(path)], check=False, timeout=10)  # noqa: S603, S607
+    done = subprocess.run(["open", str(path)], check=False, timeout=10, capture_output=True)  # noqa: S603, S607
+    if done.returncode != 0:
+        log.warning("`open` could not open %s (exit %s)", path.name, done.returncode)
 
 
 def real_adapters(cfg: DictateConfig) -> Adapters:
