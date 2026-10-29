@@ -154,6 +154,7 @@ flowchart LR
 
 ### M3. Global hotkey
 
+- **Status:** built for the hold and toggle chords (`mac/hotkey.py` `HotkeySource` over the `HotkeyApi` in `mac/quartz.py`, with a ctypes Carbon implementation that has never run on a Mac; tested against a fake). Wake is detected by the wall clock jumping ahead of the monotonic clock. The opt-in modifier-only mode (event tap and Input Monitoring check) is not built; it is deferred until the base hotkey is confirmed on a Mac at M9. The real event loop may instead be the menu bar's main-thread loop, decided in M6.
 - **Goal:** Press and release events for the hold chord and press events for the toggle chord.
 - **Requirements:** R1, R2, KTD2, KTD10
 - **Dependencies:** M1.
