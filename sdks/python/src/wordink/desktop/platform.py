@@ -1,6 +1,6 @@
 """Where the dictation app keeps its files on each OS (Windows plan W1).
 
-Pure functions of an OS name and an environment mapping, so the Windows layout is testable on Linux.
+Pure functions of an OS name and an environment mapping, so the Windows and macOS layouts are testable on Linux.
 Nothing here touches the filesystem or an OS API.
 """
 
@@ -11,9 +11,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import PurePath, PurePosixPath, PureWindowsPath
 
+
 from ..client import WordInkError
 
-OSName = str  # "linux" or "windows"
+OSName = str  # "linux", "macos" or "windows"
 
 
 @dataclass(frozen=True)
@@ -30,7 +31,9 @@ def current_os(platform: str | None = None) -> OSName:
         return "windows"
     if p.startswith("linux"):
         return "linux"
-    raise WordInkError(f"wordink-dictd supports Linux and Windows, not {p!r}")
+    if p == "darwin":
+        return "macos"
+    raise WordInkError(f"wordink-dictd supports Linux, macOS and Windows, not {p!r}")
 
 
 def _linux(env: Mapping[str, str], uid: int) -> AppPaths:
@@ -61,11 +64,34 @@ def _windows(env: Mapping[str, str]) -> AppPaths:
         failed_dir=data / "failed",
     )
 
+#: A Unix socket path (`sun_path`) holds 104 bytes on macOS, NUL included.
+MAC_SOCKET_MAX = 103
+
+
+def _macos(env: Mapping[str, str], uid: int) -> AppPaths:
+    home_str = env.get("HOME")
+    if not home_str:
+        raise WordInkError("cannot find the home folder: HOME is unset")
+    lib = PurePosixPath(home_str) / "Library"
+    support = lib / "Application Support" / "wordink"
+    tmp = env.get("TMPDIR")
+    runtime = PurePosixPath(tmp) / "wordink" if tmp else PurePosixPath(f"/tmp/wordink-{uid}")
+    if len(str(runtime / "dictd.sock").encode()) > MAC_SOCKET_MAX:
+        runtime = PurePosixPath(f"/tmp/wordink-{uid}")  # TMPDIR is too long for a socket path
+    return AppPaths(
+        config_file=support / "dictate.toml",
+        vocab_file=support / "vocabulary.txt",
+        runtime_dir=runtime,
+        failed_dir=lib / "Caches" / "wordink" / "failed",
+    )
+
 
 def app_paths(os_name: OSName, env: Mapping[str, str], *, uid: int = 0) -> AppPaths:
-    """The file layout for `os_name`. `uid` only names the `/tmp` fallback on Linux."""
+    """The file layout for `os_name`. `uid` only names the `/tmp` fallback on Linux and macOS."""
     if os_name == "linux":
         return _linux(env, uid)
+    if os_name == "macos":
+        return _macos(env, uid)
     if os_name == "windows":
         return _windows(env)
-    raise WordInkError(f"unknown OS {os_name!r}; expected 'linux' or 'windows'")
+    raise WordInkError(f"unknown OS {os_name!r}; expected 'linux', 'macos' or 'windows'")

@@ -67,11 +67,11 @@ def test_unknown_os_is_rejected():
 
 @pytest.mark.parametrize(
     ("platform", "expected"),
-    [("linux", "linux"), ("win32", "windows"), ("cygwin", None), ("darwin", None)],
+    [("linux", "linux"), ("win32", "windows"), ("cygwin", None), ("darwin", "macos"), ("freebsd14", None)],
 )
 def test_current_os(platform, expected):
     if expected is None:
-        with pytest.raises(WordInkError, match="supports Linux and Windows"):
+        with pytest.raises(WordInkError, match="supports Linux, macOS and Windows"):
             current_os(platform)
     else:
         assert current_os(platform) == expected
