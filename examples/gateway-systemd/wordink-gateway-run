@@ -11,6 +11,37 @@ set -eu
 
 MAP="${XDG_CONFIG_HOME:-$HOME/.config}/wordink/gateway-keys"
 BIN="${WORDINK_GATEWAY_BIN:-wordink-gateway}"
+NODE="${WORDINK_NODE_BIN:-node}"
+
+resolve_bin() {
+  case "$BIN" in
+    */*)
+      [ -f "$BIN" ] || return 127
+      printf '%s\n' "$BIN"
+      return 0
+      ;;
+  esac
+
+  old_ifs=$IFS
+  IFS=:
+  first_file=
+  for dir in $PATH; do
+    [ -n "$dir" ] || dir=.
+    candidate="$dir/$BIN"
+    if [ -x "$candidate" ]; then
+      IFS=$old_ifs
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+    if [ -z "$first_file" ] && [ -f "$candidate" ]; then
+      first_file=$candidate
+    fi
+  done
+  IFS=$old_ifs
+
+  [ -n "$first_file" ] || return 127
+  printf '%s\n' "$first_file"
+}
 
 if [ -f "$MAP" ]; then
   # `|| [ -n "$name" ]` keeps a final line that lacks a trailing newline.
@@ -24,7 +55,7 @@ if [ -f "$MAP" ]; then
         continue ;;
       # Names that steer this runtime or redirect the config/state the exec'd serve reads
       # are refused rather than populated with a key.
-      NODE_OPTIONS | LD_* | PATH | HOME | SHELL | IFS | ENV | BASH_ENV | CDPATH | XDG_*)
+      BIN | NODE | NODE_OPTIONS | LD_* | PATH | HOME | SHELL | IFS | ENV | BASH_ENV | CDPATH | XDG_*)
         echo "wordink-gateway-run: refusing to set $name from the key map; line skipped" >&2
         continue ;;
     esac
@@ -39,4 +70,14 @@ if [ -f "$MAP" ]; then
   done < "$MAP"
 fi
 
-exec "$BIN" serve "$@"
+if ! BIN_PATH=$(resolve_bin); then
+  echo "wordink-gateway-run: could not find '$BIN' on PATH" >&2
+  exit 127
+fi
+
+if [ -x "$BIN_PATH" ]; then
+  exec "$BIN_PATH" serve "$@"
+fi
+
+# Local package links can point directly at a 0644 JavaScript bin entry.
+exec "$NODE" "$BIN_PATH" serve "$@"
