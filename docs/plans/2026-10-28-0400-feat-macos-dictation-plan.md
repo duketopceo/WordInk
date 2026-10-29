@@ -165,6 +165,7 @@ flowchart LR
 
 ### M4. Text insertion
 
+- **Status:** built (`mac/insert.py` policy over an `InsertApi`, tested against a fake; `NativeInsertApi` wires `quartz.py` events, secure input and Accessibility, and `appkit.py` pasteboard and frontmost app, none of which has run on a Mac). Paste is Cmd+V; the pasteboard is flagged concealed and transient; the real typing and paste check is M9.
 - **Goal:** Put text into the focused app, safely.
 - **Requirements:** R5, R6, KTD3, KTD10
 - **Dependencies:** M1.
