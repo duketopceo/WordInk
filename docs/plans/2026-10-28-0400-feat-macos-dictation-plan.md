@@ -143,6 +143,7 @@ flowchart LR
 
 ### M2. macOS microphone source
 
+- **Status:** built (`mac/audio.py` over the capture now shared with Windows in `sdaudio.py`, tested against a fake `sounddevice`); the real-device smoke test is left for M9.
 - **Goal:** `AudioSource` over `sounddevice` for CoreAudio.
 - **Requirements:** R3
 - **Dependencies:** M1.
