@@ -138,9 +138,13 @@ def test_mac_waybar_is_refused_politely(macenv, capsys):
     assert "menu bar" in capsys.readouterr().err
 
 
-def test_mac_run_says_it_is_not_wired_yet(macenv, capsys):
-    assert main(["run"], os_name="macos") == 1
-    assert "M6" in capsys.readouterr().err
+def test_mac_run_starts_the_menu_bar_app(macenv, monkeypatch):
+    from wordink.desktop.mac import app
+
+    seen = []
+    monkeypatch.setattr(app, "run_configured", lambda cfg, debug: seen.append((cfg.hold_bind, debug)) or 0)
+    assert main(["run"], os_name="macos") == 0
+    assert seen == [("Ctrl+Option+D", False)]
 
 
 def test_mac_set_key_stores_in_the_keychain_without_echo(macenv, capsys, monkeypatch):
