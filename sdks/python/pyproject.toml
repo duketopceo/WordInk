@@ -12,6 +12,13 @@ dependencies = [
 
 [project.optional-dependencies]
 mic = ["sounddevice>=0.5"]
+macos = [
+    "keyring>=25; sys_platform == 'darwin'",
+    "sounddevice>=0.5; sys_platform == 'darwin'",
+    "rumps>=0.4; sys_platform == 'darwin'",
+    "pyobjc-framework-Cocoa>=10; sys_platform == 'darwin'",
+    "pyobjc-framework-Quartz>=10; sys_platform == 'darwin'",
+]
 windows = [
     "keyring>=25; sys_platform == 'win32'",
     "sounddevice>=0.5; sys_platform == 'win32'",

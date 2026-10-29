@@ -123,15 +123,17 @@ def load_config(
     """Defaults, overridden by the TOML file when present. Bad keys and values fail loudly.
 
     `os_name="windows"` uses the Windows file layout, `Ctrl+Alt+D` style hotkeys and chord validation.
+    `os_name="macos"` does the same with Apple's layout and `Ctrl+Option+D` style chords.
     """
     from .binds import validate_binds  # local import: binds imports nothing from config
 
     e = os.environ if env is None else env
     windows = os_name == "windows"
-    if windows:
+    macos = os_name == "macos"
+    if windows or macos:
         from .platform import app_paths
 
-        layout = app_paths("windows", e)
+        layout = app_paths(os_name, e, uid=os.getuid() if hasattr(os, "getuid") else 0)
         cfg_path = path or Path(str(layout.config_file))
     else:
         cfg_path = path or default_config_path(e)
@@ -178,8 +180,11 @@ def load_config(
     for key in ("min_seconds", "max_seconds", "tail_seconds"):
         if key in rc:
             kw[key] = _number("record", key, rc[key], minimum=0.0 if key != "max_seconds" else 1.0)
-    if windows:
-        from .win.hotkey import DEFAULT_HOLD, DEFAULT_TOGGLE, parse_chords
+    if windows or macos:
+        if macos:
+            from .mac.hotkey import DEFAULT_HOLD, DEFAULT_TOGGLE, parse_chords
+        else:
+            from .win.hotkey import DEFAULT_HOLD, DEFAULT_TOGGLE, parse_chords
 
         kw.setdefault("hold_bind", DEFAULT_HOLD)
         kw.setdefault("toggle_bind", DEFAULT_TOGGLE)

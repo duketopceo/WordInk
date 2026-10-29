@@ -98,13 +98,21 @@ def main(argv: list[str] | None = None, *, os_name: OSName | None = None) -> int
         os_name = os_name or current_os()
         cfg = load_config(args.config, os_name=os_name)
         if args.cmd == "set-key":
-            if os_name != "windows":
-                raise WordInkError("set-key is for Windows. On Linux put GROQ_API_KEY in the EnvironmentFile (see the README)")
-            from .win.secrets import set_key_interactive
+            if os_name == "windows":
+                from .win.secrets import set_key_interactive
 
+                where = "Windows Credential Manager"
+            elif os_name == "macos":
+                from .mac.secrets import set_key_interactive
+
+                where = "the macOS Keychain"
+            else:
+                raise WordInkError("set-key is for Windows and macOS. On Linux put GROQ_API_KEY in the EnvironmentFile (see the README)")
             set_key_interactive()
-            print("wordink-dictd: key stored in Windows Credential Manager")
+            print(f"wordink-dictd: key stored in {where}")
             return 0
+        if args.cmd == "run" and os_name == "macos":
+            raise WordInkError("the macOS app is not wired up yet (macOS plan M6); `set-key`, `binds` and `trigger` already work")
         if args.cmd == "run":
             if os_name == "windows":
                 from .win.app import run_configured
@@ -124,6 +132,10 @@ def main(argv: list[str] | None = None, *, os_name: OSName | None = None) -> int
             return 0
         if args.cmd in ("waybar",) and os_name == "windows":
             raise WordInkError("waybar is Linux only; the Windows app shows its state in the tray icon")
+        if args.cmd == "waybar" and os_name == "macos":
+            raise WordInkError("waybar is Linux only; the macOS app shows its state in the menu bar")
+        if args.cmd == "doctor" and os_name == "macos":
+            raise WordInkError("doctor for macOS is not built yet (macOS plan M6)")
         if args.cmd == "waybar":
             if args.follow:
                 follow(cfg.state_path, cfg.socket_path)
@@ -136,7 +148,7 @@ def main(argv: list[str] | None = None, *, os_name: OSName | None = None) -> int
             checks = run_checks(cfg)
             print(to_json(checks) if args.json else render(checks))
             return exit_code(checks)
-        if args.cmd == "binds" and os_name == "windows":
+        if args.cmd == "binds" and os_name in ("windows", "macos"):
             print(f"hold:   {cfg.hold_bind}\ntoggle: {cfg.toggle_bind}\n(change them under [hotkey] in dictate.toml)")
             return 0
         if args.cmd == "binds":
