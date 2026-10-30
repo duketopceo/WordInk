@@ -2,7 +2,7 @@
 // engine and no key, its wasm and worker assets resolve under the base path, and the dev-key form
 // exists only on localhost (KTD3).
 import { expect, test } from "@playwright/test";
-import { DOCS_HOST, SITE_PORT, dictate, fakeThirdParties, fakeMicFromClip, withoutWebGPU } from "./env.js";
+import { DOCS_HOST, SITE_PORT, dictate, fakeThirdParties, fakeMicFromClip, holdToTalk, withoutWebGPU } from "./env.js";
 
 test("on a public hostname the demo dictates with the local engine and offers no dev-key form", async ({ page, context }) => {
   const served = await fakeThirdParties(context);
@@ -47,6 +47,33 @@ test("on a public hostname the demo dictates with the local engine and offers no
   expect(failed).toEqual([]);
   expect(errors).toEqual([]);
   expect(served.model.some((p) => p.endsWith("decoder_model_merged_quantized.onnx"))).toBe(true);
+});
+
+// Regression: the status line used to be left on "Listening… release to transcribe." once a press
+// happened after the model was ready (any second dictation, e.g. when the first try came back
+// garbled on a slow runner), so the "Model ready on WebAssembly" message the first spec asserts
+// was lost and master CI went red intermittently.
+test("after each dictation the demo status returns to the model-ready message", async ({ page, context }) => {
+  await fakeThirdParties(context);
+  await withoutWebGPU(page);
+  await fakeMicFromClip(page);
+  await page.goto(`http://${DOCS_HOST}:${SITE_PORT}/WordInk/`);
+  await expect(page.locator("#demo wordink-mic")).toHaveAttribute("data-state", "idle");
+  const settled = () =>
+    page.waitForFunction(
+      () => {
+        const s = document.querySelector("wordink-mic")?.getAttribute("data-state");
+        return s === "idle" || s === "error";
+      },
+      undefined,
+      { timeout: 60_000 },
+    );
+  for (let press = 0; press < 2; press++) {
+    await holdToTalk(page, 3500);
+    await settled();
+    await expect(page.locator("#demo-status")).toContainText("WebAssembly");
+    await expect(page.locator("#demo-status")).not.toContainText("Listening");
+  }
 });
 
 test("on localhost the demo renders the dev-key form, and every docs page loads", async ({ page }) => {
