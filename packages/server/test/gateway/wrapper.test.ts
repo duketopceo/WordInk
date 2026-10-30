@@ -40,6 +40,8 @@ function runWrapper(
     if (opts.prependEmptyDir) {
       const emptyDir = join(dir, "empty");
       mkdirSync(emptyDir, { recursive: true });
+      // A directory named like the gateway must be skipped; the later file must run.
+      mkdirSync(join(emptyDir, "wordink-gateway"));
       searchPath = `${emptyDir}:${searchPath}`;
     }
     if (opts.gatewayInCwd) {
@@ -104,6 +106,29 @@ describe("wordink-gateway-run", () => {
     const r = runWrapper(null, 0o755, undefined, { gatewayInCwd: true });
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain("ARGV=serve");
+  });
+
+  it("treats glob characters in PATH entries literally", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wordink-glob-"));
+    try {
+      const literal = join(dir, "gw[1]");
+      const globMatch = join(dir, "gw1");
+      for (const [d, tag] of [[literal, "literal"], [globMatch, "glob"]] as const) {
+        mkdirSync(d, { recursive: true });
+        writeFileSync(join(d, "wordink-gateway"), `#!/bin/sh\necho "ARGV=${tag}"\n`, { mode: 0o755 });
+      }
+      const r = spawnSync("sh", [WRAPPER], {
+        cwd: dir,
+        env: { PATH: `${literal}:/usr/bin:/bin`, HOME: dir, XDG_CONFIG_HOME: join(dir, "config") },
+        encoding: "utf8",
+        timeout: 15_000,
+      });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain("ARGV=literal");
+      expect(r.stdout).not.toContain("ARGV=glob");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("skips comments, blanks, invalid names and refused runtime names without aborting", () => {
