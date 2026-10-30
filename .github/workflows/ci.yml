@@ -103,6 +103,28 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - run: uv sync --frozen
       - run: uv run pytest -q
+      - name: shellcheck the macOS installer (plan M7)
+        run: shellcheck ../../examples/macos-dictation/install.sh
+  # macOS dictation adapters (plan M8): the mac/ tests on a real macOS runner with the `macos` extra, an import of
+  # every mac/ module with the real Quartz, AppKit and rumps (declarations only: nothing is called at import),
+  # the installer tests under macOS's own bash 3.2, and a plutil lint of the rendered LaunchAgent plist.
+  # `mac_hardware` tests are skipped here: they need a desktop session (plan M9).
+  python-sdk-macos:
+    runs-on: macos-15
+    defaults:
+      run: { working-directory: sdks/python }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --frozen --extra macos
+      - name: Import every mac/ module with the real native packages (declarations only, nothing is called at import)
+        run: uv run python -c "import importlib, pkgutil, Quartz, AppKit, rumps, wordink.desktop.mac as m; [importlib.import_module(x.name) for x in pkgutil.iter_modules(m.__path__, m.__name__ + '.')]"
+      - name: Lint the rendered LaunchAgent plist
+        run: |
+          sed -e "s|__LAUNCHER__|$HOME/.local/bin/wordink-dictd-mac|" -e "s|__LOG_DIR__|$HOME/Library/Logs/wordink|" ../../examples/macos-dictation/io.wordink.dictd.plist.tmpl > "$RUNNER_TEMP/io.wordink.dictd.plist"
+          plutil -lint "$RUNNER_TEMP/io.wordink.dictd.plist"
+      - name: mac/ tests, platform tests and installer tests (hardware tests skipped)
+        run: uv run pytest -q -rs tests/desktop/test_mac_*.py tests/desktop/test_dictd_platform.py
   # Windows dictation adapters (plan W9): the win/ tests on a real Windows runner with the `windows` extra,
   # plus an import of every win/ module (declarations only: nothing is called at import).
   python-sdk-windows:
