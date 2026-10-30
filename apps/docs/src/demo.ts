@@ -11,25 +11,39 @@ const mic = demo.querySelector("wordink-mic") as WordInkMic;
 const status = demo.querySelector("#demo-status") as HTMLElement;
 const progress = demo.querySelector("#demo-progress") as HTMLProgressElement;
 
+// What the status line says while the demo is not mid-dictation. A press shows "Listening…" over it,
+// and the end of that dictation restores it, so the line never stays stuck on "Listening…".
+let restingStatus = status.textContent ?? "";
+const rest = (text: string): void => {
+  restingStatus = text;
+  status.textContent = text;
+};
+
 const local = createLocalProvider();
 mic.provider = local;
 
 local.on("progress", (percent) => {
   progress.hidden = false;
   progress.value = percent;
-  status.textContent = `Downloading the model… ${Math.round(percent)}%`;
+  rest(`Downloading the model… ${Math.round(percent)}%`);
 });
 local.on("ready", ({ device }) => {
   progress.hidden = true;
-  status.textContent = `Model ready on ${device === "webgpu" ? "WebGPU" : "WebAssembly"}. Hold the button and speak.`;
+  rest(`Model ready on ${device === "webgpu" ? "WebGPU" : "WebAssembly"}. Hold the button and speak.`);
 });
 local.on("error", (err) => {
   progress.hidden = true;
-  status.textContent = `The model failed to load: ${err.message}`;
+  rest(`The model failed to load: ${err.message}`);
 });
 mic.addEventListener("wordink-start", () => {
   if (progress.hidden) status.textContent = "Listening… release to transcribe.";
 });
+// The dictation is over (text delivered, or it failed): put the resting message back.
+for (const type of ["wordink-transcript", "wordink-error"] as const) {
+  mic.addEventListener(type, () => {
+    if (progress.hidden) status.textContent = restingStatus;
+  });
+}
 
 if (isLocalHostname(location.hostname)) renderDevKeyForm();
 
@@ -61,12 +75,12 @@ function renderDevKeyForm(): void {
     if (!key) return;
     mic.devKey = key;
     mic.provider = select.value as CloudProvider;
-    status.textContent = `Using ${select.selectedOptions[0]?.text ?? select.value} with your dev key.`;
+    rest(`Using ${select.selectedOptions[0]?.text ?? select.value} with your dev key.`);
   });
   details.querySelector('[data-action="local"]')?.addEventListener("click", () => {
     mic.devKey = undefined;
     mic.provider = local;
     input.value = "";
-    status.textContent = "Using the local engine.";
+    rest("Using the local engine.");
   });
 }
