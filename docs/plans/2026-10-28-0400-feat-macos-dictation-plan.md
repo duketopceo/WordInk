@@ -198,6 +198,7 @@ flowchart LR
 
 ### M7. Installer and LaunchAgent
 
+- **Status:** built (`examples/macos-dictation/install.sh`, the plist template and README, tested on Linux against fake `uname`, `uv` and `launchctl`; shellcheck clean and bash 3.2 safe). `--switch` takes the name of the app to quit. The `plutil -lint` check rides with M8. Nothing has run on a Mac.
 - **Goal:** One script to install, uninstall and roll back. Not run on any Mac as part of this plan.
 - **Requirements:** R8, R10, KTD6
 - **Dependencies:** M6.
