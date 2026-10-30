@@ -209,6 +209,7 @@ flowchart LR
 
 ### M8. CI and test seams
 
+- **Status:** built (`python-sdk-macos` job on `macos-15` in `ci.yml`: real-framework import of every `mac/` module, the `mac/`, platform and installer tests, `plutil -lint` of the rendered plist; a shellcheck step on the Linux job; the `mac_hardware` marker and its skip hook in `tests/conftest.py`; `tests/desktop/test_mac_boundaries.py` fails if a native framework is imported outside its owner module). `rumps` is allowed in `menubar.py` as well as `quartz.py` and `appkit.py`.
 - **Goal:** Keep macOS code honest without a Mac on the desk.
 - **Dependencies:** M1 onward (grows with each unit).
 - **Files:** `.github/workflows/ci.yml` (a `python-sdk-macos` job on `macos-15`), `sdks/python/pyproject.toml` (pytest marker `mac_hardware`).

@@ -47,3 +47,8 @@ packages = ["src/wordink"]
 
 [tool.uv]
 package = true
+
+[tool.pytest.ini_options]
+markers = [
+    "mac_hardware: read-only smoke test that needs a real Mac with a desktop session; skipped everywhere else (plan step M9)",
+]
