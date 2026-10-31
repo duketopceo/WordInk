@@ -9,7 +9,8 @@ import pytest
 
 from wordink.client import WordInkError
 from wordink.desktop.interfaces import Indicator
-from wordink.desktop.mac.menubar import STATES, MAX_TOOLTIP, MenuActions, MenuBar, tooltip
+from wordink.desktop.mac import menubar as menubar_module
+from wordink.desktop.mac.menubar import STATES, MAX_TOOLTIP, MenuActions, MenuBar, osascript_notify, tooltip
 
 MAIN = threading.current_thread()
 
@@ -49,6 +50,8 @@ class FakeApp:
     @title.setter
     def title(self, v):
         on_main("status item")
+        if getattr(self, "broken", False):
+            raise RuntimeError("status item gone")
         self._title = v
 
     def run(self):
@@ -73,9 +76,9 @@ def fake_rumps():
     return r
 
 
-def started(actions=None):
+def started(actions=None, fallback=None):
     r = fake_rumps()
-    bar = MenuBar(actions, rumps=r)
+    bar = MenuBar(actions, rumps=r, fallback_notify=fallback or (lambda text: None))
     bar.run()
     return bar, r, FakeApp.last
 
@@ -85,7 +88,8 @@ def test_it_is_an_indicator_and_run_builds_the_status_item_and_a_timer():
     assert isinstance(bar, Indicator) and app.ran and app.title == STATES["off"][0]
     labels = [i.title for i in app.menu if i is not None]
     assert labels == [
-        "WordInk: stopped", "Start / stop dictation", "Copy last transcript", "Open config folder", "Open log", "Quit WordInk",
+        "WordInk: stopped", "Start / stop dictation", "Copy last transcript", "Set Groq key…", "Open config folder",
+        "Open log", "Quit WordInk",
     ]
     assert app.menu.count(None) == 3
 
@@ -135,12 +139,12 @@ def test_notice_posts_a_notification_without_changing_state():
 
 def test_menu_actions_call_the_right_handlers():
     calls = []
-    acts = MenuActions(*(lambda n=n: calls.append(n) for n in ("toggle", "copy", "config", "log", "quit")))
+    acts = MenuActions(*(lambda n=n: calls.append(n) for n in ("toggle", "copy", "config", "log", "quit", "key")))
     bar, r, app = started(acts)
     by_title = {i.title: i for i in app.menu if i is not None}
-    for t in ("Start / stop dictation", "Copy last transcript", "Open config folder", "Open log", "Quit WordInk"):
+    for t in ("Start / stop dictation", "Copy last transcript", "Open config folder", "Open log", "Quit WordInk", "Set Groq key…"):
         by_title[t].callback(by_title[t])
-    assert calls == ["toggle", "copy", "config", "log", "quit"] and r.quit_calls == 1
+    assert calls == ["toggle", "copy", "config", "log", "quit", "key"] and r.quit_calls == 1
 
 
 def test_quit_still_closes_the_menu_if_the_daemon_shutdown_raises():
@@ -172,11 +176,58 @@ def test_the_ui_is_only_touched_on_the_main_thread_even_when_the_daemon_posts_fr
 
 def test_a_failing_ui_update_is_logged_and_does_not_stop_later_updates(caplog):
     bar, r, app = started()
-    r.notification = lambda *a: (_ for _ in ()).throw(RuntimeError("center down"))
-    bar.show("error", "x")
+
+    app.broken = True
+    bar.show("recording")
     bar.show("idle")
     bar.drain()
-    assert bar.state == "idle" and "menu bar update failed" in caplog.text
+    assert bar.state == "idle" and caplog.text.count("menu bar update failed") == 2
+
+
+def test_rumps_notifications_without_a_bundle_fall_back_to_osascript_and_warn_once(caplog):
+    shown: list[str] = []
+    bar, r, _ = started(fallback=shown.append)
+
+    def no_info_plist(*args):
+        raise RuntimeError("Failed to setup the notification center")
+
+    r.notification = no_info_plist
+    for msg in ("first", "second", "third"):
+        bar.notice(msg)
+    bar.show("error", "boom")
+    bar.drain()
+    assert shown == ["first", "second", "third", "boom"]
+    assert caplog.text.count("rumps notifications unavailable") == 1 and "menu bar update failed" not in caplog.text
+
+
+def test_a_working_rumps_never_uses_the_fallback():
+    shown: list[str] = []
+    bar, r, _ = started(fallback=shown.append)
+    bar.notice("hello")
+    bar.drain()
+    assert r.notes == ["hello"] and shown == []
+
+
+def test_a_fallback_that_also_fails_is_reported_once_and_never_raises(caplog):
+    def broken(text):
+        raise FileNotFoundError("osascript")
+
+    bar, r, _ = started(fallback=broken)
+    r.notification = lambda *a: (_ for _ in ()).throw(RuntimeError("no bundle"))
+    for msg in ("a", "b", "c"):
+        bar.notice(msg)
+    bar.drain()
+    assert caplog.text.count("FileNotFoundError") == 1
+
+
+def test_osascript_gets_the_message_as_an_argument_not_as_script_source(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(menubar_module.subprocess, "run", lambda cmd, **kw: seen.update(cmd=cmd, kw=kw))
+    nasty = 'say "hi" & (do shell script "id")'
+    osascript_notify(nasty)
+    cmd = seen["cmd"]
+    assert cmd[0] == "osascript" and cmd[-1] == nasty
+    assert all(nasty not in part for part in cmd[:-1]) and seen["kw"]["check"] is True and seen["kw"]["timeout"] > 0
 
 
 def test_show_before_run_is_queued_and_applied_after():

@@ -17,6 +17,7 @@ from wordink.desktop.inject import InsertResult
 from wordink.desktop.mac.app import Adapters, MacApp, log_path, run_app, run_with_menu, setup_logging
 from wordink.desktop.mac.hotkey import HotkeyClash
 from wordink.desktop.mac.menubar import MenuBar
+from wordink.desktop.mac.secrets import KeyStore
 
 from dictd_helpers import short_tmp, wait_until
 
@@ -255,6 +256,111 @@ def test_the_menu_actions_reach_the_daemon_the_clipboard_and_the_folders(monkeyp
             await app.close()
 
     asyncio.run(go())
+
+
+class MemoryBackend:
+    def __init__(self, fail: Exception | None = None) -> None:
+        self.data: dict[tuple[str, str], str] = {}
+        self.fail = fail
+
+    def get_password(self, service, username):
+        return self.data.get((service, username))
+
+    def set_password(self, service, username, password):
+        if self.fail:
+            raise self.fail
+        self.data[(service, username)] = password
+
+    def delete_password(self, service, username):
+        self.data.pop((service, username), None)
+
+
+SECRET = "gsk_menu_entered_0123456789"
+
+
+def with_key_prompt(ad, answer, backend=None):
+    """Install a fake secure dialog and a Keychain stand-in; returns the prompts it was shown."""
+    shown: list[tuple[str, str]] = []
+
+    def prompt(title, message):
+        shown.append((title, message))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    ad.prompt_secret = prompt
+    ad.key_store = KeyStore(backend or MemoryBackend())
+    return shown, ad.key_store
+
+
+def test_set_groq_key_stores_it_in_the_keychain_uses_it_at_once_and_never_logs_it(caplog):
+    cfg, ad, ins, bar, rumps, _, _ = make()
+    shown, store = with_key_prompt(ad, f"  {SECRET}\n")
+    env: dict[str, str] = {}
+    caplog.set_level(logging.DEBUG)
+
+    async def go():
+        app = MacApp(cfg, ad, env, http=groq())
+        await app.start()
+        try:
+            bar.actions.set_key()  # the menu callback, on the main thread
+            bar.drain()
+            assert store.get().reveal() == SECRET and env["GROQ_API_KEY"] == SECRET
+            assert len(rumps.notifications) == 1 and "saved" in rumps.notifications[0]
+            await asyncio.to_thread(bar.actions.toggle)  # the pipeline reads `env` per dictation
+            await wait_until(lambda: app.daemon.state == "recording")
+            await asyncio.to_thread(bar.actions.toggle)
+            await wait_until(lambda: ins.texts)
+        finally:
+            await app.close()
+
+    asyncio.run(go())
+    assert shown and "never shown or logged" in shown[0][1]
+    assert SECRET not in caplog.text and all(SECRET not in n for n in rumps.notifications)
+
+
+def test_cancelling_the_key_prompt_changes_nothing():
+    cfg, ad, _, bar, rumps, _, _ = make()
+    _, store = with_key_prompt(ad, None)
+    env: dict[str, str] = {}
+    MacApp(cfg, ad, env, http=groq())
+    bar.actions.set_key()
+    bar.drain()
+    assert store.get() is None and env == {} and rumps.notifications == []
+
+
+def test_an_empty_key_is_refused_with_a_notification_and_nothing_is_stored():
+    cfg, ad, _, bar, rumps, _, _ = make()
+    _, store = with_key_prompt(ad, "   ")
+    env: dict[str, str] = {}
+    MacApp(cfg, ad, env, http=groq())
+    bar.actions.set_key()
+    bar.drain()
+    assert store.get() is None and env == {}
+    assert rumps.notifications == ["Could not save the Groq key: refusing to store an empty key"]
+
+
+def test_a_keychain_failure_is_reported_without_the_key_and_the_old_key_stays_in_use(caplog):
+    cfg, ad, _, bar, rumps, _, _ = make()
+    with_key_prompt(ad, SECRET, MemoryBackend(fail=PermissionError(f"denied for {SECRET}")))
+    env = {"GROQ_API_KEY": "gsk_old"}
+    MacApp(cfg, ad, env, http=groq())
+    caplog.set_level(logging.DEBUG)
+    bar.actions.set_key()
+    bar.drain()
+    assert env["GROQ_API_KEY"] == "gsk_old"
+    assert rumps.notifications == ["Could not save the Groq key: cannot write GROQ_API_KEY to the macOS Keychain (PermissionError)"]
+    assert SECRET not in caplog.text
+
+
+def test_a_dialog_that_cannot_open_points_to_the_terminal_command_and_logs_only_the_type(caplog):
+    cfg, ad, _, bar, rumps, _, _ = make()
+    with_key_prompt(ad, RuntimeError(f"NSAlert refused {SECRET}"))
+    MacApp(cfg, ad, {}, http=groq())
+    bar.actions.set_key()
+    bar.drain()
+    assert "wordink-dictd set-key" in rumps.notifications[0]
+    assert "RuntimeError" in caplog.text and SECRET not in caplog.text
 
 
 def test_copy_last_before_any_dictation_is_quiet():

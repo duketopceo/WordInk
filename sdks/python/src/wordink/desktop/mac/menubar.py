@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import ModuleType
@@ -28,6 +29,15 @@ STATES: dict[str, tuple[str, str]] = {
 }
 MAX_TOOLTIP = 120
 DRAIN_INTERVAL = 0.2
+NOTIFY_TIMEOUT = 5.0
+#: osascript takes the message as an argument, so it is never parsed as AppleScript source
+_OSASCRIPT = ("on run argv", 'display notification (item 1 of argv) with title "WordInk"', "end run")
+
+
+def osascript_notify(message: str) -> None:
+    """Show a notification without a bundle: works from a script in a venv, where rumps cannot."""
+    cmd = ["osascript", *(arg for line in _OSASCRIPT for arg in ("-e", line)), message]
+    subprocess.run(cmd, check=True, timeout=NOTIFY_TIMEOUT, capture_output=True)  # noqa: S603
 
 
 def tooltip(state: str, detail: str | None = None) -> str:
@@ -46,6 +56,7 @@ class MenuActions:
     open_config: Callable[[], object]
     open_log: Callable[[], object]
     quit: Callable[[], object]
+    set_key: Callable[[], object] = lambda: None  # noqa: E731
 
 
 def _load_rumps() -> ModuleType:
@@ -59,9 +70,18 @@ def _load_rumps() -> ModuleType:
 class MenuBar:
     """An `Indicator`. `show` and `notice` are safe from any thread; `run` blocks on the main thread."""
 
-    def __init__(self, actions: MenuActions | None = None, *, rumps: ModuleType | None = None) -> None:
+    def __init__(
+        self,
+        actions: MenuActions | None = None,
+        *,
+        rumps: ModuleType | None = None,
+        fallback_notify: Callable[[str], None] = osascript_notify,
+    ) -> None:
         self.actions = actions or MenuActions(*(lambda: None,) * 5)  # the app installs the real ones
         self._rumps = rumps
+        self._fallback_notify = fallback_notify
+        self._rumps_notify_ok = True
+        self._fallback_failed = False
         self._queue: queue.SimpleQueue[tuple[str, str, str | None]] = queue.SimpleQueue()
         self.state = "off"
         self._last_error: str | None = None
@@ -86,6 +106,7 @@ class MenuBar:
             None,
             rumps.MenuItem("Start / stop dictation", callback=lambda _: self.actions.toggle()),
             rumps.MenuItem("Copy last transcript", callback=lambda _: self.actions.copy_last()),
+            rumps.MenuItem("Set Groq key…", callback=lambda _: self.actions.set_key()),
             None,
             rumps.MenuItem("Open config folder", callback=lambda _: self.actions.open_config()),
             rumps.MenuItem("Open log", callback=lambda _: self.actions.open_log()),
@@ -98,6 +119,24 @@ class MenuBar:
             self.actions.quit()
         finally:
             (self._rumps or _load_rumps()).quit_application()
+
+    def _notify(self, rumps: ModuleType, message: str) -> None:
+        """rumps notifications need a bundle Info.plist, which a venv script does not have: fall back
+        to osascript, and say so once instead of on every notification."""
+        text = message[:300]
+        if self._rumps_notify_ok:
+            try:
+                rumps.notification("WordInk", "", text)
+                return
+            except Exception as exc:  # RuntimeError: "Failed to setup the notification center"
+                self._rumps_notify_ok = False
+                log.warning("rumps notifications unavailable (%s); using osascript", type(exc).__name__)
+        try:
+            self._fallback_notify(text)
+        except (OSError, subprocess.SubprocessError) as exc:
+            if not self._fallback_failed:
+                self._fallback_failed = True
+                log.warning("notifications unavailable: %s", type(exc).__name__)
 
     def drain(self, _timer: object = None) -> None:
         """Apply queued updates. Called by the main-thread timer; tests call it directly."""
@@ -112,7 +151,7 @@ class MenuBar:
                 if kind == "state":
                     self._apply_state(rumps, a, b)
                 else:
-                    rumps.notification("WordInk", "", a[:300])
+                    self._notify(rumps, a)
             except Exception as exc:  # a menu-bar glitch must never take dictation down
                 log.warning("menu bar update failed: %s", type(exc).__name__)
 
@@ -136,7 +175,7 @@ class MenuBar:
         message = detail or "Dictation failed"
         if message != self._last_error:  # once per distinct failure
             self._last_error = message
-            rumps.notification("WordInk", "", message[:300])
+            self._notify(rumps, message)
 
     def run(self) -> None:
         """Show the status item and run the Cocoa run loop. Blocks; call on the main thread."""
