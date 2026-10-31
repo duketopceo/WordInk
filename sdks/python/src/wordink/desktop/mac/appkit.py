@@ -81,3 +81,45 @@ def microphone_access() -> str | None:
 
 def pasteboard_clear() -> None:
     _appkit().NSPasteboard.generalPasteboard().clearContents()
+
+
+def _ensure_edit_menu(ak) -> None:
+    """A menu-bar-only app has no Edit menu, so Cmd+V does nothing in a text field. Add one."""
+    app = ak.NSApplication.sharedApplication()
+    if app.mainMenu() is not None:
+        return
+    main, top = ak.NSMenu.alloc().init(), ak.NSMenuItem.alloc().init()
+    main.addItem_(top)
+    edit = ak.NSMenu.alloc().initWithTitle_("Edit")
+    entries = (("Cut", "cut:", "x"), ("Copy", "copy:", "c"), ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a"))
+    for title, action, key in entries:
+        edit.addItemWithTitle_action_keyEquivalent_(title, action, key)
+    top.setSubmenu_(edit)
+    app.setMainMenu_(main)
+
+
+def prompt_secret(title: str, message: str, ok: str = "Save", cancel: str = "Cancel") -> str | None:
+    """Ask for a secret in a dialog whose field shows dots. None when cancelled. Main thread only.
+
+    `rumps.Window` has no secure mode, so this is an NSAlert with an NSSecureTextField.
+    """
+    from Foundation import NSThread  # noqa: PLC0415
+
+    if not NSThread.isMainThread():
+        raise RuntimeError("the secret prompt must run on the main thread")
+    ak = _appkit()
+    _ensure_edit_menu(ak)
+    ak.NSApp.activateIgnoringOtherApps_(True)
+    alert = ak.NSAlert.alloc().init()
+    alert.setMessageText_(title)
+    alert.setInformativeText_(message)
+    alert.addButtonWithTitle_(ok)
+    alert.addButtonWithTitle_(cancel)
+    field = ak.NSSecureTextField.alloc().initWithFrame_(((0, 0), (320, 24)))
+    alert.setAccessoryView_(field)
+    alert.window().setInitialFirstResponder_(field)
+    if alert.runModal() != ak.NSAlertFirstButtonReturn:
+        return None
+    value = str(field.stringValue())
+    field.setStringValue_("")
+    return value

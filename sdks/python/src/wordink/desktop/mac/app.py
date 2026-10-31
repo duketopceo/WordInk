@@ -18,7 +18,7 @@ import os
 import subprocess
 import sys
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -33,7 +33,7 @@ from ..interfaces import AudioSource, HotkeySource, Transport
 from ..recorder import Recorder
 from .insert import MacInserter, mac_insert_config_from
 from .menubar import MenuActions, MenuBar
-from .secrets import KeyStore, env_with_stored_key
+from .secrets import KEY_NAME, KeyStore, env_with_stored_key
 
 log = logging.getLogger("wordink.dictd")
 
@@ -47,6 +47,8 @@ class Adapters:
     transport: Transport | None = None  # None: the Unix socket under cfg.runtime_dir
     clipboard_set: Callable[[str], None] | None = None  # for "Copy last transcript"
     open_path: Callable[[Path], None] | None = None  # `open` on a Mac
+    prompt_secret: Callable[[str, str], str | None] | None = None  # a masked dialog; None when cancelled
+    key_store: KeyStore | None = None  # None: the login Keychain
 
 
 class _StateAndMenu(StateFile):
@@ -71,7 +73,7 @@ class MacApp:
         *,
         http: httpx.BaseTransport | None = None,
     ) -> None:
-        self.cfg, self.ad = cfg, adapters
+        self.cfg, self.ad, self._env = cfg, adapters, env
         self.stop_event = asyncio.Event()
         self._loop: asyncio.AbstractEventLoop | None = None
         self.hotkeys_active = False
@@ -100,6 +102,7 @@ class MacApp:
                 open_config=lambda: self._open(cfg.vocab_path.parent),
                 open_log=lambda: self._open(log_path()),
                 quit=self.request_stop,
+                set_key=self._set_key,
             )
             adapters.menubar.on_tick = self._main_thread_tick
 
@@ -121,6 +124,28 @@ class MacApp:
             self.ad.clipboard_set(self.cfg.last_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):  # no transcript yet, or an unreadable file
             log.info("no last transcript to copy yet")
+
+    def _set_key(self) -> None:
+        """Menu action, main thread: ask for the Groq key, store it in the Keychain, use it from now on."""
+        menubar, prompt = self.ad.menubar, self.ad.prompt_secret
+        if menubar is None or prompt is None:
+            return
+        try:
+            value = prompt("Set Groq key", "Paste your Groq API key. It is stored in the macOS Keychain and never shown or logged.")
+        except Exception as exc:  # AppKit refused the dialog; never include its message
+            log.warning("the key prompt failed: %s", type(exc).__name__)
+            menubar.notice("Could not open the key prompt. Run `wordink-dictd set-key` in Terminal instead.")
+            return
+        if value is None:
+            return  # cancelled
+        try:
+            (self.ad.key_store or KeyStore()).set(value)
+        except WordInkError as exc:  # its messages name the store and the error type, never the value
+            menubar.notice(f"Could not save the Groq key: {exc}")
+            return
+        if isinstance(self._env, MutableMapping):
+            self._env[KEY_NAME] = value.strip()  # the pipeline reads this mapping on every dictation
+        menubar.notice("Groq key saved to the macOS Keychain. It is used from the next dictation.")
 
     def _open(self, path: Path) -> None:
         if self.ad.open_path is not None:
@@ -217,6 +242,7 @@ def real_adapters(cfg: DictateConfig) -> Adapters:
         menubar=menubar,
         clipboard_set=appkit.pasteboard_copy,
         open_path=_open_with_finder,
+        prompt_secret=appkit.prompt_secret,
     )
 
 
