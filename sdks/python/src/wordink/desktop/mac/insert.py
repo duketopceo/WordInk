@@ -2,7 +2,10 @@
 
 Strategy, in order: skip password managers (by bundle id); when a secure field has focus or
 Accessibility is not granted, copy to the pasteboard and notify (typing would be dropped); paste
-into terminals and for long text; otherwise type Unicode key events in small chunks. Every OS
+into terminals and for anything that needs more than one Unicode key event; otherwise type that one
+event. Several typed events race in apps that handle input asynchronously (Electron), so the chunks
+can land out of order; a paste is a single atomic insert. The user's pasteboard, rich formats
+included, is restored afterwards. Every OS
 call goes through `InsertApi`, so the whole policy is tested on Linux with a fake. `NativeInsertApi`
 at the bottom wires the real calls from `quartz.py` and `appkit.py`; it has not run on a Mac (M9).
 """
@@ -33,7 +36,9 @@ DEFAULT_DENY: tuple[str, ...] = (
     "1password", "onepassword", "bitwarden", "keepassxc", "keepass", "enpass", "protonpass", "dashlane", "lastpass",
 )
 CHUNK_UNITS = 20  # UTF-16 units per Unicode key event (the CGEvent limit)
-LONG_TEXT_CHARS = 200
+#: text needing more key events than this is pasted: one event cannot be reordered, two can
+LONG_TEXT_UNITS = CHUNK_UNITS
+TYPE_GAP = 0.01  # seconds between typed chunks, for the rare text that must be typed after all
 PASTEBOARD_RETRIES = 3
 
 Event = tuple[str, int]  # ("unit", utf16 code unit) or ("vk", virtual-key code)
@@ -43,10 +48,15 @@ class PasteboardBusy(Exception):
     """The pasteboard could not be read or written right now. Retryable."""
 
 
+#: one pasteboard item as (type, data) pairs; a snapshot holds one entry per item
+PasteboardItems = tuple[tuple[tuple[str, bytes], ...], ...]
+
+
 @dataclass(frozen=True)
 class PasteboardSnapshot:
     text: str | None  # the current plain string, if any
-    other_formats: bool  # anything besides text (images, files, rich data): we will not clobber it
+    other_formats: bool  # anything besides text (HTML, images, files, rich data)
+    items: PasteboardItems | None = None  # every format, bytes included; None when it cannot be captured whole
 
 
 class InsertApi(Protocol):
@@ -72,13 +82,17 @@ class InsertApi(Protocol):
 
     def pasteboard_clear(self) -> None: ...
 
+    def pasteboard_restore(self, items: PasteboardItems) -> None:
+        """Write back every format of every item exactly as `PasteboardSnapshot.items` captured them."""
+        ...
+
 
 @dataclass(frozen=True)
 class MacInsertConfig:
     terminals: frozenset[str] = field(default_factory=lambda: frozenset(DEFAULT_TERMINALS))
     deny: frozenset[str] = field(default_factory=lambda: frozenset(DEFAULT_DENY))
     paste_delay: float = 0.4
-    long_text: int = LONG_TEXT_CHARS
+    long_text: int = LONG_TEXT_UNITS
     notify: bool = True
 
 
@@ -217,12 +231,19 @@ class MacInserter:
                 now = self._retry(self.api.pasteboard_snapshot)
                 if now.text != ours or now.other_formats:  # type: ignore[attr-defined]
                     return  # the user (or another app) changed it: leave theirs alone
-                if saved.text:
-                    self._retry(lambda: self.api.pasteboard_set(saved.text))  # type: ignore[arg-type]
-                else:
-                    self._retry(self.api.pasteboard_clear)
+                self._put_back(saved)
             except PasteboardBusy:
                 log.warning("could not restore the pasteboard: it stayed busy")
+
+    def _put_back(self, saved: PasteboardSnapshot) -> None:
+        """Exactly one of: every format back, the plain text back, or an empty pasteboard."""
+        if saved.other_formats and saved.items is not None:
+            self._retry(lambda: self.api.pasteboard_restore(saved.items))  # type: ignore[arg-type]
+            return
+        if saved.text:
+            self._retry(lambda: self.api.pasteboard_set(saved.text))  # type: ignore[arg-type]
+            return
+        self._retry(self.api.pasteboard_clear)
 
     def _paste(self, text: str) -> bool:
         """Pasteboard + Cmd+V, restore later. False when it must not or cannot paste."""
@@ -230,8 +251,10 @@ class MacInserter:
         with self._lock:
             try:
                 snap = self._retry(self.api.pasteboard_snapshot)
-                if snap.other_formats:  # type: ignore[attr-defined]
-                    return False  # an image or files are on the pasteboard: do not destroy them
+                # Too big or lazily promised to put back whole: leave it untouched. The caller types, and
+                # typing never writes the pasteboard, so nothing of the user's is lost on that path.
+                if snap.other_formats and snap.items is None:  # type: ignore[attr-defined]
+                    return False
                 self._generation += 1
                 generation = self._generation
                 if self._pending_restore is None:  # else the pasteboard holds our previous text, not the user's
@@ -262,7 +285,7 @@ class MacInserter:
                 if i == 0:
                     raise
                 raise _TypingStopped(events_to_text([ev for b in batches[i:] for ev in b])) from exc
-            self._sleep(0.002)
+            self._sleep(TYPE_GAP)
 
     def _hand_over(self, text: str, why: str, *, notify: bool = True) -> InsertResult:
         with self._lock:
@@ -297,7 +320,7 @@ class MacInserter:
             self._ax_notified = True
             return result
         terminal = bundle in self.cfg.terminals
-        if terminal or len(text) > self.cfg.long_text:
+        if terminal or len(plan_events(text)) > self.cfg.long_text:
             if self._paste(text):
                 return InsertResult("pasted", bundle or "long text")
         try:
@@ -344,8 +367,8 @@ class NativeInsertApi:
         self._quartz.post_paste()
 
     def pasteboard_snapshot(self) -> PasteboardSnapshot:
-        text, other = self._appkit.pasteboard_snapshot()
-        return PasteboardSnapshot(text, other)
+        text, other, items = self._appkit.pasteboard_snapshot()
+        return PasteboardSnapshot(text, other, items)
 
     def pasteboard_set(self, text: str) -> None:
         if not self._appkit.pasteboard_set(text):
@@ -353,3 +376,7 @@ class NativeInsertApi:
 
     def pasteboard_clear(self) -> None:
         self._appkit.pasteboard_clear()
+
+    def pasteboard_restore(self, items: PasteboardItems) -> None:
+        if not self._appkit.pasteboard_restore(items):
+            raise PasteboardBusy("AppKit refused the pasteboard restore")
