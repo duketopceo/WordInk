@@ -105,7 +105,7 @@ examples/macos-dictation/
 
 ```mermaid
 flowchart LR
-  H[hotkey thread: RegisterEventHotKey / event tap] -->|press / release| D[daemon state machine]
+  H[main thread: RegisterEventHotKey, events from the Cocoa loop] -->|press / release| D[daemon state machine]
   M[menu bar, main thread] --> D
   C[CLI over Unix socket] --> D
   D --> A[sounddevice capture]
@@ -124,7 +124,7 @@ flowchart LR
 - **Hotkey clashes with system or other-app shortcuts.** Mitigation: R2 reserved table plus the registration error, and `doctor` lists the configured chords.
 - **Main-thread rule.** AppKit must run on the main thread. Mitigation: KTD4, with the daemon on a worker thread and a test that the menu object is only touched through its queue.
 - **Unix socket path length.** Mitigation: KTD1, with a test for the 104-byte limit.
-- **Sleep and wake.** The event tap or the audio stream can die after wake. Mitigation: the hotkey thread re-registers on a wake notification and the audio source reopens its stream per recording (it already does).
+- **Sleep and wake.** The event tap or the audio stream can die after wake. Mitigation: the main-thread timer re-registers the hotkeys when it detects a wake and the audio source reopens its stream per recording (it already does).
 - **No Mac to test on.** Everything is tested against fakes on Linux until M9. Mitigation: the `macos-15` CI job imports every module with the real native packages (declarations only), and M9 is the human check. Never claim "works on macOS" before M9.
 
 ---

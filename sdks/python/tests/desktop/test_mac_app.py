@@ -49,13 +49,17 @@ class FakeAudio:
 class FakeHotkeys:
     def __init__(self, fail: Exception | None = None) -> None:
         self.fail, self.handlers, self.stopped = fail, None, False
+        self.start_thread: threading.Thread | None = None
+        self.stop_thread: threading.Thread | None = None
 
     def start(self, press, release, toggle):
+        self.start_thread = threading.current_thread()
         if self.fail:
             raise self.fail
         self.handlers = (press, release, toggle)
 
     def stop(self):
+        self.stop_thread = threading.current_thread()
         self.stopped = True
 
 
@@ -76,6 +80,7 @@ class FakeRumps:
         self.quit = threading.Event()
         self.ran = threading.Event()
         self.titles: list[str] = []
+        self.timers: list = []
         outer = self
 
         class App:
@@ -83,15 +88,17 @@ class FakeRumps:
                 self.title = title
 
             def run(self):
+                for tick in list(outer.timers):  # the Cocoa timer firing on the main thread
+                    tick()
                 outer.ran.set()
                 outer.quit.wait(5)
 
         class Timer:
             def __init__(self, fn, interval):
-                pass
+                self.fn = fn
 
             def start(self):
-                pass
+                outer.timers.append(self.fn)
 
         self.App, self.Timer = App, Timer
 
@@ -136,6 +143,7 @@ def test_hold_to_talk_end_to_end():
     async def go():
         app = MacApp(cfg, ad, {"GROQ_API_KEY": "gsk_test"}, http=groq())
         await app.start()
+        app.start_hotkeys()
         try:
             press, release, _toggle = ad.hotkeys.handlers
             await asyncio.to_thread(press)  # the hotkey thread
@@ -149,8 +157,24 @@ def test_hold_to_talk_end_to_end():
             assert cfg.last_path.read_text() == "Ship it on the Mac today."
             assert (await app.daemon.transport.request("status")) == {"ok": True, "state": "idle"}
         finally:
+            app.stop_hotkeys()
             await app.close()
         assert ad.hotkeys.stopped and not cfg.socket_path.exists()
+
+    asyncio.run(go())
+
+
+def test_starting_the_daemon_leaves_the_hotkeys_to_the_main_thread():
+    cfg, ad, *_ = make()
+
+    async def go():
+        app = MacApp(cfg, ad, {}, http=groq())
+        await app.start()  # in the real app this runs on the daemon's worker thread
+        try:
+            assert ad.hotkeys.start_thread is None and not app.hotkeys_active
+        finally:
+            await app.close()
+        assert ad.hotkeys.stop_thread is None
 
     asyncio.run(go())
 
@@ -161,6 +185,7 @@ def test_the_socket_and_the_toggle_chord_both_drive_the_daemon():
     async def go():
         app = MacApp(cfg, ad, {"GROQ_API_KEY": "gsk_test"}, http=groq())
         await app.start()
+        app.start_hotkeys()
         try:
             assert (await app.daemon.transport.request("toggle"))["ok"]
             await wait_until(lambda: app.daemon.state == "recording")
@@ -194,6 +219,7 @@ def test_a_hotkey_clash_leaves_the_menu_and_the_socket_working_and_says_so():
     async def go():
         app = MacApp(cfg, ad, {}, http=groq())
         await app.start()
+        app.start_hotkeys()
         try:
             assert not app.hotkeys_active
             bar.drain()
@@ -257,6 +283,7 @@ def test_a_transcript_survives_an_inserter_that_fails():
     async def go():
         app = MacApp(cfg, ad, {"GROQ_API_KEY": "gsk_test"}, http=groq())
         await app.start()
+        app.start_hotkeys()
         try:
             await asyncio.to_thread(ad.hotkeys.handlers[0])
             await wait_until(lambda: app.daemon.state == "recording")
@@ -275,7 +302,7 @@ def test_the_menu_bar_runs_on_the_main_thread_and_quit_ends_everything():
 
     def drive():
         assert rumps.ran.wait(5)
-        ad.hotkeys.handlers[0]()  # a hotkey press from "the hotkey thread"
+        ad.hotkeys.handlers[0]()  # a hotkey press, as the Cocoa loop delivers it
         deadline = threading.Event()
         for _ in range(500):
             if bar._queue.qsize() or bar.state == "recording":
@@ -288,6 +315,9 @@ def test_the_menu_bar_runs_on_the_main_thread_and_quit_ends_everything():
     code["rc"] = run_with_menu(cfg, ad, {"GROQ_API_KEY": "gsk_test"}, http=groq())
     t.join(5)
     assert code["rc"] == 0 and ad.hotkeys.stopped and not cfg.socket_path.exists()
+    # registered inside the Cocoa loop and unregistered after it, both on the main thread
+    assert ad.hotkeys.start_thread is threading.main_thread()
+    assert ad.hotkeys.stop_thread is threading.main_thread()
 
 
 def test_a_startup_failure_is_raised_and_the_menu_never_opens():
