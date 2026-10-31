@@ -40,7 +40,9 @@ def has_other_formats(types: list[str]) -> bool:
 def pasteboard_items(max_bytes: int = MAX_SNAPSHOT_BYTES) -> tuple[tuple[tuple[str, bytes], ...], ...] | None:
     """Every format of every item, so a paste can put rich content (HTML, images, files) back exactly.
 
-    None when a format has no data right now (a lazy promise) or the total passes `max_bytes`.
+    None when a format has no data right now (a lazy promise) or the total passes `max_bytes`. The
+    whole snapshot is dropped rather than a partial one: a restore that silently omits a format
+    would be a lossy copy of what the user had, and the caller leaves such a pasteboard untouched.
     """
     pb = _appkit().NSPasteboard.generalPasteboard()
     out: list[tuple[tuple[str, bytes], ...]] = []

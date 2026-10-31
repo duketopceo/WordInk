@@ -231,14 +231,19 @@ class MacInserter:
                 now = self._retry(self.api.pasteboard_snapshot)
                 if now.text != ours or now.other_formats:  # type: ignore[attr-defined]
                     return  # the user (or another app) changed it: leave theirs alone
-                if saved.other_formats and saved.items is not None:
-                    self._retry(lambda: self.api.pasteboard_restore(saved.items))  # type: ignore[arg-type]
-                elif saved.text:
-                    self._retry(lambda: self.api.pasteboard_set(saved.text))  # type: ignore[arg-type]
-                else:
-                    self._retry(self.api.pasteboard_clear)
+                self._put_back(saved)
             except PasteboardBusy:
                 log.warning("could not restore the pasteboard: it stayed busy")
+
+    def _put_back(self, saved: PasteboardSnapshot) -> None:
+        """Exactly one of: every format back, the plain text back, or an empty pasteboard."""
+        if saved.other_formats and saved.items is not None:
+            self._retry(lambda: self.api.pasteboard_restore(saved.items))  # type: ignore[arg-type]
+            return
+        if saved.text:
+            self._retry(lambda: self.api.pasteboard_set(saved.text))  # type: ignore[arg-type]
+            return
+        self._retry(self.api.pasteboard_clear)
 
     def _paste(self, text: str) -> bool:
         """Pasteboard + Cmd+V, restore later. False when it must not or cannot paste."""
@@ -246,8 +251,10 @@ class MacInserter:
         with self._lock:
             try:
                 snap = self._retry(self.api.pasteboard_snapshot)
+                # Too big or lazily promised to put back whole: leave it untouched. The caller types, and
+                # typing never writes the pasteboard, so nothing of the user's is lost on that path.
                 if snap.other_formats and snap.items is None:  # type: ignore[attr-defined]
-                    return False  # too big or lazily promised to put back whole: do not destroy it
+                    return False
                 self._generation += 1
                 generation = self._generation
                 if self._pending_restore is None:  # else the pasteboard holds our previous text, not the user's
