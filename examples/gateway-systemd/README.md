@@ -3,9 +3,12 @@
 This runs `wordink-gateway serve` on `127.0.0.1:8941`. Desktop dictation apps such as Voxtype, or any client of the OpenAI audio API, point at it. Provider keys come from omaseal at start and never touch disk.
 
 ```sh
+# On Omarchy, ./install-omarchy.sh in this directory does all of this and wires Voxtype.
 # @wordink/server isn't on npm yet; build the CLI from this repo:
 pnpm --filter @wordink/server build
-install -Dm755 packages/server/dist/bin/wordink-gateway.js ~/.local/bin/wordink-gateway
+chmod +x packages/server/dist/bin/wordink-gateway.js
+# symlink, don't copy: the compiled CLI imports sibling modules by relative path
+ln -sf "$PWD/packages/server/dist/bin/wordink-gateway.js" ~/.local/bin/wordink-gateway
 # (once published: npm install -g @wordink/server)
 
 mkdir -p ~/.config/wordink ~/.local/bin ~/.config/systemd/user
