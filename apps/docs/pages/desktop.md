@@ -61,6 +61,8 @@ Provider keys resolve at serve time: a `keyEnv` whose variable is unset (or reso
 
 ## Voxtype (Linux)
 
+On Omarchy, `examples/gateway-systemd/install-omarchy.sh` builds the gateway, installs it as a systemd user service with keys from omaseal, and writes the `[whisper]` section below for you. Run it from a checkout of this repo.
+
 In `~/.config/voxtype/config.toml`, under `[whisper]`:
 
 ```toml
