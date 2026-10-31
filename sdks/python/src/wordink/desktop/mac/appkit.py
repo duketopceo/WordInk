@@ -17,6 +17,7 @@ _TEXT_TYPES = frozenset(
     }
 )
 _MARKER_PREFIX = "org.nspasteboard."
+MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024  # a bigger pasteboard (a screenshot burst, a video) is never copied around
 CONCEALED, TRANSIENT = "org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"
 
 
@@ -36,12 +37,52 @@ def has_other_formats(types: list[str]) -> bool:
     return any(t not in _TEXT_TYPES and not t.startswith(_MARKER_PREFIX) for t in types)
 
 
-def pasteboard_snapshot() -> tuple[str | None, bool]:
+def pasteboard_items(max_bytes: int = MAX_SNAPSHOT_BYTES) -> tuple[tuple[tuple[str, bytes], ...], ...] | None:
+    """Every format of every item, so a paste can put rich content (HTML, images, files) back exactly.
+
+    None when a format has no data right now (a lazy promise) or the total passes `max_bytes`. The
+    whole snapshot is dropped rather than a partial one: a restore that silently omits a format
+    would be a lossy copy of what the user had, and the caller leaves such a pasteboard untouched.
+    """
+    pb = _appkit().NSPasteboard.generalPasteboard()
+    out: list[tuple[tuple[str, bytes], ...]] = []
+    total = 0
+    for item in pb.pasteboardItems() or []:
+        entry: list[tuple[str, bytes]] = []
+        for kind in item.types():
+            data = item.dataForType_(kind)
+            if data is None:
+                return None
+            total += int(data.length())
+            if total > max_bytes:
+                return None
+            entry.append((str(kind), bytes(data)))
+        out.append(tuple(entry))
+    return tuple(out)
+
+
+def pasteboard_snapshot() -> tuple[str | None, bool, tuple[tuple[tuple[str, bytes], ...], ...] | None]:
     ak = _appkit()
     pb = ak.NSPasteboard.generalPasteboard()
     types = [str(t) for t in (pb.types() or [])]
     text = pb.stringForType_(ak.NSPasteboardTypeString)
-    return (str(text) if text is not None else None), has_other_formats(types)
+    other = has_other_formats(types)
+    return (str(text) if text is not None else None), other, (pasteboard_items() if other else None)
+
+
+def pasteboard_restore(items: tuple[tuple[tuple[str, bytes], ...], ...]) -> bool:
+    """Replace the pasteboard with `items`. False when AppKit refused the write."""
+    ak = _appkit()
+    pb = ak.NSPasteboard.generalPasteboard()
+    pb.clearContents()
+    restored = []
+    for entry in items:
+        item = ak.NSPasteboardItem.alloc().init()
+        for kind, payload in entry:
+            if not item.setData_forType_(ak.NSData.dataWithBytes_length_(payload, len(payload)), kind):
+                return False
+        restored.append(item)
+    return bool(pb.writeObjects_(restored))
 
 
 def pasteboard_set(text: str) -> bool:

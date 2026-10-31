@@ -9,15 +9,16 @@ import pytest
 from wordink.client import WordInkError
 from wordink.desktop.mac.appkit import has_other_formats
 from wordink.desktop.mac.insert import (
-    KVK_RETURN, MacInserter, MacInsertConfig, NativeInsertApi, PasteboardBusy, PasteboardSnapshot, chunks,
-    events_to_text, mac_insert_config_from, plan_events,
+    CHUNK_UNITS, KVK_RETURN, TYPE_GAP, MacInserter, MacInsertConfig, NativeInsertApi, PasteboardBusy,
+    PasteboardSnapshot, chunks, events_to_text, mac_insert_config_from, plan_events,
 )
 from wordink.desktop.mac.quartz import split_batch, units_to_text
 
 
 class FakeApi:
-    def __init__(self, bundle="com.apple.TextEdit", secure=False, ax=True, board="old", other=False):
+    def __init__(self, bundle="com.apple.TextEdit", secure=False, ax=True, board="old", other=False, items=None):
         self.bundle, self.secure, self.ax, self.board, self.other = bundle, secure, ax, board, other
+        self.items = items  # every format of the user's pasteboard, when `other` is set
         self.calls: list[tuple] = []
         self.busy_times = 0
         self.fail_typing = False
@@ -52,12 +53,18 @@ class FakeApi:
 
     def pasteboard_snapshot(self):
         self._busy()
-        return PasteboardSnapshot(self.board, self.other)
+        return PasteboardSnapshot(self.board, self.other, self.items if self.other else None)
 
     def pasteboard_set(self, text):
         self._busy()
-        self.board, self.other = text, False
+        self.board, self.other, self.items = text, False, None
         self.calls.append(("set", text))
+
+    def pasteboard_restore(self, items):
+        self._busy()
+        self.items, self.other = items, True
+        self.board = next((d.decode() for item in items for t, d in item if t == "public.utf8-plain-text"), None)
+        self.calls.append(("restore", items))
 
     def pasteboard_clear(self):
         self.board = None
@@ -89,6 +96,11 @@ def make(api=None, cfg=None):
     later, notes = Later(), []
     ins = MacInserter(api, cfg, notifier=notes.append, sleep=lambda s: None, schedule=later)
     return ins, api, later, notes
+
+
+HTML_BOARD = (
+    (("public.utf8-plain-text", b"copied"), ("public.html", b"<b>copied</b>")),
+)
 
 
 def test_ascii_and_emoji_type_as_utf16_units_without_splitting_pairs():
@@ -159,12 +171,49 @@ def test_a_custom_deny_and_terminal_list_comes_from_the_config_table():
     assert ins.insert("x").method == "typed"  # the default list was replaced
 
 
-def test_non_text_on_the_pasteboard_prevents_paste_and_types_instead():
-    ins, api, later, _ = make(FakeApi(other=True))
+def test_a_pasteboard_that_cannot_be_captured_whole_is_never_replaced_and_the_text_is_typed():
+    ins, api, later, _ = make(FakeApi(other=True, items=None))
     r = ins.insert("y" * 300)
     assert r.method == "typed" and "set" not in api.kinds()
     later.run_all()
     assert api.other is True
+
+
+def test_rich_pasteboard_content_is_pasted_over_and_put_back_whole():
+    api = FakeApi(board="copied", other=True, items=HTML_BOARD)
+    ins, _, later, _ = make(api)
+    text = "dictated " * 30
+    assert ins.insert(text).method == "pasted" and api.board == text and api.typed() == ""
+    later.run_all()
+    assert api.items == HTML_BOARD and api.other is True and api.kinds()[-1] == "restore"
+
+
+def test_a_user_copy_over_a_rich_pasteboard_is_left_alone_on_restore():
+    api = FakeApi(board="copied", other=True, items=HTML_BOARD)
+    ins, _, later, _ = make(api)
+    ins.insert("dictated " * 30)
+    api.board = "the user copied this"
+    later.run_all()
+    assert api.board == "the user copied this" and "restore" not in api.kinds()
+
+
+def test_text_that_needs_more_than_one_key_event_is_pasted_so_chunks_cannot_reorder():
+    ins, api, _, _ = make()
+    assert ins.insert("a" * CHUNK_UNITS).method == "typed"
+    ins, api, _, _ = make()
+    assert ins.insert("a" * (CHUNK_UNITS + 1)).method == "pasted"
+    ins, api, _, _ = make()
+    assert ins.insert("😀" * 11).method == "pasted"  # 22 UTF-16 units: two events
+    ins, api, _, _ = make()
+    assert ins.insert("😀" * 10).method == "typed"  # exactly 20 units: one event
+
+
+def test_typed_chunks_are_paced_when_text_must_be_typed_after_all():
+    sleeps: list[float] = []
+    api = FakeApi(other=True, items=None)
+    ins = MacInserter(api, notifier=None, sleep=sleeps.append, schedule=Later())
+    assert ins.insert("0123456789" * 5).method == "typed"
+    assert api.typed() == "0123456789" * 5 and sleeps == [TYPE_GAP] * 3
 
 
 def test_a_user_copy_before_the_restore_is_left_alone():
@@ -281,7 +330,7 @@ def test_typing_that_stops_partway_hands_over_only_the_rest():
         real(events)
 
     api.send_events = flaky
-    ins, _, _, notes = make(api)
+    ins, _, _, notes = make(api, MacInsertConfig(long_text=1000))
     text = "0123456789" * 5  # three batches of at most 20 units
     r = ins.insert(text)
     assert r.method == "clipboard" and api.board == text[20:] and "partway" in notes[0]
