@@ -67,6 +67,7 @@ class MenuBar:
         self._last_error: str | None = None
         self._app = None
         self._status_item = None
+        self.on_tick: Callable[[], None] | None = None  # runs on the main thread, once per drain
 
     # -- daemon side (any thread): only enqueue -----------------------------------------------------
     def show(self, state: str, detail: str | None = None) -> None:
@@ -101,6 +102,7 @@ class MenuBar:
     def drain(self, _timer: object = None) -> None:
         """Apply queued updates. Called by the main-thread timer; tests call it directly."""
         rumps = self._rumps or _load_rumps()
+        self._run_tick()
         while True:
             try:
                 kind, a, b = self._queue.get_nowait()
@@ -113,6 +115,14 @@ class MenuBar:
                     rumps.notification("WordInk", "", a[:300])
             except Exception as exc:  # a menu-bar glitch must never take dictation down
                 log.warning("menu bar update failed: %s", type(exc).__name__)
+
+    def _run_tick(self) -> None:
+        if self.on_tick is None:
+            return
+        try:
+            self.on_tick()
+        except Exception as exc:  # a failing hook must never take the menu bar down
+            log.warning("menu bar tick failed: %s", type(exc).__name__)
 
     def _apply_state(self, rumps: ModuleType, state: str, detail: str | None) -> None:
         self.state = state

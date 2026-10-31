@@ -1,9 +1,11 @@
 """The macOS dictation app: wires the adapters to the shared daemon and runs it (plan M6).
 
 The Cocoa run loop must own the main thread, so the menu bar runs there and the daemon's asyncio
-loop runs on a worker thread. Everything OS-specific comes in through `Adapters`, so the whole app
-runs on Linux in tests with fakes. `main()` builds the real adapters lazily; it is the
-`wordink-dictd-mac` entry point and what the LaunchAgent starts (`wordink-dictd run` does the same).
+loop runs on a worker thread. The hotkeys are registered on the main thread too (macOS kills the
+app for Carbon calls from another thread) and that same run loop delivers their events.
+Everything OS-specific comes in through `Adapters`, so the whole app runs on Linux in tests with
+fakes. `main()` builds the real adapters lazily; it is the `wordink-dictd-mac` entry point and
+what the LaunchAgent starts (`wordink-dictd run` does the same).
 """
 
 from __future__ import annotations
@@ -73,6 +75,7 @@ class MacApp:
         self.stop_event = asyncio.Event()
         self._loop: asyncio.AbstractEventLoop | None = None
         self.hotkeys_active = False
+        self._hotkeys_tried = False
         last = LastTranscriptSink(cfg.last_path)
 
         def sink(text: str) -> None:
@@ -98,8 +101,9 @@ class MacApp:
                 open_log=lambda: self._open(log_path()),
                 quit=self.request_stop,
             )
+            adapters.menubar.on_tick = self._main_thread_tick
 
-    # -- thread-safe entry points (the hotkey thread and the main-thread menu call these) -------
+    # -- thread-safe entry points (hotkey events and the menu arrive on the main thread) -------
     def _command(self, name: str) -> None:
         loop = self._loop
         if loop is not None and loop.is_running():
@@ -129,25 +133,44 @@ class MacApp:
         menubar = self.ad.menubar
         if menubar is not None:
             menubar.show("idle")
-        if self.ad.hotkeys is not None:
-            try:
-                self.ad.hotkeys.start(
-                    lambda: self._command("start"),
-                    lambda: self._command("stop"),
-                    lambda: self._command("toggle"),
-                )
-            except WordInkError as exc:  # a clash: dictation still works from the menu and `trigger`
-                log.error("%s", exc)
-                if menubar is not None:
-                    menubar.show("error", "hotkey unavailable: use the menu or `wordink-dictd trigger toggle`")
-                    menubar.notice(str(exc))
-            else:
-                self.hotkeys_active = True
+
+    # -- hotkeys: main thread only ------------------------------------------------------------------
+    def start_hotkeys(self) -> None:
+        """Register the chords. Main thread only, once, inside the running Cocoa loop."""
+        self._hotkeys_tried = True
+        hotkeys, menubar = self.ad.hotkeys, self.ad.menubar
+        if hotkeys is None:
+            return
+        try:
+            hotkeys.start(
+                lambda: self._command("start"),
+                lambda: self._command("stop"),
+                lambda: self._command("toggle"),
+            )
+        except WordInkError as exc:  # a clash: dictation still works from the menu and `trigger`
+            log.error("%s", exc)
+            if menubar is not None:
+                menubar.show("error", "hotkey unavailable: use the menu or `wordink-dictd trigger toggle`")
+                menubar.notice(str(exc))
+        else:
+            self.hotkeys_active = True
+
+    def stop_hotkeys(self) -> None:
+        """Unregister the chords. Main thread only; `run_with_menu` calls it after the loop ends."""
+        if self.hotkeys_active and self.ad.hotkeys is not None:
+            self.ad.hotkeys.stop()
+            self.hotkeys_active = False
+
+    def _main_thread_tick(self) -> None:
+        """Run by the menu bar's main-thread timer: register on the first tick, then watch for wake."""
+        if not self._hotkeys_tried:
+            self.start_hotkeys()
+        elif self.hotkeys_active:
+            poll = getattr(self.ad.hotkeys, "poll", None)
+            if poll is not None:
+                poll()
 
     async def close(self) -> None:
-        if self.hotkeys_active and self.ad.hotkeys is not None:
-            await asyncio.to_thread(self.ad.hotkeys.stop)
-            self.hotkeys_active = False
         await self.daemon.close()
 
 
@@ -235,10 +258,10 @@ def run_with_menu(
     """Daemon on a worker thread, menu bar on the calling (main) thread. Returns when Quit is chosen."""
     menubar = adapters.menubar
     ready = threading.Event()
-    result: dict[str, Any] = {"error": None, "code": 0}
+    result: dict[str, Any] = {"error": None, "code": 0, "app": None}
 
-    def started(_app: MacApp | None, exc: BaseException | None) -> None:
-        result["error"] = exc
+    def started(app: MacApp | None, exc: BaseException | None) -> None:
+        result["error"], result["app"] = exc, app
         ready.set()
 
     def worker() -> None:
@@ -260,8 +283,18 @@ def run_with_menu(
         thread.join(5.0)
         err = result["error"]
         raise err if isinstance(err, WordInkError) else WordInkError(f"cannot start: {type(err).__name__}")
-    if menubar is not None:
-        menubar.run()  # blocks until Quit (or the worker ends)
+    app: MacApp = result["app"]
+    try:
+        if menubar is not None:
+            menubar.run()  # blocks until Quit (or the worker ends); its timer registers the hotkeys
+        else:
+            app.start_hotkeys()
+    except BaseException:
+        with contextlib.suppress(RuntimeError):  # the loop may already be closed
+            app.request_stop()
+        raise
+    finally:
+        app.stop_hotkeys()
     thread.join(10.0)
     err = result["error"]
     if err is not None:

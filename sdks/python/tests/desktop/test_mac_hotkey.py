@@ -16,26 +16,29 @@ HOLD, TOGGLE = parse_chords("Ctrl+Option+D", "Ctrl+Option+S")
 
 
 class FakeApi:
-    def __init__(self, *, refuse: set[int] = frozenset(), clash: bool = True, run_error: Exception | None = None):
-        self.refuse, self.clash, self.run_error = set(refuse), clash, run_error
+    """A `HotkeyApi` that records which thread each call came from."""
+
+    def __init__(self, *, refuse: set[int] = frozenset(), clash: bool = True, install_error: Exception | None = None):
+        self.refuse, self.clash, self.install_error = set(refuse), clash, install_error
         self.registered: dict[int, object] = {}
         self.register_calls: list[int] = []
         self.unregister_calls = 0
-        self.stopped = threading.Event()
+        self.installed = False
+        self.uninstalled = False
         self.handler = None
-        self.run_thread: str | None = None
+        self.threads: dict[str, threading.Thread] = {}
 
     def set_handler(self, handler):
         self.handler = handler
 
-    def run(self, ready):
-        self.run_thread = threading.current_thread().name
-        if self.run_error:
-            raise self.run_error
-        ready()
-        self.stopped.wait(5)
+    def install(self):
+        self.threads["install"] = threading.current_thread()
+        if self.install_error:
+            raise self.install_error
+        self.installed = True
 
     def register(self, hotkey_id, chord):
+        self.threads["register"] = threading.current_thread()
         self.register_calls.append(hotkey_id)
         if hotkey_id in self.refuse:
             raise HotkeyRegistrationError("no", clash=self.clash)
@@ -45,8 +48,10 @@ class FakeApi:
         self.unregister_calls += 1
         self.registered.clear()
 
-    def stop(self):
-        self.stopped.set()
+    def uninstall(self):
+        self.uninstalled = True
+        self.installed = False
+        self.registered.clear()
 
     def press(self, hotkey_id):
         self.handler(hotkey_id, True)
@@ -69,7 +74,7 @@ class Clock:
 def make(api=None, **kw):
     api = api or FakeApi()
     events: list[str] = []
-    src = HotkeySource(HOLD, TOGGLE, api, wake_poll_interval=3600, **kw)
+    src = HotkeySource(HOLD, TOGGLE, api, **kw)
     src.start(lambda: events.append("press"), lambda: events.append("release"), lambda: events.append("toggle"))
     return src, api, events
 
@@ -79,7 +84,7 @@ def test_it_is_a_hotkey_source_and_registers_both_chords_on_start():
     try:
         assert isinstance(src, HotkeySourceProtocol)
         assert api.registered == {HOLD_ID: HOLD, TOGGLE_ID: TOGGLE}
-        assert api.run_thread == "wordink-hotkeys"
+        assert api.installed
     finally:
         src.stop()
 
@@ -117,7 +122,7 @@ def test_a_refused_chord_raises_a_clash_naming_it_and_leaves_nothing_registered(
     with pytest.raises(HotkeyClash, match=r"Ctrl\+Option\+S.*already used") as err:
         src.start(lambda: None, lambda: None, lambda: None)
     assert isinstance(err.value, WordInkError)
-    assert api.registered == {} and api.stopped.is_set()
+    assert api.registered == {} and api.uninstalled
 
 
 def test_a_refusal_that_is_not_a_clash_says_so():
@@ -126,17 +131,67 @@ def test_a_refusal_that_is_not_a_clash_says_so():
         HotkeySource(HOLD, TOGGLE, api).start(lambda: None, lambda: None, lambda: None)
 
 
-def test_an_event_loop_that_fails_to_start_is_a_clash_error_not_a_hang():
-    api = FakeApi(run_error=OSError("no loop"))
-    with pytest.raises(HotkeyClash, match="OSError"):
+def test_a_handler_that_cannot_be_installed_is_a_clash_error_and_registers_nothing():
+    api = FakeApi(install_error=HotkeyRegistrationError("InstallEventHandler failed (-50)"))
+    with pytest.raises(HotkeyClash, match="InstallEventHandler"):
         HotkeySource(HOLD, TOGGLE, api).start(lambda: None, lambda: None, lambda: None)
+    assert api.register_calls == [] and api.uninstalled
 
 
-def test_stop_unregisters_stops_the_loop_and_is_repeatable():
+def test_stop_unregisters_uninstalls_and_is_repeatable():
     src, api, _ = make()
     src.stop()
-    assert api.registered == {} and api.stopped.is_set()
+    assert api.registered == {} and api.uninstalled and not api.installed
     src.stop()
+
+
+def test_the_chords_are_registered_on_the_main_thread_and_no_event_loop_thread_is_started():
+    before = {t.name for t in threading.enumerate()}
+    src, api, _ = make()
+    try:
+        assert api.threads["install"] is threading.main_thread()
+        assert api.threads["register"] is threading.main_thread()
+        assert {t.name for t in threading.enumerate()} == before  # the Cocoa loop delivers events, not a thread
+    finally:
+        src.stop()
+
+
+def test_starting_off_the_main_thread_is_refused_before_anything_is_registered():
+    api = FakeApi()
+    src = HotkeySource(HOLD, TOGGLE, api)
+    errors: list[Exception] = []
+
+    def worker():
+        try:
+            src.start(lambda: None, lambda: None, lambda: None)
+        except WordInkError as exc:
+            errors.append(exc)
+
+    t = threading.Thread(target=worker, name="wordink-daemon")
+    t.start()
+    t.join()
+    assert len(errors) == 1 and "main thread" in str(errors[0])
+    assert api.threads == {} and api.registered == {} and not api.installed
+
+
+def test_stopping_and_wake_checks_off_the_main_thread_are_refused():
+    src, api, _ = make()
+    try:
+        errors: list[Exception] = []
+
+        def worker():
+            for call in (src.stop, src.check_wake):
+                try:
+                    call()
+                except WordInkError as exc:
+                    errors.append(exc)
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+        assert len(errors) == 2 and api.registered  # nothing was touched
+    finally:
+        src.stop()
 
 
 def test_a_second_start_is_refused():
@@ -182,7 +237,7 @@ def test_callbacks_cross_threads_through_call_soon_threadsafe():
             t = threading.Thread(target=lambda: (api.press(HOLD_ID), api.release(HOLD_ID)))
             t.start()
             t.join()
-            assert seen == []  # nothing ran on the API thread
+            assert seen == []  # nothing ran on the thread the event arrived on
             await asyncio.sleep(0.05)
             return seen, main
         finally:
@@ -237,6 +292,28 @@ def test_wake_when_a_chord_was_taken_meanwhile_logs_and_keeps_running(caplog):
         src.stop()
 
 
+def test_poll_checks_for_a_wake_only_once_per_interval_and_only_while_running():
+    clock = Clock()
+    src, api, _ = make(wall=clock.wall, mono=lambda: clock.mono, wake_poll_interval=5.0)
+    try:
+        clock.sleep(600)
+        src.poll()  # too soon after start: not even looked at
+        assert src.reregistrations == 0
+        clock.mono += 6
+        src.poll()
+        assert src.reregistrations == 1
+        clock.mono += 1
+        clock.sleep(600)
+        src.poll()  # inside the interval again
+        assert src.reregistrations == 1
+    finally:
+        src.stop()
+    clock.mono += 60
+    clock.sleep(600)
+    src.poll()  # stopped: never re-registers
+    assert src.reregistrations == 1 and api.registered == {}
+
+
 def test_carbon_modifier_mask():
     assert carbon_modifiers(HOLD) == 0x1000 | 0x800
     assert carbon_modifiers(parse_chords("Cmd+Shift+F5", "Cmd+Shift+F6")[0]) == 0x100 | 0x200
@@ -244,10 +321,83 @@ def test_carbon_modifier_mask():
 
 def test_the_carbon_api_imports_everywhere_but_refuses_to_run_off_a_mac():
     api = CarbonApi()
-    api.stop()  # nothing running: a no-op
+    api.uninstall()  # nothing installed: a no-op
     api.unregister_all()
     import sys
 
     if sys.platform != "darwin":
         with pytest.raises(HotkeyRegistrationError, match="only on macOS"):
+            api.install()
+        with pytest.raises(HotkeyRegistrationError, match="only on macOS"):
             api.register(HOLD_ID, HOLD)
+
+
+class FakeCarbon:
+    """Just the Carbon calls `CarbonApi` may make. Any other name (RunApplicationEventLoop, ...) raises."""
+
+    def __init__(self, install_status: int = 0):
+        self.calls: list[tuple[str, threading.Thread]] = []
+        self.install_status = install_status
+
+    def _note(self, name: str) -> None:
+        self.calls.append((name, threading.current_thread()))
+
+    def GetApplicationEventTarget(self):  # noqa: N802
+        self._note("GetApplicationEventTarget")
+        return 1
+
+    def InstallEventHandler(self, *args):  # noqa: N802
+        self._note("InstallEventHandler")
+        return self.install_status
+
+    def RegisterEventHotKey(self, *args):  # noqa: N802
+        self._note("RegisterEventHotKey")
+        return 0
+
+    def UnregisterEventHotKey(self, ref):  # noqa: N802
+        self._note("UnregisterEventHotKey")
+        return 0
+
+    def RemoveEventHandler(self, ref):  # noqa: N802
+        self._note("RemoveEventHandler")
+        return 0
+
+    def names(self) -> list[str]:
+        return [name for name, _ in self.calls]
+
+
+def carbon_with(fake: FakeCarbon) -> CarbonApi:
+    api = CarbonApi()
+    api._lib = fake  # type: ignore[assignment]  # a fake framework in place of ctypes.CDLL
+    return api
+
+
+def test_carbon_installs_registers_and_uninstalls_on_the_calling_thread_without_an_event_loop():
+    fake = FakeCarbon()
+    src = HotkeySource(HOLD, TOGGLE, carbon_with(fake))
+    src.start(lambda: None, lambda: None, lambda: None)
+    src.stop()
+    assert fake.names().count("InstallEventHandler") == 1
+    assert fake.names().count("RegisterEventHotKey") == 2
+    assert fake.names().count("UnregisterEventHotKey") == 2  # both chords released on stop
+    assert fake.names().count("RemoveEventHandler") == 1
+    assert {thread for _, thread in fake.calls} == {threading.main_thread()}
+    assert not any("EventLoop" in name for name in fake.names())
+
+
+def test_carbon_install_failure_is_a_registration_error():
+    api = carbon_with(FakeCarbon(install_status=-9868))
+    with pytest.raises(HotkeyRegistrationError, match="InstallEventHandler failed"):
+        api.install()
+
+
+def test_nothing_in_the_mac_package_runs_a_carbon_event_loop():
+    """The crash this guards: RunApplicationEventLoop off the main thread (SIGTRAP on macOS 27)."""
+    import pathlib
+
+    import wordink.desktop.mac as mac
+
+    for path in pathlib.Path(mac.__file__).parent.glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert ".RunApplicationEventLoop(" not in text, path.name
+        assert ".QuitApplicationEventLoop(" not in text, path.name

@@ -1,7 +1,8 @@
 """Hotkey chords for macOS: parse `Ctrl+Option+D` into key codes and refuse reserved ones.
 
 The parser (plan M1) is pure. `HotkeySource` (plan M3) registers the two chords through the
-`HotkeyApi` in `quartz.py` and turns press and release events into daemon callbacks. The key
+`HotkeyApi` in `quartz.py` and turns press and release events into daemon callbacks. Everything
+here runs on the main thread, where the menu bar's Cocoa run loop delivers the events. The key
 codes are the Carbon `kVK_*` virtual key codes, which name physical keys on an ANSI layout.
 """
 
@@ -142,14 +143,19 @@ class HotkeyClash(WordInkError):
 class HotkeySource:
     """Press/release for the hold chord and press for the toggle chord, over a `HotkeyApi`.
 
-    * The API's event loop runs on its own thread; `start()` waits for it and registers both
-      chords, raising `HotkeyClash` (and registering nothing) if either is refused.
-    * Callbacks go through `loop.call_soon_threadsafe` when a loop is given, else run on the API
-      thread. A callback that raises is logged and never kills the event loop.
+    * Main thread only: `start()`, `stop()` and `poll()` register and unregister through Carbon,
+      which macOS allows only there. The source runs no event loop and starts no thread; the
+      Cocoa run loop the app already runs on the main thread delivers the events.
+    * `start()` registers both chords, raising `HotkeyClash` (and registering nothing) if either
+      is refused.
+    * Callbacks go through `loop.call_soon_threadsafe` when a loop is given, else run on the
+      calling (main) thread, so they must not block. A callback that raises is logged and never
+      breaks event delivery.
     * Key repeat and a stray release are ignored, so the daemon sees strict press/release pairs.
     * After sleep and wake the registrations are redone (the wake is detected by the wall clock
       jumping ahead of the monotonic clock, which stops while the Mac sleeps) and a hold that was
-      in progress is released, because its key-up was probably lost.
+      in progress is released, because its key-up was probably lost. The app calls `poll()` from
+      its main-thread timer to do that check.
     """
 
     def __init__(
@@ -159,25 +165,28 @@ class HotkeySource:
         api: HotkeyApi,
         *,
         loop: asyncio.AbstractEventLoop | None = None,
-        start_timeout: float = 3.0,
         wake_poll_interval: float = 5.0,
         wake_gap: float = 10.0,
         wall: Callable[[], float] = time.time,
         mono: Callable[[], float] = time.monotonic,
     ) -> None:
         self.hold, self.toggle, self.api, self.loop = hold, toggle, api, loop
-        self.start_timeout, self.wake_poll_interval, self.wake_gap = start_timeout, wake_poll_interval, wake_gap
+        self.wake_poll_interval, self.wake_gap = wake_poll_interval, wake_gap
         self._wall, self._mono = wall, mono
         self._offset = wall() - mono()
+        self._last_poll = mono()
         self.reregistrations = 0
         self._handlers: dict[str, Callable[[], None]] = {}
         self._holding = False
         self._lock = threading.Lock()
-        self._stop = threading.Event()
-        self._threads: list[threading.Thread] = []
-        self._run_error: Exception | None = None
+        self._running = False
 
-    # -- events (API thread) ------------------------------------------------------------------------
+    @staticmethod
+    def _require_main_thread(action: str) -> None:
+        if threading.current_thread() is not threading.main_thread():
+            raise WordInkError(f"hotkeys must be {action} on the main thread (macOS kills the app otherwise)")
+
+    # -- events (main thread, from the Cocoa run loop) ----------------------------------------
     def _call(self, name: str) -> None:
         handler = self._handlers.get(name)
         if handler is None:
@@ -214,18 +223,10 @@ class HotkeySource:
                 why = "is already used by macOS or another app" if exc.clash else "could not be registered"
                 raise HotkeyClash(f"hotkey {chord.text} {why}; pick another in the config") from exc
 
-    def _run(self, ready: threading.Event) -> None:
-        try:
-            self.api.run(ready.set)
-        except Exception as exc:
-            self._run_error = exc
-            log.error("hotkey event loop stopped: %s", type(exc).__name__)
-        finally:
-            ready.set()  # never leave start() waiting
-
     # -- wake detection -----------------------------------------------------------------------------
     def check_wake(self) -> bool:
-        """True (after re-registering) when the Mac slept since the last check."""
+        """True (after re-registering) when the Mac slept since the last check. Main thread only."""
+        self._require_main_thread("re-registered")
         offset = self._wall() - self._mono()
         slept = offset - self._offset
         self._offset = offset
@@ -244,12 +245,13 @@ class HotkeySource:
             self._call("hold_release")  # never leave the microphone recording
         return True
 
-    def _watch_wake(self) -> None:
-        while not self._stop.wait(self.wake_poll_interval):
-            try:
-                self.check_wake()
-            except Exception as exc:
-                log.error("wake check: %s", type(exc).__name__)
+    def poll(self) -> None:
+        """Check for a wake at most every `wake_poll_interval`; the app calls this from a timer."""
+        now = self._mono()
+        if not self._running or now - self._last_poll < self.wake_poll_interval:
+            return
+        self._last_poll = now
+        self.check_wake()
 
     # -- HotkeySource -----------------------------------------------------------------------------------
     def start(
@@ -258,35 +260,28 @@ class HotkeySource:
         on_hold_release: Callable[[], None],
         on_toggle: Callable[[], None],
     ) -> None:
-        if self._threads:
+        self._require_main_thread("started")
+        if self._running:
             raise WordInkError("the hotkey source is already running")
         self._handlers = {"hold_press": on_hold_press, "hold_release": on_hold_release, "toggle": on_toggle}
-        self._stop.clear()
         self._holding = False
-        self._run_error = None
         self._offset = self._wall() - self._mono()
+        self._last_poll = self._mono()
         self.api.set_handler(self._on_key)
-        ready = threading.Event()
-        loop_thread = threading.Thread(target=self._run, args=(ready,), name="wordink-hotkeys", daemon=True)
-        self._threads.append(loop_thread)
-        loop_thread.start()
+        self._running = True
         try:
-            if not ready.wait(self.start_timeout) or self._run_error is not None:
-                reason = type(self._run_error).__name__ if self._run_error else "timed out"
-                raise HotkeyClash(f"cannot start the hotkey event loop ({reason})")
+            self.api.install()
             self._register_all()
+        except HotkeyRegistrationError as exc:
+            self.stop()
+            raise HotkeyClash(f"cannot install the hotkey handler ({exc})") from exc
         except Exception:
             self.stop()
             raise
-        watcher = threading.Thread(target=self._watch_wake, name="wordink-wake", daemon=True)
-        self._threads.append(watcher)
-        watcher.start()
 
     def stop(self) -> None:
-        self._stop.set()
-        self.api.unregister_all()
-        self.api.stop()
-        for t in self._threads:
-            t.join(2.0)
-        self._threads = []
+        """Unregister both chords and stop event delivery. Repeatable."""
+        self._require_main_thread("stopped")
+        self._running = False
+        self.api.uninstall()
         self._holding = False

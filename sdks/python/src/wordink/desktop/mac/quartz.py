@@ -3,8 +3,11 @@
 `RegisterEventHotKey` (Carbon) is the one hotkey API that needs no Accessibility or Input
 Monitoring permission and reports both press and release. `HotkeyApi` is the seam; `CarbonApi`
 implements it with `ctypes` and loads the framework only when first used, so this module imports
-on every OS. `CarbonApi` has never run on a Mac (plan M9 is the human check), so the pure logic
-lives in `hotkey.HotkeySource` and is tested against a fake `HotkeyApi`.
+on every OS. The pure logic lives in `hotkey.HotkeySource` and is tested against a fake `HotkeyApi`.
+
+`CarbonApi` never runs an event loop of its own. The menu bar's NSApplication run loop owns the
+main thread and delivers the hotkey events, so every call here must be made on the main thread:
+running `RunApplicationEventLoop` anywhere else makes macOS kill the process (SIGTRAP).
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("wordink.dictd")
 
-#: called on the API's thread: (hotkey id given to `register`, True for press / False for release)
+#: called on the main thread by the Cocoa run loop: (hotkey id given to `register`, True for press / False for release)
 KeyHandler = Callable[[int, bool], None]
 
 
@@ -35,11 +38,13 @@ class HotkeyRegistrationError(OSError):
 
 
 class HotkeyApi(Protocol):
+    """Every method must be called on the main thread; events arrive there too, from the run loop
+    the application already runs. The API starts no loop and no thread."""
+
     def set_handler(self, handler: KeyHandler) -> None: ...
 
-    def run(self, ready: Callable[[], None]) -> None:
-        """Run the event loop on this thread: call `ready()` once registrations can be made, then
-        block until `stop()`."""
+    def install(self) -> None:
+        """Route hotkey events to the handler. Raises `HotkeyRegistrationError`."""
         ...
 
     def register(self, hotkey_id: int, chord: Chord) -> None:
@@ -48,8 +53,8 @@ class HotkeyApi(Protocol):
 
     def unregister_all(self) -> None: ...
 
-    def stop(self) -> None:
-        """Make `run` return. Safe to call when it is not running."""
+    def uninstall(self) -> None:
+        """Unregister every chord and stop routing events. Safe to call when not installed."""
         ...
 
 
@@ -89,6 +94,7 @@ class CarbonApi:
         self._handler: KeyHandler | None = None
         self._refs: dict[int, ctypes.c_void_p] = {}
         self._callback = _HANDLER_TYPE(self._on_event)  # keep a reference so it is never collected
+        self._handler_ref = ctypes.c_void_p()
         self._installed = False
         self._lock = threading.Lock()
 
@@ -100,7 +106,7 @@ class CarbonApi:
             lib.GetApplicationEventTarget.restype = ctypes.c_void_p
             lib.InstallEventHandler.argtypes = [
                 ctypes.c_void_p, _HANDLER_TYPE, ctypes.c_uint32, ctypes.POINTER(_EventTypeSpec),
-                ctypes.c_void_p, ctypes.c_void_p,
+                ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p),
             ]  # fmt: skip
             lib.InstallEventHandler.restype = ctypes.c_int32
             lib.GetEventKind.argtypes = [ctypes.c_void_p]
@@ -110,6 +116,8 @@ class CarbonApi:
                 ctypes.c_uint32, ctypes.c_void_p, ctypes.c_void_p,
             ]  # fmt: skip
             lib.GetEventParameter.restype = ctypes.c_int32
+            lib.RemoveEventHandler.argtypes = [ctypes.c_void_p]
+            lib.RemoveEventHandler.restype = ctypes.c_int32
             lib.RegisterEventHotKey.argtypes = [
                 ctypes.c_uint32, ctypes.c_uint32, _EventHotKeyID, ctypes.c_void_p, ctypes.c_uint32,
                 ctypes.POINTER(ctypes.c_void_p),
@@ -137,18 +145,22 @@ class CarbonApi:
             log.exception("hotkey event handler failed")
         return 0
 
-    def run(self, ready: Callable[[], None]) -> None:
+    def install(self) -> None:
+        if self._installed:
+            return
         lib = self._carbon()
         specs = (_EventTypeSpec * 2)(
             _EventTypeSpec(_K_EVENT_CLASS_KEYBOARD, _K_EVENT_HOT_KEY_PRESSED),
             _EventTypeSpec(_K_EVENT_CLASS_KEYBOARD, _K_EVENT_HOT_KEY_RELEASED),
         )
-        status = lib.InstallEventHandler(lib.GetApplicationEventTarget(), self._callback, 2, specs, None, None)
+        ref = ctypes.c_void_p()
+        status = lib.InstallEventHandler(
+            lib.GetApplicationEventTarget(), self._callback, 2, specs, None, ctypes.byref(ref)
+        )
         if status != 0:
             raise HotkeyRegistrationError(f"InstallEventHandler failed ({status})")
+        self._handler_ref = ref
         self._installed = True
-        ready()
-        lib.RunApplicationEventLoop()
 
     def register(self, hotkey_id: int, chord: Chord) -> None:
         lib = self._carbon()
@@ -171,9 +183,11 @@ class CarbonApi:
             for ref in refs:
                 self._lib.UnregisterEventHotKey(ref)
 
-    def stop(self) -> None:
+    def uninstall(self) -> None:
+        self.unregister_all()
         if self._lib is not None and self._installed:
-            self._lib.QuitApplicationEventLoop()
+            self._lib.RemoveEventHandler(self._handler_ref)
+        self._installed = False
 
 
 # -- keyboard events, secure input and Accessibility (plan M4) ----------------------------------------
