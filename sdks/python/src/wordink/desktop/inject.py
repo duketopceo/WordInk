@@ -55,6 +55,21 @@ def _run(cmd: Sequence[str], stdin: bytes | None) -> subprocess.CompletedProcess
     return subprocess.run(list(cmd), input=stdin, capture_output=True, timeout=RUN_TIMEOUT, check=False)
 
 
+def _run_serve(cmd: Sequence[str], stdin: bytes | None) -> subprocess.CompletedProcess[bytes]:
+    # wl-copy forks a child that serves the selection until it is replaced; captured
+    # pipes stay open in the child, so run() with capture_output never returns.
+    proc = subprocess.Popen(
+        list(cmd), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    try:
+        proc.communicate(input=stdin, timeout=RUN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise
+    return subprocess.CompletedProcess(list(cmd), proc.returncode)
+
+
 class Injector:
     def __init__(
         self,
@@ -62,11 +77,13 @@ class Injector:
         *,
         path: str | None = None,
         runner: Runner = _run,
+        serve_runner: Runner = _run_serve,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.cfg = cfg or InjectConfig()
         self._path = path
         self._runner = runner
+        self._serve_runner = serve_runner
         self._sleep = sleep
 
     # -- plumbing ---------------------------------------------------------------------------
@@ -77,8 +94,9 @@ class Injector:
         exe = self._which(name)
         if exe is None:
             return False
+        runner = self._serve_runner if name == "wl-copy" else self._runner
         try:
-            return self._runner([exe, *args], stdin).returncode == 0
+            return runner([exe, *args], stdin).returncode == 0
         except (OSError, subprocess.TimeoutExpired) as exc:
             log.warning("%s failed: %s", name, type(exc).__name__)
             return False
