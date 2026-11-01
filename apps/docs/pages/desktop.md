@@ -73,6 +73,8 @@ remote_api_key = "wdk_…"   # your device token, or set VOXTYPE_WHISPER_API_KEY
 
 Move your `initial_prompt` words into the gateway's `vocabulary` so every app shares them. The gateway caps the combined prompt at 800 characters, with gateway vocabulary first.
 
+If dictated text never lands in a terminal, the paste key is the cause: terminals treat `ctrl+v` as quoted-insert. Voxtype 1.1.1+ defaults `output.paste_keys` to `shift+insert`, which pastes in terminals and GUI apps alike; on older builds run the daemon with `--paste-keys shift+insert`. The install script sets this for you when it can.
+
 ## TypeWhisper (macOS, Windows, iOS)
 
 TypeWhisper's bundled **OpenAI Compatible** engine talks to the gateway directly — no WordInk plugin is needed or planned.

@@ -56,3 +56,13 @@ EOF
 else
   echo "install-omarchy: Voxtype config missing or already has a [whisper] section; wire it by hand (apps/docs/pages/desktop.md, 'Voxtype (Linux)')"
 fi
+
+if [ -f "$VOX" ] && command -v voxtype >/dev/null 2>&1; then
+  # Terminals treat Ctrl+V as quoted-insert, so the ctrl+v default never pastes into
+  # them. voxtype >=1.1.1 takes shift+insert in config; older builds need --paste-keys.
+  if voxtype config get output.paste_keys >/dev/null 2>&1; then
+    voxtype config set output.paste_keys shift+insert >/dev/null 2>&1 || true
+  else
+    echo "install-omarchy: voxtype <1.1.1 can't hold paste_keys in config; run the daemon with --paste-keys shift+insert (or upgrade) or dictation won't paste into terminals" >&2
+  fi
+fi
