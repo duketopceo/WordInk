@@ -120,7 +120,7 @@ class Daemon:
         self.pipeline = pipeline
         self.sink = sink
         self.recorder = recorder or Recorder(
-            cfg.record_command, min_seconds=cfg.min_seconds, tail_seconds=cfg.tail_seconds
+            cfg.record_command, device=cfg.record_device, min_seconds=cfg.min_seconds, tail_seconds=cfg.tail_seconds
         )
         self.indicator = indicator or StateFile(cfg.state_path)
         self.notifier = notifier

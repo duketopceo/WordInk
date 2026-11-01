@@ -53,6 +53,7 @@ timeout = 5
 min_words = 2
 [record]
 command = ["arecord", "-q"]
+device = "alsa_input.test-source"
 min_seconds = 0.5
 max_seconds = 30
 tail_seconds = 0
@@ -63,6 +64,7 @@ tail_seconds = 0
     assert (cfg.whisper, cfg.language) == ("whisper-large-v3", "en")
     assert (cfg.llm_model, cfg.tone, cfg.cleanup_timeout, cfg.min_words) == ("llama-3.3-70b-versatile", "casual", 5.0, 2)
     assert cfg.record_command == ("arecord", "-q")
+    assert cfg.record_device == "alsa_input.test-source"
     assert (cfg.min_seconds, cfg.max_seconds, cfg.tail_seconds) == (0.5, 30.0, 0.0)
 
 
