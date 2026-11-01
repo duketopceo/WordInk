@@ -74,6 +74,7 @@ Pricing comes mostly from aggregator sites. Treat it as approximate.
 | Handy | Partial Wayland | Yes | Yes | Local (Whisper, Parakeet) | Free | MIT |
 | OpenWhispr | Yes (Wayland unclear) | Yes | Yes | Local or cloud + cleanup | Free | MIT |
 | Voxtype | Wayland-native | No | No | Local (many engines) | Free | Yes |
+| Hex (Anomaly/OpenCode) | Beta (wlroots + X11, x64+ARM64) | Yes (beta) | Yes | Local only (own models, ~160 MB) | Free | MIT (full app source) |
 | hyprwhspr | Wayland (Omarchy) | No | No | Local + cloud | Free | Yes |
 | whisrs | Wayland + X11 | No | No | Groq/Deepgram/OpenAI + whisper.cpp | Free | MIT |
 | nerd-dictation | Partial | No | No | Local Vosk | Free | Yes |
