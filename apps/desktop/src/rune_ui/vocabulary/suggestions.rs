@@ -256,13 +256,22 @@ fn reason_text(suggestion: &Suggestion) -> String {
             reason,
         } => tr_named(
             "AI guess: heard as “{heard}”. {reason}",
-            &[("heard", heard), ("reason", reason)],
+            &[("heard", heard), ("reason", &sentence_case(reason))],
         )
         .trim()
         .to_string(),
         Reason::Ai { reason, .. } if reason.is_empty() => tr("AI guess").to_string(),
         Reason::Ai { reason, .. } => tr_fill("AI guess: {}", reason),
     }
+}
+
+/// `text` with its first letter capitalised, as models often start a
+/// reason in lower case.
+fn sentence_case(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
 }
 
 fn suggestion_row(p: Paint, index: usize, suggestion: &Suggestion) -> El {
