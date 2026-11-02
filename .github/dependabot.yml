@@ -21,7 +21,13 @@ updates:
     groups:
       rust-deps:
         patterns: ["*"]
-  # Add a cargo entry for /apps/desktop in the change that creates it.
+  # Desktop app (its own workspace; git-sourced crates are skipped by Dependabot)
+  - package-ecosystem: cargo
+    directory: /apps/desktop
+    schedule: { interval: weekly }
+    groups:
+      desktop-rust-deps:
+        patterns: ["*"]
   # Swift packages
   - package-ecosystem: swift
     directory: /sdks/ios

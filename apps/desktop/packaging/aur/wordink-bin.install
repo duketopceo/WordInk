@@ -1,0 +1,5 @@
+post_install() {
+  echo 'Open WordInk from your launcher or run `wordink`; the first run downloads a speech model.'
+  echo 'Start WordInk at login: systemctl --user enable wordink.service'
+  echo 'Updates come from pacman; WordInk never replaces this package itself.'
+}

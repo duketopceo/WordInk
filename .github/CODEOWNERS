@@ -4,6 +4,7 @@
 /.github/workflows/** @duketopceo
 /.github/dependabot.yml @duketopceo
 /apps/desktop/src/updater* @duketopceo
+/apps/desktop/packaging/linux/ @duketopceo
 /SECURITY.md @duketopceo
 
 # Risk-weighted: the trust boundaries and the shared core.

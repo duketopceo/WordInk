@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=WordInk
+Comment=Voice dictation, local or cloud
+Exec=@HEX_BIN@
+Icon=io.github.duketopceo.wordink
+Terminal=false
+Categories=Utility;Accessibility;
+StartupNotify=true
+StartupWMClass=io.github.duketopceo.wordink
+Actions=quit;
+
+[Desktop Action quit]
+Name=Quit WordInk
+Exec=@HEX_BIN@ quit

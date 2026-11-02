@@ -19,36 +19,54 @@ Only the latest release receives security fixes.
 | latest release | yes       |
 | older releases | no        |
 
-## Release signing (planned)
+## Release signing
 
-Desktop release binaries are not signed yet, and the in-app updater does not
-verify signatures. Today the repository's release workflow publishes npm
-packages only; desktop builds on every platform are unsigned and the updater
-only links to the GitHub release. Treat any desktop download as unsigned and
-get it from the official GitHub releases page.
+Desktop releases come from `desktop-v*` tags (`.github/workflows/desktop-release.yml`).
+Each release carries `SHA256SUMS`, a CycloneDX SBOM and build-provenance
+attestations (`gh attestation verify <file> -R duketopceo/WordInk`).
 
-The plan, which is not yet implemented, is to sign Linux release artifacts with
-an ed25519 key and have the updater verify the signature before installing.
+- **Linux** executables are signed with an ed25519 key. The in-app updater
+  refuses an update whose signature does not verify against the public key
+  compiled into it, and the release tarball's `install.sh` checks the same
+  signature before installing.
+- **macOS and Windows** builds are not signed (no notarization, no
+  Authenticode). Treat their downloads as unsigned and take them only from the
+  official GitHub releases page. Their in-app updater only links to the newest
+  release; it never downloads or installs anything.
 
-- **Private key (planned).** It would exist only as a secret in a protected
-  `release` environment on GitHub, require the owner's approval to deploy to,
-  be read only by a separate signing job, and never be committed to the repo.
-- **Public key (planned).** It would be a constant in the app's updater module
-  (`apps/desktop/src/updater*`). CODEOWNERS assigns the owner as reviewer for
-  changes to that path and to `.github/workflows/**`. Owner approval is
-  mandatory only while the default branch's protection rule or ruleset
-  requires review from code owners.
+How the Linux key is kept:
 
-### Rotating the key (planned)
+- **Private key.** It exists only as the secret `WORDINK_LINUX_SIGNING_KEY` of
+  the protected `release` environment on GitHub, which requires the owner's
+  approval before a job runs in it. Only the `sign-linux` job reads it, and that
+  job runs one script on the build output as data. It is never committed.
+- **Public key.** `apps/desktop/packaging/linux/wordink-signing.pub`, compiled
+  into the updater (`SIGNING_KEY` in `apps/desktop/src/updater/linux.rs`) and
+  embedded in `apps/desktop/packaging/linux/install-release.sh`; a unit test
+  keeps the three equal. CODEOWNERS assigns the owner as reviewer for those
+  paths and for `.github/workflows/**`. Owner approval is mandatory only while
+  the default branch's protection rule or ruleset requires review from code
+  owners.
 
-Once signing exists:
+### Rotating the key
 
-1. Generate a new ed25519 keypair on a trusted machine.
-2. Replace the public key constant in `apps/desktop/src/updater*`.
-3. Cut a release signed with the old key, while the old secret is still in the
-   `release` environment, so that installed apps accept it and learn the new
-   public key.
-4. Replace the secret in the `release` environment with the new private key.
+1. Generate a new ed25519 keypair on a trusted machine:
+   `openssl genpkey -algorithm ed25519 -out new.key` and
+   `openssl pkey -in new.key -pubout -out wordink-signing.pub`.
+2. Replace the public key in `apps/desktop/packaging/linux/wordink-signing.pub`,
+   the `SIGNING_KEY` bytes in `apps/desktop/src/updater/linux.rs` and the
+   `signing_key=` line in `apps/desktop/packaging/linux/install-release.sh`
+   (the test `the_compiled_key_is_the_published_one` checks all three).
+3. An installed app trusts only the key compiled into it, so it refuses an
+   update signed by the new key. For a planned rotation, first publish a
+   release whose app carries the new key (steps 1 and 2 on a commit that keeps
+   `wordink-signing.pub` on the old key for this one release, with the test
+   updated to match) and sign it with the old key, while the old secret is
+   still in the `release` environment. Installed apps accept it and learn the
+   new key. After a leak there is no such release: people reinstall from the
+   tarball's `install.sh`, which carries the new key.
+4. Replace the secret in the `release` environment with the new private key:
+   `gh secret set WORDINK_LINUX_SIGNING_KEY --env release -R duketopceo/WordInk < new.key`.
 5. Revoke the old key: delete it everywhere and publish a security advisory
    stating the date it stopped being valid.
 

@@ -1,0 +1,60 @@
+# Maintainer: WordInk contributors
+#
+# Not related to extra/hex (the hex dump tool): this is the WordInk voice
+# dictation app, so it neither provides nor conflicts with it.
+#
+# Generated from duketopceo/WordInk apps/desktop/packaging/aur by scripts/release-aur.sh, which
+# sets pkgver, the release manifest's linux-x64 and linux-arm64 file URLs, and
+# the checksums for each release.
+pkgname=wordink-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='WordInk voice dictation, based on Hex by Anomaly: hold a key, speak, and it types (Linux beta)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/duketopceo/WordInk'
+license=('MIT')
+# Linked: alsa-lib, gcc-libs, glibc, vulkan-icd-loader. Loaded at
+# runtime: the X11/Wayland/xkbcommon client libraries and OpenBLAS.
+depends=(
+  'alsa-lib' 'curl' 'gcc-libs' 'glibc' 'libx11' 'libxcb' 'libxcursor'
+  'libxi' 'libxkbcommon' 'libxkbcommon-x11' 'openblas' 'vulkan-icd-loader'
+  'wayland'
+)
+optdepends=(
+  'wl-clipboard: paste on Wayland'
+  'wtype: paste on Wayland'
+  'vulkan-driver: GPU transcription'
+  'wireplumber: mute output while dictating (or libpulse for pactl)'
+  'xdg-utils: open links from voice commands'
+)
+options=('!strip' '!debug')
+install=wordink-bin.install
+source=(
+  'io.github.duketopceo.wordink.desktop'
+  'wordink.service'
+  'LICENSE'
+  'io.github.duketopceo.wordink-16.png' 'io.github.duketopceo.wordink-24.png' 'io.github.duketopceo.wordink-32.png' 'io.github.duketopceo.wordink-48.png'
+  'io.github.duketopceo.wordink-64.png' 'io.github.duketopceo.wordink-128.png' 'io.github.duketopceo.wordink-256.png' 'io.github.duketopceo.wordink-512.png'
+)
+source_x86_64=("wordink-${pkgver}-linux-x64::@URL_X64@")
+source_aarch64=("wordink-${pkgver}-linux-arm64::@URL_ARM64@")
+sha256sums=('@DESKTOP_SHA256@'
+            '@SERVICE_SHA256@'
+            '@LICENSE_SHA256@'
+            @ICON_SHA256S@)
+sha256sums_x86_64=('@SHA256_X64@')
+sha256sums_aarch64=('@SHA256_ARM64@')
+
+package() {
+  local target=x64
+  [ "$CARCH" = aarch64 ] && target=arm64
+  install -Dm755 "wordink-${pkgver}-linux-${target}" "$pkgdir/usr/bin/wordink"
+  install -Dm644 io.github.duketopceo.wordink.desktop "$pkgdir/usr/share/applications/io.github.duketopceo.wordink.desktop"
+  local size
+  for size in 16 24 32 48 64 128 256 512; do
+    install -Dm644 "io.github.duketopceo.wordink-$size.png" \
+      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/io.github.duketopceo.wordink.png"
+  done
+  install -Dm644 wordink.service "$pkgdir/usr/lib/systemd/user/wordink.service"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

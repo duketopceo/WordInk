@@ -27,7 +27,7 @@ windows = [
 ]
 
 [project.scripts]
-wordink = "wordink.cli:main"
+wordink-sdk = "wordink.cli:main"
 wordink-mcp = "wordink.mcp_server:main"
 wordink-dictd = "wordink.desktop.cli:main"
 
