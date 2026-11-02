@@ -194,7 +194,7 @@ def test_doctor_all_good_with_our_binds_installed(tmp_path, monkeypatch):
     binds = [
         {"modmask": SUPER_ALT, "key": "D", "dispatcher": "exec", "arg": "wordink-dictd trigger start"},
         {"modmask": SUPER_ALT, "key": "S", "dispatcher": "exec", "arg": "wordink-dictd trigger toggle"},
-        {"modmask": 64, "key": "D", "dispatcher": "exec", "arg": "ptt-daemon trigger"},
+        {"modmask": 64, "key": "D", "dispatcher": "exec", "arg": "other-tool trigger"},
     ]
     bin_dir, cfg = _doctor_rig(tmp_path, monkeypatch, binds)
     checks = _by_name(run_checks(cfg, GOOD_ENV, path=str(bin_dir)))

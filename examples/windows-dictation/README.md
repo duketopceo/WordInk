@@ -1,7 +1,7 @@
-# WordInk dictation on Windows (my-windows-pc)
+# WordInk dictation on Windows
 
 Hold a hotkey, speak, release: cleaned text appears in the focused window. Same Groq Whisper + LLM
-cleanup pipeline as the Linux daemon. Plan: `docs/plans/2026-10-28-0200-feat-windows-dictation-plan.md`.
+cleanup pipeline as the Linux daemon. Plan: `docs/archive/2026-10-28-0200-feat-windows-dictation-plan.md`.
 
 > Status: nothing here runs by itself and it has not been run on a real machine. The installer registers
 > `wordink-dictd-tray` (the app wiring from plan W7b); read the plan's W10 checks before the first real run.

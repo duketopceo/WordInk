@@ -147,7 +147,7 @@ describe("applyTonePreset", () => {
   it("email: formats greeting, body paragraph, and sign-off with blank lines", () => {
     expect(
       applyTonePreset("hi sarah thanks for sending the roadmap over best alex", "email"),
-    ).toBe("Hi Sarah,\n\nThanks for sending the roadmap over.\n\nBest,\nLuke");
+    ).toBe("Hi Sarah,\n\nThanks for sending the roadmap over.\n\nBest,\nAlex");
   });
 
   it("code: converts spoken casing and symbol phrases into identifiers", () => {

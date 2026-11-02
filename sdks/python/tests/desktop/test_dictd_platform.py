@@ -14,7 +14,7 @@ from wordink.desktop.transcribe import default_failed_dir
 from wordink.desktop.vocab import default_vocab_path
 
 LINUX_ENV = {
-    "HOME": "/home/alex",
+    "HOME": "~",
     "XDG_CONFIG_HOME": "/cfg",
     "XDG_CACHE_HOME": "/cache",
     "XDG_RUNTIME_DIR": "/run/user/1000",
@@ -35,9 +35,9 @@ def test_linux_layout_matches_what_the_daemon_already_uses():
 
 
 def test_linux_falls_back_to_home_and_tmp():
-    p = app_paths("linux", {"HOME": "/home/alex"}, uid=1234)
-    assert str(p.config_file) == "/home/alex/.config/wordink/dictate.toml"
-    assert str(p.failed_dir) == "/home/alex/.cache/wordink/failed"
+    p = app_paths("linux", {"HOME": "~"}, uid=1234)
+    assert str(p.config_file) == "~/.config/wordink/dictate.toml"
+    assert str(p.failed_dir) == "~/.cache/wordink/failed"
     assert str(p.runtime_dir) == "/tmp/wordink-1234"
 
 

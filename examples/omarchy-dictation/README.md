@@ -2,7 +2,7 @@
 
 `wordink-dictd` is a small push-to-talk daemon: hold a key, speak, release, and cleaned-up text is typed into the focused window. Groq Whisper transcribes (with your vocabulary as a hint), a Groq LLM pass tidies it, and the offline `flow.py` rules take over if that pass is slow or down. It needs only a Groq key; a WordInk gateway is optional.
 
-Plan: [`docs/plans/2026-10-28-0005-feat-standalone-linux-dictation-app-plan.md`](../../docs/plans/2026-10-28-0005-feat-standalone-linux-dictation-app-plan.md).
+Plan: [`docs/archive/2026-10-28-0005-feat-standalone-linux-dictation-app-plan.md`](../../docs/archive/2026-10-28-0005-feat-standalone-linux-dictation-app-plan.md).
 
 ## Install
 
@@ -25,7 +25,7 @@ The script adds a `source =` line to `~/.config/hypr/hyprland.conf` between mark
 | hold `SUPER ALT, D` | record while held, transcribe on release |
 | tap `SUPER ALT, S` | start, tap again to stop |
 
-ptt-tool keeps `SUPER, D`; `wordink-dictd` refuses that key. Change the keys in `~/.config/wordink/dictate.toml` (`[hotkey] hold = "..."`), then re-run the installer. `wordink-dictd binds` prints the lines.
+The defaults avoid Omarchy's own `SUPER, D` launcher bind. Change the keys in `~/.config/wordink/dictate.toml` (`[hotkey] hold = "..."`), then re-run the installer. `wordink-dictd binds` prints the lines.
 
 ## Switching from Voxtype, and back
 

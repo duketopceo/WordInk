@@ -9,8 +9,8 @@ WordInk provides a unified dictation and Wispr Flow post-processing stack across
 | Platform | Client / Integration | Audio & VAD Engine | Flow Cleanup & Learning |
 |---|---|---|---|
 | **iOS & iPadOS** | `apps/ios/WordInkApp` + `apps/ios/WordInkKeyboard` (`sdks/ios/WordInkIOS`) | Two-process App Group warm lease (`AVAudioSession` + `ActivityKit` Live Activity + `+20 dB` Whisper Gain) | Gateway `flow.ts` + on-device `LocalFallbackTranscriber` (`SFSpeechRecognizer` / `WhisperKit`) + 20s `EditVocabularyLearner` |
-| **Linux (Wayland / X11)** | `Voxtype` (`~/.config/voxtype/config.toml`) & `ptt-tool` / `wordink` CLI | PipeWire / PulseAudio / SoundDevice 16 kHz mono PCM16 | Gateway `flow.ts` + Python `wordink.flow` (`--flow-cleanup --tone`) |
-| **macOS & Windows** | `TypeWhisper` (`openai-compatible` engine) | Native CoreAudio / WASAPI | Gateway `flow.ts` (`POST /v1/audio/transcriptions`) + shared vocabulary |
+| **Linux (Wayland / X11)** | `wordink-dictd` daemon, or Voxtype through the gateway (`~/.config/voxtype/config.toml`), plus the `wordink` CLI | PipeWire / PulseAudio / SoundDevice 16 kHz mono PCM16 | Gateway `flow.ts` + Python `wordink.flow` (`--flow-cleanup --tone`) |
+| **macOS & Windows** | `wordink-dictd` daemon, or `TypeWhisper` (`openai-compatible` engine) | Native CoreAudio / WASAPI | Gateway `flow.ts` (`POST /v1/audio/transcriptions`) + shared vocabulary |
 | **Web (Browser / React)** | `@wordink/web` (`<wordink-mic>`), `@wordink/react`, `@wordink/local` | Rust/WASM `wordink-core` (`SPEECH_RMS_THRESHOLD = 0.01`, 16 kHz resampler) + WebGPU/WASM Moonshine/Whisper | `@wordink/server` relay/gateway + `transform` hook |
 | **Python / MCP** | `sdks/python` (`wordink` CLI + FastMCP server) | `sounddevice` 16 kHz WAV capture | `wordink.flow` (`apply_flow_cleanup`, `learn_vocabulary_from_edit`) verified against `tests/fixtures/flow-contract.json` |
 

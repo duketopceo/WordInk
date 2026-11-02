@@ -116,7 +116,7 @@
       "id": "email-greeting-body-signoff",
       "input": "hi sarah thanks for sending the roadmap over best alex",
       "tone": "email",
-      "expected": "Hi Sarah,\n\nThanks for sending the roadmap over.\n\nBest,\nLuke"
+      "expected": "Hi Sarah,\n\nThanks for sending the roadmap over.\n\nBest,\nAlex"
     },
     {
       "id": "code-camel-case",

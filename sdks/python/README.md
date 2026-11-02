@@ -10,7 +10,7 @@ Two entry points ship from one package:
 |---|---|
 | `wordink` | CLI: `transcribe` a file, `dictate` from the mic, `models` to list |
 | `wordink-mcp` | MCP stdio server: `transcribe` + `list_models` tools for agents |
-| `wordink-dictd` | Linux push-to-talk dictation daemon (Hyprland bind → Groq Whisper → cleanup → typed into the focused window). `run`, `trigger start`, `stop`, `toggle`, `status`, `last`, `binds`, `vocab`. Needs `GROQ_API_KEY`; see `docs/plans/2026-10-28-0005-feat-standalone-linux-dictation-app-plan.md` |
+| `wordink-dictd` | Push-to-talk dictation daemon for Linux, Windows and macOS (hotkey → Groq Whisper → cleanup → typed into the focused window); the interim client until the desktop app (`apps/desktop`) reaches parity. `run`, `trigger start`, `stop`, `toggle`, `status`, `last`, `binds`, `vocab`. Needs `GROQ_API_KEY`; see `docs/archive/2026-10-28-0005-feat-standalone-linux-dictation-app-plan.md` |
 
 ## Install
 

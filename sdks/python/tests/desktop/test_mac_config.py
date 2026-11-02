@@ -11,7 +11,7 @@ from wordink.desktop.cli import main
 from wordink.desktop.config import load_config
 from wordink.desktop.platform import MAC_SOCKET_MAX, app_paths, current_os
 
-ENV = {"HOME": "/Users/alex", "TMPDIR": "/var/folders/ab/cdef0123/T/"}
+ENV = {"HOME": "~", "TMPDIR": "/var/folders/ab/cdef0123/T/"}
 
 
 def load(tmp_path, body: str | None = None, env=ENV):
@@ -27,18 +27,18 @@ def test_darwin_is_macos():
 
 def test_layout_follows_apples_folders():
     p = app_paths("macos", ENV, uid=501)
-    assert p.config_file == PurePosixPath("/Users/alex/Library/Application Support/wordink/dictate.toml")
-    assert p.vocab_file == PurePosixPath("/Users/alex/Library/Application Support/wordink/vocabulary.txt")
-    assert p.failed_dir == PurePosixPath("/Users/alex/Library/Caches/wordink/failed")
+    assert p.config_file == PurePosixPath("~/Library/Application Support/wordink/dictate.toml")
+    assert p.vocab_file == PurePosixPath("~/Library/Application Support/wordink/vocabulary.txt")
+    assert p.failed_dir == PurePosixPath("~/Library/Caches/wordink/failed")
     assert p.runtime_dir == PurePosixPath("/var/folders/ab/cdef0123/T/wordink")
 
 
 def test_no_tmpdir_uses_a_per_user_tmp_folder():
-    assert app_paths("macos", {"HOME": "/Users/alex"}, uid=501).runtime_dir == PurePosixPath("/tmp/wordink-501")
+    assert app_paths("macos", {"HOME": "~"}, uid=501).runtime_dir == PurePosixPath("/tmp/wordink-501")
 
 
 def test_a_long_tmpdir_falls_back_so_the_socket_path_fits():
-    env = {"HOME": "/Users/alex", "TMPDIR": "/private/var/folders/" + "x" * 90 + "/T/"}
+    env = {"HOME": "~", "TMPDIR": "/private/var/folders/" + "x" * 90 + "/T/"}
     p = app_paths("macos", env, uid=501)
     assert p.runtime_dir == PurePosixPath("/tmp/wordink-501")
     assert len(str(p.runtime_dir / "dictd.sock").encode()) <= MAC_SOCKET_MAX
@@ -57,8 +57,8 @@ def test_without_home_it_says_so():
 def test_defaults_use_mac_hotkeys_and_library_paths(tmp_path):
     cfg = load(tmp_path)
     assert (cfg.hold_bind, cfg.toggle_bind) == ("Ctrl+Option+D", "Ctrl+Option+S")
-    assert str(cfg.vocab_path) == "/Users/alex/Library/Application Support/wordink/vocabulary.txt"
-    assert str(cfg.failed_dir) == "/Users/alex/Library/Caches/wordink/failed"
+    assert str(cfg.vocab_path) == "~/Library/Application Support/wordink/vocabulary.txt"
+    assert str(cfg.failed_dir) == "~/Library/Caches/wordink/failed"
     assert cfg.socket_path.name == "dictd.sock"
 
 

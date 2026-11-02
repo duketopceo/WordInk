@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Black-box coverage of examples/gateway-systemd/wordink-gateway-run: a fake
-// `keyring helper` and a fake `wordink-gateway` on PATH make what the wrapper exported
+// `secret-tool` and a fake `wordink-gateway` on PATH make what the wrapper exported
 // (and skipped) observable.
 const WRAPPER = join(import.meta.dirname, "../../../../examples/gateway-systemd/wordink-gateway-run");
 
@@ -23,10 +23,10 @@ function runWrapper(
     const binDir = join(dir, "bin");
     const configDir = join(dir, "config");
     mkdirSync(binDir, { recursive: true });
-    // `keyring helper get <service> <account>` -> key-for-<service>-<account>, or fails for "missing".
+    // `secret-tool lookup service <service> account <account>` -> key-for-<service>-<account>, or fails for "missing".
     writeFileSync(
-      join(binDir, "keyring helper"),
-      '#!/bin/sh\n[ "$1" = get ] || exit 1\ncase "$2" in missing) exit 1 ;; esac\nprintf "key-for-%s-%s\\n" "$2" "$3"\n',
+      join(binDir, "secret-tool"),
+      '#!/bin/sh\n[ "$1" = lookup ] || exit 1\ncase "$3" in missing) exit 1 ;; esac\nprintf "key-for-%s-%s\\n" "$3" "$5"\n',
       { mode: 0o755 },
     );
     // A package bin can be a non-executable JS file behind a symlink.
@@ -68,7 +68,7 @@ function runWrapper(
 }
 
 describe("wordink-gateway-run", () => {
-  it("exports mapped keys via keyring helper, including a final line without a newline", () => {
+  it("exports mapped keys via secret-tool, including a final line without a newline", () => {
     const r = runWrapper("GROQ_API_KEY=groq/default\nOPENAI_API_KEY=openai/main");
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("ARGV=serve");
@@ -158,12 +158,12 @@ describe("wordink-gateway-run", () => {
     expect(r.stdout).toContain("LD_PRELOAD=\n");
     expect(r.stdout).toContain("XDG_HACK=\n");
     expect(r.stdout).toMatch(/PATH=[^\n]*\/usr\/bin/); // PATH was not replaced with a "key"
-    expect(r.stdout).toContain("OPENAI_API_KEY=\n"); // keyring helper lookup failed -> skipped, not "key-for-…"
+    expect(r.stdout).toContain("OPENAI_API_KEY=\n"); // keyring lookup failed -> skipped, not "key-for-…"
     expect(r.stderr).toMatch(/refusing to set NODE_OPTIONS/);
     expect(r.stderr).toMatch(/refusing to set LD_PRELOAD/);
     expect(r.stderr).toMatch(/refusing to set XDG_HACK/);
     expect(r.stderr).toMatch(/refusing to set PATH/);
     expect(r.stderr).toMatch(/not a valid environment name/);
-    expect(r.stderr).toMatch(/no missing\/acct for OPENAI_API_KEY/);
+    expect(r.stderr).toMatch(/no secret for missing\/acct \(OPENAI_API_KEY\)/);
   });
 });

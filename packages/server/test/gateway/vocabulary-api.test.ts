@@ -168,10 +168,10 @@ describe("GET /v1/vocabulary (R4)", () => {
       ["ptt-tool", "runtime"],
       ["acmeapp", "runtime"],
     ]);
-    const [omarchy, , ptt-tool] = body.data;
+    const [omarchy, , agentTerm] = body.data;
     expect(omarchy).toMatchObject({ pinned: true, effective: { prompt: true, keyterm: true } });
     expect(omarchy).not.toHaveProperty("addedBy");
-    expect(ptt-tool).toMatchObject({ pinned: false, addedBy: "helper-agent", addedByTokenId: adminId });
+    expect(agentTerm).toMatchObject({ pinned: false, addedBy: "helper-agent", addedByTokenId: adminId });
     expect(body.prompt_chars).toBe("Omarchy, Hyprland, ptt-tool, acmeapp".length);
     expect(body.keyterm_count).toBe(4);
   });

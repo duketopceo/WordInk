@@ -5,7 +5,7 @@
 #   examples/gateway-systemd/install-omarchy.sh
 #
 # Idempotent: existing gateway.json, gateway-keys and a Voxtype [whisper] section are left alone.
-# The Groq key is never read here; it stays in keyring helper as groq/default (see gateway-keys).
+# The Groq key is never read here; it stays in the keyring as groq/default (see gateway-keys).
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -26,8 +26,8 @@ install -m 644 "$HERE/wordink-gateway.service" "$CFG/systemd/user/"
 [ -f "$CFG/wordink/gateway.json" ] || cp "$HERE/gateway.example.json" "$CFG/wordink/gateway.json"
 [ -f "$CFG/wordink/gateway-keys" ] || printf 'GROQ_API_KEY=groq/default\n' > "$CFG/wordink/gateway-keys"
 
-if ! keyring helper get groq default >/dev/null 2>&1; then
-  echo "install-omarchy: no groq/default in keyring helper yet. Run: keyring helper set groq default" >&2
+if ! secret-tool lookup service groq account default >/dev/null 2>&1; then
+  echo "install-omarchy: no groq/default in the keyring yet. Run: secret-tool store --label=\"WordInk Groq key\" service groq account default" >&2
   echo "install-omarchy: the gateway refuses to start until a provider key resolves." >&2
 fi
 
