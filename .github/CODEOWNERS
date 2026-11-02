@@ -1,12 +1,17 @@
 * @duketopceo
 
-# Risk-weighted: a bad change here breaks dictation latency, paste, or boot.
-/wordink/engine.py @duketopceo
-/wordink/groq_service.py @duketopceo
-/wordink/audio.py @duketopceo
-/wordink/text_inserter.py @duketopceo
-/wordink/config.py @duketopceo
-/wordink/onboarding/server.py @duketopceo
-/wordink/telemetry/ @duketopceo
-pyproject.toml @duketopceo
-uv.lock @duketopceo
+# Release and supply-chain surface: a bad change here ships unsigned or hostile builds.
+/.github/workflows/** @duketopceo
+/.github/dependabot.yml @duketopceo
+/apps/desktop/src/updater* @duketopceo
+/SECURITY.md @duketopceo
+
+# Risk-weighted: the trust boundaries and the shared core.
+/crates/wordink-core/ @duketopceo
+/packages/server/ @duketopceo
+/sdks/python/src/ @duketopceo
+/sdks/python/pyproject.toml @duketopceo
+/sdks/python/uv.lock @duketopceo
+/Cargo.toml @duketopceo
+/Cargo.lock @duketopceo
+/pnpm-lock.yaml @duketopceo

@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest an improvement or new capability
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that is hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Desktop app
+        - Python SDK
+        - Web SDK / packages
+        - Gateway / server
+        - iOS app
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: clean-room
+    attributes:
+      label: Clean room
+      options:
+        - label: This is described in my own words and does not rely on copying code or text from a GPL project.
+          required: true

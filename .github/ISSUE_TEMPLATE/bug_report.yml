@@ -1,0 +1,55 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For security problems use private reporting instead (see SECURITY.md).
+        Do not paste API keys, tokens or private audio transcripts.
+  - type: input
+    id: version
+    attributes:
+      label: WordInk version
+      placeholder: e.g. 0.3.1
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Desktop app
+        - Python SDK
+        - Web SDK / packages
+        - Gateway / server
+        - iOS app
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and environment
+      placeholder: e.g. Linux (Wayland, GNOME), Windows 11, macOS 15
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Remove anything private first.
+      render: text
