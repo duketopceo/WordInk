@@ -445,9 +445,9 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn captures_default_on_and_refuse_a_shortcut_in_use() {
+    fn captures_default_off_and_refuse_a_shortcut_in_use() {
         let settings = AppSettings::default();
-        assert!(settings.capture.enabled);
+        assert!(!settings.capture.enabled, "WordInk turns captures off by default");
         let mut taken = AppSettings::default();
         taken.capture.hotkey = taken.dictation_hotkey.clone();
         let before = serde_json::to_value(&taken).unwrap();

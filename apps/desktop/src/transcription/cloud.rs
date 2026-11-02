@@ -1020,6 +1020,7 @@ pub fn gateway_url() -> Option<String> {
 /// the cloud engine and prints the text, then its usage on stderr. Spends
 /// real money when a key resolves, so it is not part of any test.
 #[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn transcribe_file_cli(path: &Path) -> i32 {
     // A one-shot process: resolve the key before the first route() reads it.
     refresh_key();

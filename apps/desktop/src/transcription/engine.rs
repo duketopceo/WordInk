@@ -328,6 +328,7 @@ pub struct Transcribed {
     /// Time from the finish request to the final text.
     pub finish_ms: u64,
     /// What a cloud engine used and cost; `None` for a local model.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub usage: Option<crate::history::UsageRecord>,
 }
 
