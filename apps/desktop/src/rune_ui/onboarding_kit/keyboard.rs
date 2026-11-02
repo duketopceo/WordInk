@@ -196,7 +196,7 @@ pub(crate) fn key_slots() -> [KeySlot; KEY_COUNT] {
 }
 
 pub(crate) fn ember(p: Paint) -> Color {
-    rune_theme_opencode::ember(p.k.dark, 9)
+    super::super::brand::ember(p.k.dark, 9)
 }
 
 /// Renders the crisp 2D 14.5u Apple Magic Keyboard `El`.

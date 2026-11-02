@@ -126,7 +126,7 @@ fn cached(look: Look, frame: usize) -> Arc<Vec<u8>> {
     if let Some(rgba) = cache.lock().unwrap().get(&key) {
         return rgba.clone();
     }
-    let kit = rune_theme_opencode::kit(look.dark);
+    let kit = super::brand::kit(look.dark);
     let turn = PI * ease(frame as f32 / FRAMES as f32);
     let rgba = Arc::new(render(
         turn,

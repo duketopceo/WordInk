@@ -246,7 +246,7 @@ pub(super) fn human_models(models: &[ModelInfo]) -> String {
 
 pub(super) fn human_vocabulary(entries: &[VocabularyEntry]) -> String {
     if entries.is_empty() {
-        return "The vocabulary is empty; `hex vocabulary add <term>` adds one\n".into();
+        return "The vocabulary is empty; `wordink vocabulary add <term>` adds one\n".into();
     }
     entries
         .iter()
