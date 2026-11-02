@@ -12,6 +12,7 @@
 mod activity;
 #[cfg(hex_capture)]
 pub(crate) mod capture_capsule;
+mod cloud_engine;
 mod controls;
 #[cfg(target_os = "macos")]
 pub(crate) mod deep_link;
@@ -49,6 +50,7 @@ mod platform;
 mod platform_settings;
 pub(crate) mod playground;
 mod practice;
+mod recovery;
 #[cfg(hex_capture)]
 mod scrawl;
 mod settings;
@@ -57,6 +59,7 @@ mod sound_sets;
 mod spark;
 #[cfg(target_os = "macos")]
 pub(crate) mod story_link;
+mod usage;
 mod vocabulary;
 
 use std::sync::Arc;
@@ -646,6 +649,8 @@ enum Pane {
     /// Recorded calls and their settings, or the opt-in (macOS beta).
     Meetings,
     History,
+    /// Words, sessions, time saved and estimated cost per provider.
+    Usage,
     /// Annotate (Scrawl's captures inside Hex): the switch, shortcuts,
     /// permission, transcriber, folder, retention, and Scrawl's own app.
     /// Dev builds, macOS and Linux only.
@@ -668,6 +673,7 @@ impl Pane {
         Pane::Modes,
         Pane::Meetings,
         Pane::History,
+        Pane::Usage,
         #[cfg(hex_capture)]
         Pane::Annotate,
         Pane::VoiceFilter,
@@ -694,6 +700,7 @@ impl Pane {
             Pane::Output => tr("Output"),
             Pane::Modes => tr("Modes"),
             Pane::History => tr("History"),
+            Pane::Usage => tr("Usage"),
             Pane::Meetings => tr("Meetings"),
             #[cfg(hex_capture)]
             Pane::Annotate => tr("Annotate"),
@@ -709,6 +716,7 @@ impl Pane {
             Pane::Output => "nav-output",
             Pane::Modes => "nav-modes",
             Pane::History => "nav-history",
+            Pane::Usage => "nav-usage",
             Pane::Meetings => "nav-meetings",
             #[cfg(hex_capture)]
             Pane::Annotate => "nav-annotate",
@@ -724,6 +732,7 @@ impl Pane {
             Pane::Output => &OUTPUT_ICON,
             Pane::Modes => &MODES_ICON,
             Pane::History => &HISTORY_ICON,
+            Pane::Usage => &ACTIVITY_ICON,
             Pane::Meetings => &MEETINGS_ICON,
             #[cfg(hex_capture)]
             Pane::Annotate => &SCRAWL_ICON,
@@ -744,6 +753,10 @@ enum Menu {
     InputSourceLanguage(usize),
     /// How long History keeps dictations.
     HistoryRetention,
+    /// The Usage pane's period.
+    UsageWindow,
+    /// The engine a failed dictation is retried on.
+    RetryEngine,
     /// The OpenCode thinking variant.
     Variant,
     /// The selected meeting's overflow menu.
@@ -809,6 +822,7 @@ pub(crate) struct Ui {
     duck_volume_drag: Option<f32>,
     models: models::Models,
     history: history::HistoryPane,
+    usage: usage::UsagePane,
     modes: modes::ModesPane,
     output: output::OutputPane,
     picker: picker::Picker,
@@ -909,6 +923,7 @@ impl Ui {
             duck_volume_drag: None,
             models: models::Models::default(),
             history: history::HistoryPane::default(),
+            usage: usage::UsagePane::default(),
             modes,
             output: output::OutputPane::default(),
             picker: picker::Picker::default(),
@@ -1217,6 +1232,10 @@ impl Ui {
         self.pane = pane;
         match pane {
             Pane::History => self.history.reload(),
+            Pane::Usage => {
+                let store = self.history.store().cloned();
+                self.usage.reload(store.as_ref());
+            }
             Pane::HudLab => self.ask(platform::PlatformRequest::ConfigureHud(self.platform.hud)),
             #[cfg(hex_capture)]
             Pane::Annotate => self.ask(platform::PlatformRequest::Scrawl(
@@ -1351,6 +1370,10 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
             && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible),
     );
     changed |= ui.history.poll(ui.pane == Pane::History);
+    {
+        let store = ui.history.store().cloned();
+        changed |= ui.usage.poll(store.as_ref(), ui.pane == Pane::Usage);
+    }
     if ui.pane == Pane::Output && !ui.labs_open {
         changed |= output::poll(ui, clock, tx);
     }
@@ -1468,6 +1491,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         Pane::Output => (Vec::new(), output::pane(ui, p, cx.is_reduced_motion())),
         Pane::Modes => modes::pane(ui, p, &mut layer),
         Pane::History => history::pane(ui, p, &mut layer),
+        Pane::Usage => usage::pane(ui, p, &mut layer),
         Pane::Meetings => meetings::pane(ui, p, &mut layer),
         #[cfg(hex_capture)]
         Pane::Annotate => (Vec::new(), scrawl::pane(ui, p, &mut layer)),
@@ -1980,6 +2004,26 @@ const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         ui.history = history::HistoryPane::fixture();
         ui.pane = Pane::History;
+    }),
+    ("history-failed", |ui| {
+        *ui = portal_fixture();
+        ui.history = history::HistoryPane::fixture_failed();
+        ui.pane = Pane::History;
+    }),
+    ("history-recovered", |ui| {
+        *ui = portal_fixture();
+        ui.history = history::HistoryPane::fixture_recovered();
+        ui.pane = Pane::History;
+    }),
+    ("usage", |ui| {
+        *ui = portal_fixture();
+        ui.usage = usage::UsagePane::fixture();
+        ui.pane = Pane::Usage;
+    }),
+    ("usage-empty", |ui| {
+        *ui = portal_fixture();
+        ui.usage = usage::UsagePane::fixture_empty();
+        ui.pane = Pane::Usage;
     }),
     ("history-empty", |ui| {
         *ui = portal_fixture();

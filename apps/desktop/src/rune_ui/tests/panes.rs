@@ -6,6 +6,7 @@ use crate::desktop::login_item::LoginItemStatus;
 use crate::desktop::onboarding::{
     Input, Observation, PermissionAction, PermissionKind, Practice, Step,
 };
+use crate::transcription::cloud::Provider;
 use platform::{CalendarRequest, MeetingRequest, PlatformHost, PlatformRequest};
 
 fn asked(rt: &Runtime<Ui>) -> &[PlatformRequest] {
@@ -738,7 +739,10 @@ fn the_practice_game_follows_hex_s_own_dictation_on_every_os() {
         assert!(!holding(&rt));
         onboarding::input(&mut rt.state, Input::Dictation(Observation::Started));
         refresh(&mut rt);
-        assert!(holding(&rt), "{scene}: the shortcut held, as WordInk records");
+        assert!(
+            holding(&rt),
+            "{scene}: the shortcut held, as WordInk records"
+        );
         onboarding::input(&mut rt.state, Input::Dictation(Observation::Transcribing));
         refresh(&mut rt);
         assert!(!holding(&rt), "{scene}: released");
@@ -2035,4 +2039,158 @@ fn fun_driver_installed(rt: &rune::Runtime<Ui>) -> bool {
         .hex_microphone
         .as_ref()
         .is_some_and(|status| status.driver_bundle_installed)
+}
+
+// ---- U12: usage, failed dictations, recovery ----
+
+fn failed_key(rt: &Runtime<Ui>, index: usize) -> String {
+    format!(
+        "history-failed{}",
+        rt.state.history.failed[index].timestamp_ms
+    )
+}
+
+#[test]
+fn failed_dictations_show_in_history_beside_the_retained_ones_with_a_retry() {
+    let mut rt = runtime("history-failed", true, PANE_SIZE);
+    assert_eq!(rt.state.history.failed.len(), 2);
+    for index in 0..2 {
+        assert!(
+            rt.find(&failed_key(&rt, index)).is_some(),
+            "failed clip {index} is listed"
+        );
+    }
+    assert!(
+        rt.find("history-entry3").is_some(),
+        "retained dictations are still there"
+    );
+    assert!(texts(&rt).iter().any(|t| t == "Failed dictation"));
+    // The open failure offers Retry, on the engine that failed.
+    assert!(rt.find("history-retry").is_some());
+    assert!(texts(&rt).iter().any(|t| t == "Retry"));
+    assert!(!rt.state.history.is_retrying());
+
+    // Without any retained entry the failures still show, not the empty state.
+    rt.state.history.entries.clear();
+    refresh(&mut rt);
+    assert!(rt.find("history-empty").is_none());
+    assert!(rt.find(&failed_key(&rt, 1)).is_some());
+}
+
+#[test]
+fn retry_can_pick_another_engine_and_says_which() {
+    let mut rt = runtime("history-failed", true, PANE_SIZE);
+    tap(&mut rt, "history-retry-engine-trigger");
+    assert_eq!(rt.state.open, Some(Menu::RetryEngine));
+    // Groq, OpenRouter, OpenAI, ...
+    tap_option(&mut rt, 2);
+    assert_eq!(rt.state.history.retry_engine, Some(Provider::OpenAi));
+    assert!(
+        texts(&rt).iter().any(|t| t == "Retry with OpenAI"),
+        "{:?}",
+        texts(&rt)
+    );
+    tap(&mut rt, "history-retry");
+    assert!(
+        rt.state.history.is_retrying(),
+        "a cloud clip retries without asking"
+    );
+    assert!(rt.find("history-confirm").is_none());
+}
+
+#[test]
+fn a_clip_recorded_for_a_local_model_asks_before_it_goes_to_the_cloud() {
+    let mut rt = runtime("history-failed", true, PANE_SIZE);
+    let local = failed_key(&rt, 1);
+    assert_eq!(rt.state.history.failed[1].origin, "local");
+    tap(&mut rt, &local);
+    tap(&mut rt, "history-retry");
+    assert!(
+        rt.find("history-confirm").is_some(),
+        "the person is asked first"
+    );
+    assert!(
+        !rt.state.history.is_retrying(),
+        "nothing is sent before the answer"
+    );
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|t| t.starts_with("This audio was recorded for a local model"))
+    );
+    // Cancel leaves it as it was.
+    tap(&mut rt, "history-confirm-cancel");
+    assert!(rt.find("history-confirm").is_none() && !rt.state.history.is_retrying());
+    // Saying yes sends it.
+    tap(&mut rt, "history-retry");
+    tap(&mut rt, "history-confirm-send");
+    assert!(rt.state.history.is_retrying());
+    assert!(rt.find("history-confirm").is_none());
+}
+
+#[test]
+fn a_recovered_dictation_shows_its_text_with_copy_and_paste_and_inserts_nothing() {
+    let mut rt = runtime("history-recovered", true, PANE_SIZE);
+    let text = rt.state.history.recovered.as_ref().unwrap().text.clone();
+    assert!(texts(&rt).iter().any(|shown| *shown == text));
+    assert!(
+        rt.find("history-recovered-copy").is_some() && rt.find("history-recovered-paste").is_some()
+    );
+    assert!(
+        rt.copy_request.is_none(),
+        "nothing is copied or inserted on its own"
+    );
+    tap(&mut rt, "history-recovered-copy");
+    assert_eq!(rt.copy_request.as_deref(), Some(text.as_str()));
+    rt.copy_request = None;
+    tap(&mut rt, "history-recovered-paste");
+    assert_eq!(rt.copy_request.as_deref(), Some(text.as_str()));
+    assert!(rt.state.history.recovered.as_ref().unwrap().pasted);
+    assert!(sent(&rt).is_empty(), "no request reached the service");
+}
+
+#[test]
+fn the_usage_pane_shows_the_totals_the_formula_and_each_model() {
+    let mut rt = runtime("usage", true, PANE_SIZE);
+    let shown = texts(&rt);
+    let summary = rt.state.usage.summary.clone();
+    for expected in [
+        "Words dictated",
+        "Sessions",
+        "Audio recorded",
+        "Estimated cost",
+        "Time saved",
+        "Words ÷ 40 wpm typing speed − time spent speaking",
+        "OpenAI · gpt-4o-mini-transcribe",
+        "Groq · whisper-large-v3-turbo",
+        "OpenRouter · google/gemini-2.5-flash-lite",
+        "Local model · parakeet_v3",
+    ] {
+        assert!(
+            shown.iter().any(|t| t == expected),
+            "shows {expected}: {shown:?}"
+        );
+    }
+    assert!(shown.iter().any(|t| *t == summary.words.to_string()));
+    assert!(shown.iter().any(|t| *t == summary.sessions.to_string()));
+    assert!(
+        shown
+            .iter()
+            .any(|t| *t == crate::history::usage::cost_label(summary.cost_usd))
+    );
+    // The sidebar has the pane, and the window picker changes the period.
+    tap(&mut rt, "nav-general");
+    tap(&mut rt, "nav-usage");
+    assert_eq!(rt.state.pane, Pane::Usage);
+    tap(&mut rt, "usage-window-trigger");
+    assert_eq!(rt.state.open, Some(Menu::UsageWindow));
+    tap_option(&mut rt, 0);
+    assert_eq!(rt.state.usage.window, crate::history::usage::Window::Today);
+}
+
+#[test]
+fn an_empty_period_says_so_instead_of_showing_zeros() {
+    let rt = runtime("usage-empty", true, PANE_SIZE);
+    assert!(rt.find("usage-empty").is_some());
+    assert!(rt.find("usage-words").is_none());
 }

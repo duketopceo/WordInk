@@ -527,6 +527,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Commands listen all the time, so WordInk stops releasing the microphone when idle", ["Polecenia nasłuchują cały czas, więc WordInk przestanie zwalniać mikrofon w bezczynności", "命令会一直监听，因此 WordInk 将不再在空闲时释放麦克风", "コマンドは常に聞き取るため、WordInk はアイドル時にマイクを解放しなくなります", "Befehle hören ständig zu, daher gibt WordInk das Mikrofon im Leerlauf nicht mehr frei", "Los comandos escuchan todo el tiempo, así que WordInk deja de liberar el micrófono en reposo", "Команди слухають постійно, тож WordInk більше не звільняє мікрофон під час простою"]),
     ("Modes", ["Tryby", "模式", "モード", "Modi", "Modos", "Режими"]),
     ("History", ["Historia", "历史记录", "履歴", "Verlauf", "Historial", "Історія"]),
+    ("Usage", ["Użycie", "用量", "使用状況", "Nutzung", "Uso", "Використання"]),
     ("Add mode", ["Dodaj tryb", "添加模式", "モードを追加", "Modus hinzufügen", "Añadir modo", "Додати режим"]),
     ("Add correction", ["Dodaj poprawkę", "添加更正", "修正を追加", "Korrektur hinzufügen", "Añadir corrección", "Додати виправлення"]),
     ("Vocabulary", ["Słownictwo", "词汇表", "語彙", "Vokabular", "Vocabulario", "Словник"]),

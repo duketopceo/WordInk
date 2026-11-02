@@ -1866,6 +1866,12 @@ pub struct AppSettings {
     /// Which engine dictation uses: Groq when a key resolves, else local
     /// (`auto`), or one of them always. Keys are never stored here.
     pub engine: crate::transcription::cloud::EngineChoice,
+    /// The model the named cloud engine is sent (an OpenRouter id,
+    /// `whisper-1`, ...). Unset, or not one the provider takes: its default.
+    pub engine_model: Option<String>,
+    /// The WordInk gateway's URL. https, or http to localhost only. Its
+    /// token is a key (`wordink keys set gateway`), never stored here.
+    pub gateway_url: Option<String>,
     pub transcription_recents: Vec<TranscriptionSelection>,
     pub keyboard_model_switching: KeyboardModelSwitching,
     pub dictation_processing: DictationProcessingSettings,
@@ -1996,6 +2002,8 @@ impl Default for AppSettings {
             transcription: default_transcription(),
             transcription_device: TranscriptionDevice::Auto,
             engine: crate::transcription::cloud::EngineChoice::default(),
+            engine_model: None,
+            gateway_url: None,
             transcription_recents: Vec::new(),
             keyboard_model_switching: KeyboardModelSwitching::default(),
             dictation_processing: DictationProcessingSettings::default(),
@@ -2312,7 +2320,11 @@ impl AppSettings {
         INDICATOR_STYLE.store(self.indicator_style as u8, Ordering::Relaxed);
         #[cfg(not(target_os = "macos"))]
         crate::transcription::local_transcriber::set_device(self.transcription_device);
-        crate::transcription::cloud::set_engine_choice(self.engine);
+        crate::transcription::cloud::set_engine(
+            self.engine,
+            self.engine_model.as_deref(),
+            self.gateway_url.as_deref(),
+        );
         crate::transcription::cloud::set_clip_retention(self.history_retention);
         RECORDING_DUCK_VOLUME.store(self.recording_duck_volume.to_bits(), Ordering::Relaxed);
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);

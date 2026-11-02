@@ -16,6 +16,7 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 
 pub mod stats;
+pub mod usage;
 
 const VERSION: u32 = 1;
 const MAX_ENTRIES: usize = 10_000;
@@ -77,6 +78,9 @@ pub enum HistoryKind {
     Printed,
     /// Dictate without processing: pasted as heard, with no step run.
     Raw,
+    /// A failed dictation's clip, transcribed again from History: not
+    /// inserted anywhere, but Paste Last can paste it.
+    Recovered,
 }
 
 impl HistoryKind {
@@ -87,6 +91,7 @@ impl HistoryKind {
             Self::VoiceAction => "Voice Action",
             Self::Printed => "Printed",
             Self::Raw => "Raw",
+            Self::Recovered => "Recovered",
         }
     }
 }
@@ -560,6 +565,14 @@ impl History {
         self.synced().record(draft, now_ms())
     }
 
+    /// What the usage records in `window` add up to, over every retained
+    /// entry (not the bounded search snapshot).
+    pub fn usage(&self, window: usage::Window) -> usage::UsageSummary {
+        let now = now_ms();
+        let since = window.since_ms(now, usage::local_day_start(now));
+        usage::summarize(self.synced().entries(), since)
+    }
+
     pub fn delete(&self, id: u64) -> io::Result<bool> {
         self.synced().delete(id)
     }
@@ -675,9 +688,15 @@ mod tests {
         let reopened = HistoryStore::open(path, HistoryRetention::Week, 1_000);
         assert_eq!(reopened.entry(id).unwrap().usage.as_ref().unwrap().words, 4);
         let old = r#"{"id":1,"timestamp_ms":5,"kind":"dictation","raw_text":"a","final_text":"a"}"#;
-        assert_eq!(serde_json::from_str::<HistoryEntry>(old).unwrap().usage, None);
+        assert_eq!(
+            serde_json::from_str::<HistoryEntry>(old).unwrap().usage,
+            None
+        );
         let local = UsageRecord::local("parakeet_v3", 1_500, "one two three");
-        assert_eq!((local.provider.as_str(), local.words, local.cost_usd), ("local", 3, 0.0));
+        assert_eq!(
+            (local.provider.as_str(), local.words, local.cost_usd),
+            ("local", 3, 0.0)
+        );
     }
 
     #[test]
@@ -1043,7 +1062,10 @@ mod tests {
     #[test]
     fn clear_also_deletes_the_clips_of_failed_dictations() {
         let path = temp_path("clear-clips");
-        let clips = path.parent().unwrap().join(crate::transcription::cloud::FAILED_CLIPS_DIR);
+        let clips = path
+            .parent()
+            .unwrap()
+            .join(crate::transcription::cloud::FAILED_CLIPS_DIR);
         fs::create_dir_all(&clips).unwrap();
         fs::write(clips.join("failed-1.wav"), b"RIFF").unwrap();
         let mut store = HistoryStore::open(path, HistoryRetention::Week, 0);

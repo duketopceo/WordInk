@@ -20,10 +20,11 @@ pub(crate) enum Target {
 }
 
 /// The main panes a `hex://settings/<pane>` link names.
-const PANES: [(&str, Pane); 5] = [
+const PANES: [(&str, Pane); 6] = [
     ("general", Pane::General),
     ("output", Pane::Output),
     ("history", Pane::History),
+    ("usage", Pane::Usage),
     ("meetings", Pane::Meetings),
     ("voice-filter", Pane::VoiceFilter),
 ];

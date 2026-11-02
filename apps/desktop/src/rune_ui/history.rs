@@ -2,6 +2,10 @@
 //! retention choice, two-step Clear all, and a detail view with Copy and
 //! Delete. It shares the host's store, which the listener records into.
 
+use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, TryRecvError};
+use std::time::{Duration, Instant};
+
 use rune::{El, TextEdit, Tx, col, text};
 use rune_kit::{Select, SelectAppearance, TextInput};
 
@@ -12,6 +16,29 @@ use super::{Menu, Ui};
 use crate::desktop::i18n::{event_age, tr, tr_fill, tr_named};
 use crate::history::stats::HistoryStats;
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention};
+use crate::transcription::cloud::{self, Provider};
+use crate::transcription::recover::{self, FailedClip, Retried, RetryError};
+
+/// How often the open pane looks for newly kept clips.
+const CLIP_SCAN: Duration = Duration::from_secs(2);
+
+/// A retry in flight on its own thread.
+pub(super) struct Retrying {
+    pub(super) clip: String,
+    pub(super) result: Receiver<Result<Retried, RetryError>>,
+    /// A fixture sends nothing, so nothing answers; this keeps the channel
+    /// open so the pane reads as waiting rather than stopped.
+    pub(super) fixture_sender: Option<std::sync::mpsc::Sender<Result<Retried, RetryError>>>,
+}
+
+/// What a successful retry recovered: shown with Copy and Paste, never
+/// inserted by itself.
+pub(super) struct Recovered {
+    pub(super) text: String,
+    pub(super) engine: String,
+    /// Paste was pressed: the text is on the clipboard.
+    pub(super) pasted: bool,
+}
 
 #[derive(Default)]
 pub(super) struct HistoryPane {
@@ -23,15 +50,34 @@ pub(super) struct HistoryPane {
     pub(super) selected: Option<u64>,
     pub(super) clear_armed: bool,
     pub(super) copied: Option<u64>,
-    error: Option<String>,
+    pub(super) error: Option<String>,
     /// Labs › Dictation stats: every retained entry summed up, while on.
     pub(super) stats: Option<HistoryStats>,
+    /// Kept clips of dictations that failed, newest first (R11).
+    pub(super) failed: Vec<FailedClip>,
+    clips_dir: Option<PathBuf>,
+    clips_scanned: Option<Instant>,
+    /// The failed dictation open in the detail, by file name.
+    pub(super) selected_failed: Option<String>,
+    /// The engine Retry sends the open clip to.
+    pub(super) retry_engine: Option<Provider>,
+    /// A local clip waiting for the person to say it may go to the cloud.
+    pub(super) confirm: Option<String>,
+    pub(super) retrying: Option<Retrying>,
+    pub(super) recovered: Option<Recovered>,
+    pub(super) retry_error: Option<String>,
 }
 
 impl HistoryPane {
     /// The host's store; `None` when it could not open one.
+    pub(super) fn store(&self) -> Option<&History> {
+        self.store.as_ref()
+    }
+
+    /// The host's store; `None` when it could not open one.
     pub(super) fn shared(store: Option<History>) -> Self {
         Self {
+            clips_dir: cloud::failed_clips_dir(),
             error: store
                 .is_none()
                 .then(|| tr("History could not be loaded.").to_string()),
@@ -44,6 +90,69 @@ impl HistoryPane {
     pub(super) fn reload(&mut self) {
         self.reload_entries();
         self.reload_stats();
+        self.reload_clips();
+    }
+
+    /// The kept clips of failed dictations.
+    fn reload_clips(&mut self) {
+        self.clips_scanned = Some(Instant::now());
+        let Some(dir) = &self.clips_dir else {
+            return;
+        };
+        self.failed = recover::list(dir);
+        if self
+            .selected_failed
+            .as_ref()
+            .is_some_and(|name| !self.failed.iter().any(|clip| clip.file_name() == *name))
+        {
+            self.selected_failed = None;
+            self.confirm = None;
+        }
+    }
+
+    /// A retry is running or, in a fixture, was requested.
+    #[cfg(test)]
+    pub(super) fn is_retrying(&self) -> bool {
+        self.retrying.is_some()
+    }
+
+    /// The engine Retry offers for `clip`: the one that failed, when it was
+    /// a cloud engine, else the one chosen, else Groq.
+    pub(super) fn engine_for(&self, clip: &FailedClip) -> Provider {
+        self.retry_engine
+            .or_else(|| Provider::from_id(&clip.origin))
+            .or_else(|| cloud::chosen_provider())
+            .unwrap_or(Provider::Groq)
+    }
+
+    /// Adopts a finished retry.
+    fn poll_retry(&mut self) -> bool {
+        let Some(retrying) = &self.retrying else {
+            return false;
+        };
+        let answer = match retrying.result.try_recv() {
+            Ok(answer) => answer,
+            Err(TryRecvError::Empty) => return false,
+            Err(TryRecvError::Disconnected) => Err(RetryError::Failed("the retry stopped".into())),
+        };
+        let clip = self.retrying.take().map(|r| r.clip).unwrap_or_default();
+        match answer {
+            Ok(retried) => {
+                let engine = format!("{} · {}", retried.usage.provider, retried.usage.model);
+                self.recovered = Some(Recovered {
+                    text: retried.text,
+                    engine,
+                    pasted: false,
+                });
+                self.selected = None;
+                self.selected_failed = None;
+                self.retry_error = None;
+            }
+            Err(RetryError::NeedsConfirmation) => self.confirm = Some(clip),
+            Err(RetryError::Failed(message)) => self.retry_error = Some(message),
+        }
+        self.reload();
+        true
     }
 
     fn reload_entries(&mut self) {
@@ -72,17 +181,27 @@ impl HistoryPane {
     /// While the pane shows, picks up new dictations and search edits. The
     /// stats are summed again only when the entries or the toggle changed.
     pub(super) fn poll(&mut self, visible: bool) -> bool {
+        let retried = self.poll_retry();
         if !visible || self.store.is_none() {
-            return false;
+            return retried;
+        }
+        let mut changed = retried;
+        if self
+            .clips_scanned
+            .is_none_or(|at| at.elapsed() >= CLIP_SCAN)
+        {
+            let before = self.failed.clone();
+            self.reload_clips();
+            changed |= self.failed != before;
         }
         let previous = std::mem::take(&mut self.entries);
         self.reload_entries();
-        let changed = self.entries != previous;
-        if changed || self.stats.is_some() != crate::labs::history_stats() {
+        changed |= self.entries != previous;
+        if self.entries != previous || self.stats.is_some() != crate::labs::history_stats() {
             self.reload_stats();
             return true;
         }
-        false
+        changed
     }
 
     fn entry(&self, id: u64) -> Option<&HistoryEntry> {
@@ -147,6 +266,41 @@ impl HistoryPane {
 
     pub(super) fn fixture_empty() -> Self {
         Self::default()
+    }
+
+    /// Two failed dictations beside a retained one: a Groq failure, and
+    /// audio recorded for a local model.
+    pub(super) fn fixture_failed() -> Self {
+        let now = crate::history::now_ms();
+        let clip = |minutes: u64, origin: &str| FailedClip {
+            path: PathBuf::from(format!(
+                "/fixture/{}",
+                cloud::clip_name(now - minutes * 60_000, origin)
+            )),
+            timestamp_ms: now - minutes * 60_000,
+            origin: origin.into(),
+        };
+        let failed = vec![clip(3, "groq"), clip(75, "local")];
+        Self {
+            selected_failed: Some(failed[0].file_name()),
+            selected: None,
+            failed,
+            ..Self::fixture()
+        }
+    }
+
+    /// A retry that recovered text, waiting for Copy or Paste.
+    pub(super) fn fixture_recovered() -> Self {
+        Self {
+            recovered: Some(Recovered {
+                text: "Please move the Thursday review to ten, and send the draft to Maya first."
+                    .into(),
+                engine: "openai · gpt-4o-mini-transcribe".into(),
+                pasted: false,
+            }),
+            selected: None,
+            ..Self::fixture_failed()
+        }
     }
 }
 
@@ -218,6 +372,9 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
         Some(empty) => empty,
         None => {
             let mut list = col().key("history-list");
+            for clip in &pane.failed {
+                list = list.child(super::recovery::failed_item(p, pane, clip));
+            }
             for entry in &pane.entries {
                 let id = entry.id;
                 let mut meta = tr(entry.kind.label()).to_string();
@@ -238,6 +395,9 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
                     },
                     move |ui: &mut Ui| {
                         ui.history.selected = Some(id);
+                        ui.history.selected_failed = None;
+                        ui.history.recovered = None;
+                        ui.history.confirm = None;
                         ui.history.clear_armed = false;
                     },
                 ));
@@ -250,7 +410,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
                 .build(p.k)
                 .key("history-search");
             let column = ld::list_column(search, "history-scroll", list);
-            ld::body(p, "history-body", column, detail(ui, p))
+            ld::body(p, "history-body", column, detail(ui, p, layer))
         }
     };
     (
@@ -389,7 +549,7 @@ fn copy_action(ui: &Ui, p: Paint, id: u64, in_row: bool) -> El {
 /// long.
 fn empty(ui: &Ui, p: Paint) -> Option<El> {
     let pane = &ui.history;
-    if !pane.entries.is_empty() {
+    if !pane.entries.is_empty() || !pane.failed.is_empty() {
         return None;
     }
     let retention = ui.settings.history_retention;
@@ -427,8 +587,18 @@ fn empty(ui: &Ui, p: Paint) -> Option<El> {
     })
 }
 
-fn detail(ui: &Ui, p: Paint) -> El {
+fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let pane = &ui.history;
+    if let Some(recovered) = &pane.recovered {
+        return super::recovery::recovered_detail(p, recovered);
+    }
+    if let Some(clip) = pane
+        .selected_failed
+        .as_ref()
+        .and_then(|name| pane.failed.iter().find(|clip| clip.file_name() == *name))
+    {
+        return super::recovery::failed_detail(ui, p, clip, layer);
+    }
     let Some(entry) = pane.selected.and_then(|id| pane.entry(id)) else {
         return empty(ui, p).unwrap_or_else(|| {
             ld::empty_state(

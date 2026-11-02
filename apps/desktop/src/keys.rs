@@ -63,7 +63,11 @@ pub fn resolve(account: &str, env_var: &str) -> Option<(String, KeySource)> {
     resolve_order(
         std::env::var(env_var).ok(),
         || keyring_get(account),
-        || file_path(account).ok().and_then(|path| read_key_file(&path)),
+        || {
+            file_path(account)
+                .ok()
+                .and_then(|path| read_key_file(&path))
+        },
     )
     .map(|(key, source)| (key.trim().to_string(), source))
 }
@@ -209,8 +213,26 @@ fn keyring_set(account: &str, key: &str) -> bool {
     stored.is_some()
 }
 
-/// The providers that take a key.
-pub const PROVIDERS: &[&str] = &["groq"];
+/// The providers that take a key, and the environment variable that
+/// overrides each one's stored key. The gateway's "key" is its bearer token.
+pub const PROVIDER_ENV: &[(&str, &str)] = &[
+    ("groq", "GROQ_API_KEY"),
+    ("openrouter", "OPENROUTER_API_KEY"),
+    ("openai", "OPENAI_API_KEY"),
+    ("deepgram", "DEEPGRAM_API_KEY"),
+    ("gateway", "WORDINK_GATEWAY_TOKEN"),
+];
+
+/// The names `wordink keys set` takes.
+pub const PROVIDERS: &[&str] = &["groq", "openrouter", "openai", "deepgram", "gateway"];
+
+/// The environment variable for `provider`'s key.
+pub fn env_var(provider: &str) -> Option<&'static str> {
+    PROVIDER_ENV
+        .iter()
+        .find(|(name, _)| *name == provider)
+        .map(|(_, env)| *env)
+}
 
 /// `wordink keys set <provider>`: reads the key from `input` (stdin, never
 /// argv, so it stays out of shell history and the process list) and hands it
@@ -230,7 +252,9 @@ pub fn set_from(
     input.read_line(&mut line)?;
     let key = line.trim();
     if key.is_empty() {
-        return Err(eyre!("no key on stdin; pipe it in, e.g. `omaseal get ... | wordink keys set {provider}`"));
+        return Err(eyre!(
+            "no key on stdin; pipe it in, e.g. `omaseal get ... | wordink keys set {provider}`"
+        ));
     }
     let source = save(provider, key)?;
     Ok(format!("{provider}: key saved ({})", source.label()))
@@ -240,7 +264,12 @@ pub fn set_from(
 pub fn status_lines(is_set: impl Fn(&str) -> bool) -> Vec<String> {
     PROVIDERS
         .iter()
-        .map(|provider| format!("{provider}: {}", if is_set(provider) { "set" } else { "unset" }))
+        .map(|provider| {
+            format!(
+                "{provider}: {}",
+                if is_set(provider) { "set" } else { "unset" }
+            )
+        })
         .collect()
 }
 
@@ -262,11 +291,7 @@ pub fn run_cli(command: &KeysCommand) -> i32 {
         }
         KeysCommand::Status => {
             for line in status_lines(|provider| {
-                let env = match provider {
-                    "groq" => "GROQ_API_KEY",
-                    _ => return false,
-                };
-                status(provider, env).is_some()
+                env_var(provider).is_some_and(|env| status(provider, env).is_some())
             }) {
                 println!("{line}");
             }
@@ -280,7 +305,7 @@ pub fn run_cli(command: &KeysCommand) -> i32 {
 pub enum KeysCommand {
     /// Save a provider's API key, read from stdin (never from an argument).
     Set {
-        /// `groq`.
+        /// `groq`, `openrouter`, `openai`, `deepgram` or `gateway`.
         provider: String,
     },
     /// Show whether each provider's key is set. Never prints a key.
@@ -324,7 +349,10 @@ mod tests {
             },
         );
         assert_eq!(found.map(|(_, source)| source), Some(KeySource::Env));
-        assert!(!asked.get(), "the keyring is never asked when the environment answers");
+        assert!(
+            !asked.get(),
+            "the keyring is never asked when the environment answers"
+        );
     }
 
     #[cfg(unix)]
@@ -335,7 +363,10 @@ mod tests {
         let _ = fs::remove_dir_all(&directory);
         let path = directory.join("groq.key");
         write_key_file(&path, "secret-value").unwrap();
-        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         assert_eq!(read_key_file(&path).as_deref(), Some("secret-value"));
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
         assert_eq!(read_key_file(&path), None);
@@ -345,10 +376,14 @@ mod tests {
     #[test]
     fn set_reads_the_key_from_the_input_trims_it_and_never_echoes_it() {
         let mut saved = None;
-        let line = set_from("groq", &mut std::io::Cursor::new("  gsk_secret123 \n"), |account, key| {
-            saved = Some((account.to_string(), key.to_string()));
-            Ok(KeySource::File)
-        })
+        let line = set_from(
+            "groq",
+            &mut std::io::Cursor::new("  gsk_secret123 \n"),
+            |account, key| {
+                saved = Some((account.to_string(), key.to_string()));
+                Ok(KeySource::File)
+            },
+        )
         .unwrap();
         assert_eq!(saved, Some(("groq".into(), "gsk_secret123".into())));
         assert!(!line.contains("gsk_secret123"));
@@ -365,7 +400,89 @@ mod tests {
     #[test]
     fn status_shows_only_set_or_unset() {
         let lines = status_lines(|provider| provider == "groq");
-        assert_eq!(lines, vec!["groq: set".to_string()]);
-        assert_eq!(status_lines(|_| false), vec!["groq: unset".to_string()]);
+        assert_eq!(lines[0], "groq: set");
+        assert!(lines[1..].iter().all(|line| line.ends_with(": unset")));
+        assert_eq!(lines.len(), PROVIDERS.len());
+        assert!(
+            status_lines(|_| false)
+                .iter()
+                .all(|line| line.ends_with(": unset"))
+        );
+    }
+
+    #[test]
+    fn every_provider_has_its_own_environment_variable_and_account() {
+        use crate::transcription::cloud::Provider;
+        let expected = [
+            ("groq", "GROQ_API_KEY"),
+            ("openrouter", "OPENROUTER_API_KEY"),
+            ("openai", "OPENAI_API_KEY"),
+            ("deepgram", "DEEPGRAM_API_KEY"),
+            ("gateway", "WORDINK_GATEWAY_TOKEN"),
+        ];
+        for (provider, env) in expected {
+            assert_eq!(env_var(provider), Some(env));
+            assert!(PROVIDERS.contains(&provider));
+            let known = Provider::from_id(provider).expect("a cloud provider");
+            assert_eq!(
+                known.key_env(),
+                env,
+                "the engine reads the same variable the CLI reports"
+            );
+        }
+        assert_eq!(PROVIDERS.len(), Provider::ALL.len());
+        assert_eq!(env_var("nope"), None);
+    }
+
+    #[test]
+    fn a_new_providers_key_resolves_env_then_keyring_then_file_like_groqs() {
+        // The same order, for each account name.
+        for provider in PROVIDERS {
+            let found = resolve_order(None, || None, || some(&format!("{provider}-file-key")));
+            assert_eq!(
+                found,
+                Some((format!("{provider}-file-key"), KeySource::File))
+            );
+            let found = resolve_order(some("env"), || some("ring"), || some("file"));
+            assert_eq!(found, Some(("env".into(), KeySource::Env)));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn each_provider_keeps_its_key_in_its_own_owner_only_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory =
+            std::env::temp_dir().join(format!("wordink-keys-providers-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        for provider in PROVIDERS {
+            let path = directory.join(format!("{provider}.key"));
+            write_key_file(&path, &format!("{provider}-secret")).unwrap();
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            assert_eq!(read_key_file(&path), Some(format!("{provider}-secret")));
+        }
+        assert!(file_path("openrouter").unwrap().ends_with("openrouter.key"));
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn set_accepts_every_provider_and_saves_to_its_account() {
+        for provider in PROVIDERS {
+            let mut saved = None;
+            let line = set_from(
+                provider,
+                &mut std::io::Cursor::new("tok-123\n"),
+                |account, key| {
+                    saved = Some((account.to_string(), key.to_string()));
+                    Ok(KeySource::Keyring)
+                },
+            )
+            .unwrap();
+            assert_eq!(saved, Some((provider.to_string(), "tok-123".to_string())));
+            assert!(line.starts_with(provider) && !line.contains("tok-123"));
+        }
     }
 }
