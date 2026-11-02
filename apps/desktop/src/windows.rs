@@ -29,7 +29,7 @@ use crate::desktop::events::{
 use crate::transcription::local_transcriber::LocalTranscriber;
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection, validate};
 
-const DEFAULT_MODEL: &str = "parakeet_unified_en";
+const DEFAULT_MODEL: &str = "parakeet_v3";
 const DEFAULT_LANGUAGE: &str = "en";
 
 #[derive(Parser)]
@@ -517,10 +517,18 @@ mod tests {
     }
 
     #[test]
+    fn the_default_model_is_the_catalog_default() {
+        assert_eq!(
+            DEFAULT_MODEL.parse::<TranscriptionModelId>().unwrap(),
+            TranscriptionModelId::default()
+        );
+    }
+
+    #[test]
     fn incompatible_model_and_language_are_rejected() {
         let result = SelectionArgs {
             model: DEFAULT_MODEL.into(),
-            language: "pl".into(),
+            language: "ja".into(),
         }
         .resolve();
 

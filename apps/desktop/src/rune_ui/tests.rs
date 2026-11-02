@@ -1430,7 +1430,7 @@ fn mode_applications_refuse_one_another_modes_use() {
 #[test]
 fn the_transcription_picker_asks_the_service_for_a_model() {
     let mut rt = runtime("picker", true, PANE_SIZE);
-    tap(&mut rt, "model2/top/actions/choose-model");
+    tap(&mut rt, "model3/top/actions/choose-model");
     assert!(matches!(
         sent(&rt),
         [Request::ChooseModel {
@@ -1765,7 +1765,7 @@ fn the_sound_sets_sheet_plays_and_chooses_sets() {
 #[test]
 fn a_download_in_progress_can_be_cancelled() {
     let mut rt = runtime("picker-downloading", true, PANE_SIZE);
-    tap(&mut rt, "model1/top/actions/cancel-model");
+    tap(&mut rt, "model2/top/actions/cancel-model");
     assert!(matches!(sent(&rt), [Request::CancelModel]));
 }
 

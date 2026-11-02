@@ -763,6 +763,8 @@ fn model_card(
     if model.id == TranscriptionModelId::ParakeetUltra {
         title = title.child(Badge::new(tr("Labs")).build(p.k));
     }
+    // The licence the weights are published under, as its source names it.
+    title = title.child(Badge::new(model.license).build(p.k));
     let metric = |key: &str, label: &str, value: String| {
         row()
             .key(key)
