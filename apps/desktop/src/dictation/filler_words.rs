@@ -1,5 +1,6 @@
 //! Labs › Remove filler words: the hesitations a model writes down
-//! verbatim ("um", "umm", "uh", "uhh", "erm", "er", "ah") leave a dictation,
+//! verbatim ("um", "umm", "uh", "uhh", "erm", "er", "ah", "eh", "hmm", "hm",
+//! "mm", "mhm") leave a dictation,
 //! with no model involved. A filler matches as a whole word, lowercase or
 //! with only its first letter capitalised, so "umbrella", "ahead", "error",
 //! "Uhura", "uh-huh", and "ER" stay as they are. The comma or ellipsis that
@@ -7,7 +8,9 @@
 //! capitalised filler that started a sentence hands its capital to the next
 //! word. Line breaks are kept.
 
-const FILLERS: &[&str] = &["um", "umm", "uh", "uhh", "erm", "er", "ah"];
+const FILLERS: &[&str] = &[
+    "um", "umm", "uh", "uhh", "erm", "er", "ah", "eh", "hmm", "hm", "mm", "mhm",
+];
 
 /// `transcript` without its filler words.
 pub fn apply(transcript: &str) -> String {
@@ -169,6 +172,15 @@ mod tests {
             "Hello. We left. Then"
         );
         assert_eq!(apply("Uh, um, okay"), "Okay");
+    }
+
+    #[test]
+    fn the_wider_voxtype_hesitations_leave_too() {
+        assert_eq!(apply("So, hmm, we should go."), "So, we should go.");
+        assert_eq!(apply("It is, eh, fine."), "It is, fine.");
+        assert_eq!(apply("mhm and hm and mm okay"), "and and okay");
+        assert_eq!(apply("The hmmm stays."), "The hmmm stays.");
+        assert_eq!(apply("Mmm, hammock"), "Mmm, hammock");
     }
 
     #[test]

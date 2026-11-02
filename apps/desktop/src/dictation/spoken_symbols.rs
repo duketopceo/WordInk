@@ -27,6 +27,24 @@ const SYMBOLS: &[(&[&str], char, Join)] = &[
     (&["comma"], ',', Join::Previous),
     (&["semicolon"], ';', Join::Previous),
     (&["colon"], ':', Join::Previous),
+    // Sentence punctuation, brackets and a few signs a Voxtype user says
+    // (the words the other tools treat as symbols; ambiguous ones such as
+    // "plus", "pipe" or "tab" are left as words).
+    (&["period"], '.', Join::Previous),
+    (&["question", "mark"], '?', Join::Previous),
+    (&["exclamation", "mark"], '!', Join::Previous),
+    (&["exclamation", "point"], '!', Join::Previous),
+    (&["open", "parenthesis"], '(', Join::Next),
+    (&["open", "paren"], '(', Join::Next),
+    (&["close", "parenthesis"], ')', Join::Previous),
+    (&["close", "paren"], ')', Join::Previous),
+    (&["open", "bracket"], '[', Join::Next),
+    (&["close", "bracket"], ']', Join::Previous),
+    (&["open", "brace"], '{', Join::Next),
+    (&["close", "brace"], '}', Join::Previous),
+    (&["dollar", "sign"], '$', Join::Next),
+    (&["percent", "sign"], '%', Join::Previous),
+    (&["backslash"], '\\', Join::Both),
 ];
 
 /// `transcript` with its spoken symbols applied.
@@ -132,6 +150,25 @@ fn emit(
 #[cfg(test)]
 mod tests {
     use super::apply;
+
+    #[test]
+    fn spoken_sentence_punctuation_and_brackets_join_their_neighbours() {
+        assert_eq!(apply("done period next"), "done. next");
+        assert_eq!(apply("really question mark"), "really?");
+        assert_eq!(apply("wow exclamation mark ok"), "wow! ok");
+        assert_eq!(apply("wow exclamation point"), "wow!");
+        assert_eq!(apply("call open paren now close paren ok"), "call (now) ok");
+        assert_eq!(
+            apply("see open parenthesis here close parenthesis"),
+            "see (here)"
+        );
+        assert_eq!(apply("a open bracket 1 close bracket"), "a [1]");
+        assert_eq!(apply("x open brace y close brace"), "x {y}");
+        assert_eq!(apply("it costs dollar sign five"), "it costs $five");
+        assert_eq!(apply("fifty percent sign off"), "fifty% off");
+        assert_eq!(apply("a backslash b"), "a\\b");
+        assert_eq!(apply("the periodic table"), "the periodic table");
+    }
 
     #[test]
     fn symbols_join_their_neighbours() {
