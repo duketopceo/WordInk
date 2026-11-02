@@ -1,0 +1,35 @@
+# Neutral sample Voxtype config for the `wordink import voxtype` tests.
+engine = "whisper"
+
+[hotkey]
+enabled = false
+key = "SCROLLLOCK"
+
+[audio]
+device = "default"
+pause_media = true
+duck_media = false
+duck_media_volume_percent = 40
+
+[audio.feedback]
+enabled = false
+theme = "subtle"
+
+[output]
+mode = "paste"
+
+[text]
+spoken_punctuation = true
+filter_fillers = true
+
+[text.replacements]
+"sample tool" = "SampleTool"
+"acme corp" = "Acme Corp"
+"foo bar" = "foobar"
+"drop me" = ""
+
+[vad]
+enabled = false
+
+[osd]
+enabled = true

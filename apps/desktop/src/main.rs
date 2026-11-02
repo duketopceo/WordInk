@@ -60,6 +60,7 @@ mod rune_ui;
 mod suppression;
 mod transcription;
 mod updater;
+mod voxtype_import;
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -130,6 +131,11 @@ enum Command {
     Keys {
         #[command(subcommand)]
         command: keys::KeysCommand,
+    },
+    /// Bring settings across from another dictation app.
+    Import {
+        #[command(subcommand)]
+        command: voxtype_import::ImportCommand,
     },
     /// Inspect and control the running desktop app or offline audio tools.
     Dev {
@@ -312,6 +318,7 @@ fn main() -> Result<()> {
     let cli = match cli.command {
         Some(Command::Control(command)) => control::cli::finish(control::cli::run(command)),
         Some(Command::Keys { command }) => std::process::exit(keys::run_cli(&command)),
+        Some(Command::Import { command }) => std::process::exit(voxtype_import::run_cli(&command)),
         command => Cli { command },
     };
     #[cfg(debug_assertions)]
@@ -412,7 +419,9 @@ fn main() -> Result<()> {
             }
             local_api::run_service(&log_dir, event_path, embedded, &SHUTDOWN)
         }
-        Command::Control(_) | Command::Keys { .. } => unreachable!("handled before startup"),
+        Command::Control(_) | Command::Keys { .. } | Command::Import { .. } => {
+            unreachable!("handled before startup")
+        },
         #[cfg(hex_capture)]
         Command::CapsulePlayground { .. } => unreachable!("handled before startup"),
         Command::Dev { command } => {

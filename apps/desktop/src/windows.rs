@@ -58,6 +58,11 @@ enum Command {
         #[command(subcommand)]
         command: crate::keys::KeysCommand,
     },
+    /// Bring settings across from another dictation app.
+    Import {
+        #[command(subcommand)]
+        command: crate::voxtype_import::ImportCommand,
+    },
     /// Open the native Windows application.
     App {
         /// Start the resident listener without showing the Settings window.
@@ -167,6 +172,9 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
     if let Command::Keys { command } = &command {
         std::process::exit(crate::keys::run_cli(command));
     }
+    if let Command::Import { command } = &command {
+        std::process::exit(crate::voxtype_import::run_cli(command));
+    }
     // A headless render (`--snap`) draws fixtures without starting the
     // runtime or touching the data folder, and prints to the terminal that
     // ran it.
@@ -243,7 +251,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
             speed,
             selection,
         } => stream_bench(&wav, speed, &selection.resolve()?),
-        Command::Control(_) | Command::Keys { .. } => unreachable!("handled before logging"),
+        Command::Control(_) | Command::Keys { .. } | Command::Import { .. } => unreachable!("handled before logging"),
     }
 }
 
