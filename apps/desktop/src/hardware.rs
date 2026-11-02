@@ -121,6 +121,7 @@ pub fn classify(devices: &[RawDevice]) -> (GpuApi, f64) {
 }
 
 /// `MemTotal` of a `/proc/meminfo`, in GB.
+#[cfg(any(target_os = "linux", test))]
 pub fn parse_meminfo(text: &str) -> Option<f64> {
     let line = text.lines().find(|line| line.starts_with("MemTotal:"))?;
     let kilobytes: f64 = line
@@ -186,6 +187,7 @@ impl Probed {
 pub fn probe() -> Probe {
     // ggml's own device list, the one Auto uses, minus a GPU that hung or
     // ran slower than the CPU under this driver (`gpu_health`).
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     let devices = crate::transcription::gpu_health::gpus()
         .into_iter()
         .filter(|device| !crate::transcription::gpu_health::failed(device))
@@ -196,6 +198,14 @@ pub fn probe() -> Probe {
             memory_bytes: device.memory_total,
         })
         .collect::<Vec<_>>();
+    // macOS runs on Apple silicon only: Metal with unified memory.
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    let devices = vec![RawDevice {
+        description: "Apple GPU".into(),
+        kind: "metal".into(),
+        gpu: true,
+        memory_bytes: 0,
+    }];
     let (gpu_api, vram_or_unified_gb) = classify(&devices);
     Probe {
         gpu_api,
