@@ -71,7 +71,7 @@ The owner does not use WordInk day to day because it has no Hex-style pill and n
 
   Hex's pill is the default. Synth feedback sounds for start, stop and error are a separate, optional setting.
 - R8. Live text (style c) streams words as they are recognised for models that can stream. With other models it, like the other styles, shows the phases: ready, loading model, recording, transcribing, done, copied, error.
-- R9. Pressing the hotkey cancels a recording; pressing Esc twice cancels from the pill.
+- R9. A dictation can be cancelled with a dedicated, rebindable Cancel shortcut, or by pressing Esc twice while the indicator shows. Pressing the dictation hotkey again stops and inserts.
 - R10. Text is inserted into the focused app with terminal-safe paste and clipboard restore, and is never typed into a detected password field.
 - R11. A dictation that fails is kept and can be recovered from history.
 
@@ -138,15 +138,15 @@ The owner does not use WordInk day to day because it has no Hex-style pill and n
 
 - F1. **First run** (covers R18, R20, R22, R28): install, grant permissions, see the hardware recommendation, choose Groq (paste a key) or local (download Parakeet v3 with progress), set or accept the hotkey, then do a test dictation.
 - F2. **Dictate** (covers R5, R7, R8, R10, R12-R15): press Option/Alt+Space. Media pauses and the chosen indicator appears (live text streams words where the model supports it). Release or press again: the text is processed and inserted into the focused app, media resumes, and the pill shows done.
-- F3. **Cancel or recover** (covers R9, R11): press the hotkey again mid-recording, or Esc twice, and nothing is inserted. If the provider fails, the clip is kept and History offers retry with another model.
+- F3. **Cancel or recover** (covers R9, R11): press the Cancel shortcut, or Esc twice while the indicator shows, and nothing is inserted. If the provider fails, the clip is kept and History offers retry with another model.
 
 ### Acceptance Examples
 
-- AE1. (covers R7, R8) With the default pill, dictating "hello world" with Groq on Omarchy shows the pill through record, transcribe and done, and "hello world" lands in a foot terminal; switching the style to live text shows the words as they stream.
+- AE1. (covers R7, R8) With the default pill, dictating "hello world" with Groq on Omarchy shows the pill through record, transcribe and done, and "hello world" lands in a foot terminal; with the live-text style, Groq shows the phase labels, and a streaming-capable local model on a GPU shows the words as they stream.
 - AE2. (covers R20, R22) On a machine with no API key and Vulkan available, onboarding recommends Parakeet v3, and dictation works offline after the download.
 - AE3. (covers R12, R13) With the owner's Voxtype replacement table imported, a spoken replacement term comes out written, and "um" is dropped when filler removal is on.
 - AE4. (covers R10) Dictating while a password manager field is focused inserts nothing and shows why.
-- AE5. (covers R32) A search of the repo and its full history for the owner's hostnames, email and personal booking link finds nothing.
+- AE5. (covers R32) A search of `master` and its full history for the owner's hostnames, email and personal booking link finds nothing.
 
 ### Success Criteria
 
@@ -172,7 +172,7 @@ The owner does not use WordInk day to day because it has no Hex-style pill and n
 ### Dependencies / Assumptions
 
 - Hex v3.2.0 builds on Asahi aarch64 with Vulkan (Honeykrisp). This is unverified, so verify it first.
-- The Hex window needs Vulkan on Linux and Windows and AVX2 on x86. Machines without them use the cloud path through a minimal fallback or are unsupported. Planning decides which.
+- The Hex window needs a Vulkan driver on Linux and Windows (a software driver such as Mesa lavapipe counts) and AVX2 on x86. Without a GPU, the window runs on the software driver and onboarding recommends Groq (KTD8); without any Vulkan driver or AVX2 the app exits with a message.
 - OpenRouter audio-input models are discoverable through its model API.
 
 ### Outstanding Questions
@@ -214,7 +214,7 @@ Public sources:
   - Deepgram.
   - The WordInk gateway.
 
-  Keys come from the OS keyring, with an environment-variable fallback (`GROQ_API_KEY`, `OPENROUTER_API_KEY`). Keys are never written to the settings file.
+  Keys come from the OS keyring (Secret Service, Keychain, Credential Manager). Where Linux has no Secret Service, keys go in a user-only (0600) file in the WordInk config directory, separate from settings, and onboarding says where the key is stored. Environment variables (`GROQ_API_KEY`, `OPENROUTER_API_KEY`) override both. Keys are never written to the settings file or logs.
 - KTD5. Every transcription records provider, model, audio seconds, words and estimated cost into history. Prices come from a bundled table for Groq, OpenAI and Deepgram, and from the OpenRouter catalogue `pricing` field, cached daily. The Usage pane aggregates these records. (Covers R25.)
 - KTD6. The indicator style is one setting: `pill` (Hex's HUD, the default), `audio_bar` or `live_text`.
   - `audio_bar` is a new Rune HUD view that draws a level meter from the existing capture levels, in the shape of Voxtype's popup. It is re-implemented, not copied.
@@ -224,8 +224,8 @@ Public sources:
   - Groq as the engine when a Groq key exists. Otherwise, Parakeet TDT 0.6B v3, local.
   - Option+Space on macOS and Alt+Space elsewhere.
 
-  The keyboard type is detected from Hex's `keyboard_input_sources` and layout data, so labels read Option or Alt. Hex's Parakeet Unified stays in the catalogue, labelled with its license, and is never the default. (Covers R5, R6, R18, R20, R21.)
-- KTD8. Hardware recommendation reuses Hex's Auto device logic (the GPU/CPU probe, and remembered hangs) and adds the RAM and CPU-feature probe. Onboarding shows one recommended choice and one alternative. Machines without Vulkan or AVX2 are recommended Groq. Without a Vulkan driver the window itself cannot open, so the docs state the requirement and the app exits with a message. A no-window CLI mode is deferred. (Resolves the open area on fallback.)
+  The keyboard type is detected from Hex's `keyboard_input_sources` and layout data, so labels read Option or Alt. GNOME binds Alt+Space to its window menu, so GNOME sessions default to Ctrl+Alt+Space, and the label says so. Windows keeps Alt+Space unless the owner's Windows device pass finds a conflict. Hex's Parakeet Unified stays in the catalogue, labelled with its license, and is never the default. (Covers R5, R6, R18, R20, R21.)
+- KTD8. Hardware recommendation reuses Hex's Auto device logic (the GPU/CPU probe, and remembered hangs) and adds the RAM and CPU-feature probe. Onboarding shows one recommended choice and one alternative. Machines without Vulkan or AVX2 are recommended Groq. "No Vulkan" here means no GPU Vulkan device: the window still runs on a software Vulkan driver (Mesa lavapipe), which the docs list as the fallback. With no Vulkan driver at all, or no AVX2, the app exits with a message naming the fix. A no-window CLI mode is deferred. (Resolves the open area on fallback.)
 - KTD9. Merge when green. The agent may squash-merge its own PRs when CI passes and review has no open blocking finding, and may use `--admin` only when a stale CodeRabbit CHANGES_REQUESTED is the sole block. (session-settled: user-directed — chosen over stacking every PR for the owner to merge: overnight progress.)
 - KTD10. The owner switches over on Linux in U5:
   1. Install the app beside `wordink-dictd`.
@@ -234,7 +234,7 @@ Public sources:
   4. Stop and disable `wordink-dictd.service` only after a successful dictation with the app.
 
   Roll back by re-enabling the unit and restoring the binds from the Omarchy stash. `wordink-dictd` stays packaged for Windows and macOS until those platforms reach parity. (Resolves the open area on dictd.)
-- KTD11. Meeting mode: Hex's Meetings is macOS-only. Port `wordink-dictd`'s meeting mode (mic plus system-audio capture, source-based speaker labels, export) as an app command and pane on Linux and Windows. ML diarization stays out. (Covers R24.)
+- KTD11. Meeting mode: Hex's Meetings UI is marketed macOS-only, but its source has a Linux and Windows meetings runtime. Enable and exercise that runtime first. Then port only the proven gaps from `wordink-dictd` (source-based speaker labels, markdown export) into Hex's meeting modules, not a parallel module. ML diarization stays out. (Covers R24.)
 - KTD12. Personal details are scrubbed in two passes:
   - in files, in U15;
   - in history, once, in U18, using `git filter-repo --replace-text` with a private expressions file kept outside the repo. Before that rewrite, take a verified `git bundle` backup and confirm it with `git bundle verify`.
@@ -289,7 +289,7 @@ packages/* (web SDK, gateway) and apps/ios → separate products, cleaned (R36)
 | U8 | Model catalogue defaults + license display | `apps/desktop/src/transcription/models.rs`, `apps/desktop/src/rune_ui/models.rs` | U2 |
 | U9 | Hardware recommendation | `apps/desktop/src/desktop/onboarding.rs`, `apps/desktop/src/transcription/engine.rs` | U8 |
 | U10 | Option/Alt+Space default + keyboard detect | `apps/desktop/src/keyboard.rs`, platform input files | U2 |
-| U11 | Meeting mode port | `apps/desktop/src/meeting*`, new `apps/desktop/src/wordink_meeting.rs` | U3 |
+| U11 | Meeting mode on Linux/Windows | `apps/desktop/src/meeting*` | U3 |
 | U12 | Usage/cost, history re-transcribe, recovery | `apps/desktop/src/history*`, `apps/desktop/src/rune_ui/history.rs`, new usage pane | U3, U7 |
 | U13 | Settings panes + onboarding | `apps/desktop/src/rune_ui/settings.rs`, `apps/desktop/src/rune_ui/onboarding*` | U9, U12 |
 | U14 | CI/CD + signed Linux releases | `.github/workflows/desktop.yml`, `.github/workflows/release.yml`, `apps/desktop/packaging/**` | U2 |
@@ -301,12 +301,13 @@ packages/* (web SDK, gateway) and apps/ios → separate products, cleaned (R36)
 
 ### U1. Import Hex v3.2.0
 - **Goal:** Hex's source builds and runs from `apps/desktop/` in this repo.
-- **Requirements:** R1, R3.
-- **Files:** `apps/desktop/**` (copied tree), `apps/desktop/UPSTREAM.md`, `apps/desktop/LICENSE` (Hex MIT, unchanged), and root `Cargo.toml` (a comment only, if needed, to keep `apps/desktop` out of the root workspace).
+- **Requirements:** R1, R2, R3.
+- **Files:** `scripts/hex-sync.sh`, `apps/desktop/**` (copied tree), `apps/desktop/UPSTREAM.md`, `apps/desktop/LICENSE` (Hex MIT, unchanged), and root `Cargo.toml` (a comment only, if needed, to keep `apps/desktop` out of the root workspace).
 - **Approach:**
   1. Copy the Hex tree at tag commit `00610c5` from a scratch clone, without `.git` and with the KTD1 exclusions, including `.cargo/config.toml`.
   2. Verify that `cargo build --release` in `apps/desktop` succeeds on Linux aarch64 with Vulkan, and that the binary opens its window under Hyprland. This is the prerequisite gate; stop per the Stop conditions if it fails.
   3. Commit the import as a single commit whose message names the source commit.
+  4. Add `scripts/hex-sync.sh` per KTD2 (covers R2), with a dry-run test against a known Hex tag.
 - **Test scenarios:**
   - `cargo test` (Hex's default set) passes, or its failures are pre-existing upstream failures and are listed.
   - The root `cargo build -p wordink-core` is unaffected.
@@ -326,6 +327,7 @@ packages/* (web SDK, gateway) and apps/ios → separate products, cleaned (R36)
   - Point the data and config directories at `wordink`.
   - Point the updater at GitHub Releases of this repo (wired in U14).
   - Add an About line crediting Hex.
+  - Inventory every outbound host in the imported tree. Disable or compile out features that phone Anomaly or third parties, or that capture the screen by default: `hex_capture`/screen recording, the opencode.ai router, and release-service check-ins. Keep QuickJS mode scripts, but without network access unless the user enables it. Record the inventory in `apps/desktop/UPSTREAM.md`.
   - Use WordInk's brand assets where they exist; otherwise a neutral placeholder icon.
 - **Test scenarios:**
   - The app's data dir is `…/wordink`, not `…/hex`.
@@ -377,11 +379,13 @@ packages/* (web SDK, gateway) and apps/ios → separate products, cleaned (R36)
 ### U5. Owner install + Linux switch-over
 - **Goal:** The owner dictates daily with the WordInk app on Omarchy.
 - **Requirements:** R4, R5, R31.
-- **Files:** the install script adapted from Hex's `scripts/install-linux.sh` (local-build mode), and `examples/omarchy-desktop/` (generic Hyprland binds, no personal content).
+- **Files:** the install script adapted from Hex's `scripts/install-linux.sh` (local-build mode), and `examples/omarchy-desktop/` (generic Hyprland binds and Waybar notes, no personal content).
 - **Approach:**
-  - Follow KTD10 exactly.
+  - Follow KTD10 exactly. Until U10 changes the in-app default, Alt+Space is provided as a compositor bind that runs the app's dictation command.
+  - The Omarchy bar module (R31) is the app's StatusNotifierItem tray in Waybar. The example documents it, plus the optional Waybar mic indicator.
   - Edit the Omarchy bindings only through the owner's stash-canonical config: edit the stash, then copy.
   - Remove the Voxtype reinstall hook only in U17.
+  - Port `wordink-dictd`'s password-field protection (R10): a focused-app deny list, plus Hex's AT-SPI focus data where the toolkit exposes a password role. Hex's paste path has no such check, so this is new work and its tests cover AE4.
 - **Test scenarios:**
   - After install, Alt+Space toggles a recording into a foot terminal.
   - Disabling the app and re-enabling `wordink-dictd` restores the old behaviour.
@@ -455,9 +459,7 @@ packages/* (web SDK, gateway) and apps/ios → separate products, cleaned (R36)
 - **Goal:** Meeting recording with mic plus system audio, source labels and export works on Linux and Windows.
 - **Requirements:** R24.
 - **Files:**
-  - a new `apps/desktop/src/wordink_meeting.rs`;
-  - a CLI command;
-  - a pane entry;
+  - Hex's `apps/desktop/src/meeting*` modules;
   - reference: `sdks/python/src/wordink/desktop/meeting.py`.
 - **Approach:**
   - Port the dictd behaviour per KTD11.
@@ -473,7 +475,8 @@ packages/* (web SDK, gateway) and apps/ios → separate products, cleaned (R36)
 - **Approach:**
   - Aggregate the KTD5 records.
   - Time saved = words ÷ 40 wpm typing − audio seconds, with the formula shown in the pane.
-  - Re-transcribe sends the stored clip to another engine.
+  - Re-transcribe sends the stored clip to another engine. Sending a clip recorded with a local model to a cloud provider needs an explicit confirmation.
+  - Clips follow the history retention setting (default 7 days), are stored user-only (0600), and are deleted with their history entry.
 - **Test scenarios:**
   - Aggregation over fixture records.
   - The cost total per provider.
@@ -501,8 +504,10 @@ packages/* (web SDK, gateway) and apps/ios → separate products, cleaned (R36)
   - `apps/desktop/packaging/**`;
   - the updater public-key constant.
 - **Approach:**
-  - Adapt Hex's `check-*.yml` and `release.yml` to `apps/desktop`.
-  - Generate the signing keypair locally and store the private key only as a repo secret. Setting that secret is an owner action if auto mode blocks it.
+  - Adapt Hex's `check-*.yml` and `release.yml` to `apps/desktop`. Remove the Anomaly release-service, R2, Azure, Apple, AUR and Homebrew jobs.
+  - The release job writes a schema-1 update manifest as a release asset on the same host the app checks: stable channel, `linux-x64` and `linux-arm64` targets, sha256, size, and the `-sig` entries from Hex's `sign-linux.sh`.
+  - Only Linux uses the direct, ed25519-verified update path. On macOS and Windows the in-app updater is download-only: it links to the GitHub release, as Hex's `DownloadOnly` method does, until signing exists.
+  - Generate the signing keypair locally. Store the private key only as a secret on a protected `release` environment that requires the owner's approval to deploy, used only by a separate signing job. CODEOWNERS covers `.github/workflows/**` and the updater key constant. Rotation steps are documented in `SECURITY.md`. Setting the secret and the environment is an owner action if auto mode blocks it.
   - Ship macOS and Windows unsigned, with that stated in the README.
 - **Test scenarios:** the workflows pass actionlint; a PR run builds on all OSes.
 - **Verification:** a green CI run on the PR. A dry-run release job produces artifacts with checksums.
@@ -558,12 +563,13 @@ packages/* (web SDK, gateway) and apps/ios → separate products, cleaned (R36)
 - **Requirements:** R32 (history).
 - **Files:** none in the tree; a private expressions file outside the repo.
 - **Approach:**
-  1. Take a fresh mirror clone.
+  1. Take a fresh mirror clone. Run a credential scan (gitleaks) over the full history first; a found credential is rotated by the owner, not just rewritten.
   2. Make a `git bundle` backup into `~/Downloads/claude/` and verify it.
   3. Run `git filter-repo --replace-text` with the private expressions.
-  4. Verify with `git log --all -p | rg` over the expressions: no hits.
+  4. Verify with `git log master -p | rg` over the expressions: no hits.
   5. Force-push `master` once. Leave other branches alone except those that must follow; close or rebase open PRs only if needed and record which.
   6. If the push is blocked by branch protection or auto mode, record the exact commands for the owner.
+  7. List remaining refs that still contain the details (other remote branches, tags, and GitHub's read-only `refs/pull/*`, which a force-push cannot reach) in the morning report. Deleting branches, or asking GitHub support to purge cached refs, is the owner's call.
 - **Test scenarios:** none (an operational step).
 - **Verification:** the post-push mirror search finds no hits, and CI is green on the rewritten master.
 
