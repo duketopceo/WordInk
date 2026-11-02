@@ -357,6 +357,12 @@ impl HistoryStore {
 
     /// Delete every entry.
     pub fn clear(&mut self) -> io::Result<()> {
+        // The clips of failed dictations are history too.
+        if let Some(parent) = self.path.parent() {
+            crate::transcription::cloud::clear_clips(
+                &parent.join(crate::transcription::cloud::FAILED_CLIPS_DIR),
+            );
+        }
         if self.entries.is_empty() {
             return Ok(());
         }
@@ -1032,6 +1038,18 @@ mod tests {
             .set_retention(HistoryRetention::Off, day_ms + 1_001)
             .unwrap();
         assert!(texts(&store, 5).is_empty(), "Off lists nothing");
+    }
+
+    #[test]
+    fn clear_also_deletes_the_clips_of_failed_dictations() {
+        let path = temp_path("clear-clips");
+        let clips = path.parent().unwrap().join(crate::transcription::cloud::FAILED_CLIPS_DIR);
+        fs::create_dir_all(&clips).unwrap();
+        fs::write(clips.join("failed-1.wav"), b"RIFF").unwrap();
+        let mut store = HistoryStore::open(path, HistoryRetention::Week, 0);
+        // Even with no entries: the clips are history too.
+        store.clear().unwrap();
+        assert_eq!(fs::read_dir(&clips).unwrap().count(), 0);
     }
 
     #[test]

@@ -2313,6 +2313,7 @@ impl AppSettings {
         #[cfg(not(target_os = "macos"))]
         crate::transcription::local_transcriber::set_device(self.transcription_device);
         crate::transcription::cloud::set_engine_choice(self.engine);
+        crate::transcription::cloud::set_clip_retention(self.history_retention);
         RECORDING_DUCK_VOLUME.store(self.recording_duck_volume.to_bits(), Ordering::Relaxed);
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);
         PAUSE_BROWSER_MEDIA.store(self.pause_browser_media, Ordering::Relaxed);

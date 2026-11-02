@@ -381,6 +381,10 @@ impl Running {
     }
 }
 
+/// What a local transcription says when the engine started with no model.
+pub(crate) const NO_LOCAL_MODEL: &str =
+    "no local model installed \u{2014} install one in Settings";
+
 pub struct TranscriptionEngine {
     commands: Sender<Command>,
     running: Running,
@@ -402,6 +406,12 @@ pub struct TranscriptionEngine {
     next_stream: AtomicU64,
     deadlines: Deadlines,
     thread: Option<JoinHandle<()>>,
+    /// Whether this engine was started with no local model: it can only run
+    /// cloud dictation.
+    cloud_only: bool,
+    /// The route [`Self::begin`] chose for the capture now recording, taken
+    /// by the finish that follows so both use one decision.
+    routed: Mutex<Option<Option<crate::transcription::cloud::Provider>>>,
 }
 
 /// The GGUF selection the engine's model held after its last command.
@@ -546,6 +556,7 @@ impl TranscriptionEngine {
     }
 
     fn start_with(model: Option<Model>) -> Result<Self> {
+        let cloud_only = model.is_none();
         let streams = Arc::new(AtomicBool::new(
             model.as_ref().is_some_and(|model| model.stream_options().is_some()),
         ));
@@ -583,6 +594,8 @@ impl TranscriptionEngine {
             next_stream: AtomicU64::new(0),
             deadlines: Deadlines::PRODUCTION,
             thread: Some(thread),
+            cloud_only,
+            routed: Mutex::new(None),
         })
     }
 
@@ -603,6 +616,8 @@ impl TranscriptionEngine {
             next_stream: AtomicU64::new(0),
             deadlines: Deadlines::PRODUCTION,
             thread: None,
+            cloud_only: false,
+            routed: Mutex::new(None),
         };
         (engine, receiver)
     }
@@ -628,9 +643,32 @@ impl TranscriptionEngine {
         self
     }
 
+    /// The route for a capture, from the cached key; never waits on the
+    /// keyring.
+    fn decide(&self) -> Option<crate::transcription::cloud::Provider> {
+        crate::transcription::cloud::route_with(self.cloud_only)
+    }
+
+    /// The route [`Self::begin`] chose for this capture, or a fresh decision
+    /// when no capture began.
+    fn take_route(&self) -> Option<crate::transcription::cloud::Provider> {
+        let decided = self
+            .routed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        decided.unwrap_or_else(|| self.decide())
+    }
+
     /// Opens a live stream when the loaded model can stream on this device.
+    /// Decides the capture's route once: the finish that follows uses it.
     pub fn begin(&self) -> Option<LiveStream> {
-        self.begin_routed(crate::transcription::cloud::route())
+        let route = self.decide();
+        *self
+            .routed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(route);
+        self.begin_routed(route)
     }
 
     /// [`Self::begin`] for a dictation routed to `cloud`: a cloud engine
@@ -691,7 +729,7 @@ impl TranscriptionEngine {
 
     /// Whether the loaded model can stream on its device.
     pub(crate) fn streams(&self) -> bool {
-        self.streams_routed(crate::transcription::cloud::route())
+        self.streams_routed(self.decide())
     }
 
     fn streams_routed(&self, cloud: Option<crate::transcription::cloud::Provider>) -> bool {
@@ -769,7 +807,7 @@ impl TranscriptionEngine {
         clip: Vec<f32>,
         offline: Offline,
     ) -> Result<PendingTranscript> {
-        if let Some(provider) = crate::transcription::cloud::route() {
+        if let Some(provider) = self.take_route() {
             // A stream opened before the engine changed ends unused.
             drop(stream);
             let language = crate::transcription::cloud::language_hint(
@@ -1201,6 +1239,10 @@ impl Worker {
             job.finish(Err("transcription was abandoned".into()));
             return;
         }
+        if self.model.is_none() && self.parked.is_none() {
+            job.finish(Err(NO_LOCAL_MODEL.into()));
+            return;
+        }
         let started = Instant::now();
         self.start(&job);
         self.offline(clip, offline, source, started, job);
@@ -1369,6 +1411,39 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_capture_finishes_on_the_route_its_begin_chose() {
+        use crate::transcription::cloud::{Provider, force_route};
+        let (engine, commands) = TranscriptionEngine::for_test();
+        force_route(None);
+        let stream = engine.begin();
+        assert!(stream.is_some(), "begin chose local, and opened a stream");
+        // The key resolves mid-recording: the finish still goes local.
+        force_route(Some(Provider::Groq));
+        let _pending = engine
+            .finish_with(stream, vec![0.0; 100], Box::new(|_, _| Ok(String::new())))
+            .unwrap();
+        let mut saw_finish = false;
+        while let Ok(command) = commands.try_recv() {
+            saw_finish |= matches!(command, Command::Finish { .. });
+        }
+        assert!(saw_finish, "the finish used begin's decision, not a fresh one");
+        // The decision is spent: the next capture decides again.
+        assert_eq!(engine.take_route(), Some(Provider::Groq));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_model_less_engine_says_no_local_model_instead_of_a_reload_failure() {
+        let engine = TranscriptionEngine::start_without_model().unwrap();
+        let error = engine
+            .foreground(vec![0.0; 100], Box::new(|_, _| Ok("x".into())))
+            .unwrap()
+            .wait()
+            .unwrap_err();
+        assert_eq!(error, "no local model installed \u{2014} install one in Settings");
+    }
 
     #[test]
     fn a_cloud_routed_capture_opens_no_stream_even_when_the_model_streams() {

@@ -224,6 +224,9 @@ pub(crate) fn run(
     let mut settings = settings.clone();
     // Dictation that runs on a cloud provider (a Groq key, by default) loads
     // no local model, so it works before one is downloaded.
+    // Startup, on the listener's worker: the one place the key may be resolved
+    // and waited for. The hotkey loop reads only the cached key.
+    crate::transcription::cloud::refresh_key();
     let cloud_only = transcriber.is_none() && crate::transcription::cloud::route().is_some();
     let engine_start = if cloud_only {
         TranscriptionEngine::start_without_model()
@@ -443,7 +446,7 @@ pub(crate) fn run(
                 register |= shortcuts(&next) != shortcuts(&settings);
                 // A cloud engine loads no model; a listener that started on
                 // one loads the local model when settings switch to it.
-                if crate::transcription::cloud::route().is_none() || !cloud_only {
+                if crate::transcription::cloud::route_with(cloud_only).is_none() || !cloud_only {
                     model.want(&next.transcription);
                 }
                 toggle = next.shortcut_mode == crate::dictation::ShortcutMode::Toggle;

@@ -68,6 +68,15 @@ pub fn resolve(account: &str, env_var: &str) -> Option<(String, KeySource)> {
     .map(|(key, source)| (key.trim().to_string(), source))
 }
 
+/// [`resolve`], plus whether the keyring could not be asked (it failed, timed
+/// out or is backing off) when nothing was found: then `None` may only mean
+/// "unreadable right now".
+pub fn resolve_checked(account: &str, env_var: &str) -> (Option<(String, KeySource)>, bool) {
+    let found = resolve(account, env_var);
+    let unreadable = found.is_none() && !keyring_usable();
+    (found, unreadable)
+}
+
 /// Where a key resolves from, or `None` when there is none.
 pub fn status(account: &str, env_var: &str) -> Option<KeySource> {
     resolve(account, env_var).map(|(_, source)| source)
@@ -175,6 +184,7 @@ fn keyring_get(account: &str) -> Option<String> {
             Err(keyring::Error::NoEntry) => None,
             Err(error) => {
                 tracing::debug!(%error, "the OS keyring is unavailable");
+                keyring_failed();
                 None
             }
         }
