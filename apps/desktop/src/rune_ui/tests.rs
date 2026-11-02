@@ -245,7 +245,11 @@ fn each_panes_advanced_fold_starts_closed_and_stays_its_own() {
 #[test]
 fn desktops_without_a_portal_list_commands_instead_of_recording_rows() {
     let rt = runtime("commands", true, GOLDEN_SIZE);
-    assert!(texts(&rt).iter().any(|text| text == "wordink dictation toggle"));
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "wordink dictation toggle")
+    );
     assert!(rt.find("dictation-hotkey").is_none());
     assert!(rt.find("paste-last-hotkey").is_none());
 }
@@ -1944,7 +1948,10 @@ fn a_found_model_moves_on_without_a_download_and_back_returns_to_it() {
         shown.contains(&"Choose a speech model".to_owned()),
         "{shown:?}"
     );
-    assert!(!shown.contains(&"Setting up WordInk".to_owned()), "{shown:?}");
+    assert!(
+        !shown.contains(&"Setting up WordInk".to_owned()),
+        "{shown:?}"
+    );
     assert!(
         shown.contains(&"Parakeet Unified English".to_owned()),
         "the rows stay"
@@ -2313,6 +2320,9 @@ fn goldens() {
             "modes",
             "modes-picker",
             "picker-downloading",
+            "replacements",
+            "sounds",
+            "privacy",
         ] {
             check_golden(scene, dark, PANE_SIZE);
         }
@@ -2327,6 +2337,7 @@ fn goldens() {
     check_golden("picker-found", false, PANE_SIZE);
 }
 
+mod engine_step;
 mod onboarding_check;
 mod panes;
 

@@ -1063,45 +1063,11 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     rows
 }
 
-/// Enable on launch (Linux and Windows), the Dock icon, sounds, the
-/// interface language, and the update channel.
-fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
+/// The sound volume and sound set rows, in General's Application card and
+/// the Sounds pane.
+pub(super) fn sound_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     let settings = &ui.settings;
     let mut rows: Vec<CardRow> = Vec::new();
-    if ui.platform.caps.listener_control {
-        rows.push(
-            icon_toggle_row(
-                p,
-                "enable-on-launch",
-                &PLAY,
-                tr("Enable on launch"),
-                None,
-                settings.enable_on_launch,
-                |ui: &mut Ui| {
-                    let enabled = !ui.settings.enable_on_launch;
-                    ui.update(|settings| settings.enable_on_launch = enabled);
-                },
-            )
-            .into(),
-        );
-    }
-    if ui.platform.caps.dock_icon {
-        rows.push(
-            icon_toggle_row(
-                p,
-                "dock-icon",
-                &DOCK,
-                tr("Show Dock icon"),
-                None,
-                settings.show_dock_icon,
-                |ui: &mut Ui| {
-                    let show = !ui.settings.show_dock_icon;
-                    ui.update(|settings| settings.show_dock_icon = show);
-                },
-            )
-            .into(),
-        );
-    }
     rows.push(pick_row(
         ui,
         p,
@@ -1144,6 +1110,49 @@ fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         )
         .into(),
     );
+    rows
+}
+
+/// Enable on launch (Linux and Windows), the Dock icon, sounds, the
+/// interface language, and the update channel.
+fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
+    let settings = &ui.settings;
+    let mut rows: Vec<CardRow> = Vec::new();
+    if ui.platform.caps.listener_control {
+        rows.push(
+            icon_toggle_row(
+                p,
+                "enable-on-launch",
+                &PLAY,
+                tr("Enable on launch"),
+                None,
+                settings.enable_on_launch,
+                |ui: &mut Ui| {
+                    let enabled = !ui.settings.enable_on_launch;
+                    ui.update(|settings| settings.enable_on_launch = enabled);
+                },
+            )
+            .into(),
+        );
+    }
+    if ui.platform.caps.dock_icon {
+        rows.push(
+            icon_toggle_row(
+                p,
+                "dock-icon",
+                &DOCK,
+                tr("Show Dock icon"),
+                None,
+                settings.show_dock_icon,
+                |ui: &mut Ui| {
+                    let show = !ui.settings.show_dock_icon;
+                    ui.update(|settings| settings.show_dock_icon = show);
+                },
+            )
+            .into(),
+        );
+    }
+    rows.extend(sound_rows(ui, p, layer));
     let languages = crate::desktop::i18n::LANGUAGE_CHOICES;
     rows.push(pick_row(
         ui,

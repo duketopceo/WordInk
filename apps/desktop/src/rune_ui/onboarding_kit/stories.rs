@@ -103,6 +103,9 @@ pub(crate) struct Onboard {
     pub(crate) closed: f32,
     download_secs: f64,
     pub(crate) had_model: bool,
+    /// The engine or hotkey page covers the story: it waits there, so its
+    /// practice field takes no focus from them.
+    pub(crate) engine_hold: bool,
     pub(crate) granted: bool,
     pub(crate) scripted_try: bool,
     pub(crate) permissions_from: Option<f64>,
@@ -222,6 +225,7 @@ impl Onboard {
                 DOWNLOAD_SECS
             },
             had_model: false,
+            engine_hold: false,
             granted: false,
             scripted_try: false,
             permissions_from: None,
@@ -502,7 +506,7 @@ impl Onboard {
     }
 
     pub(crate) fn can_hear(&self) -> bool {
-        self.speech == Speech::Apple || self.downloaded()
+        !self.engine_hold && (self.speech == Speech::Apple || self.downloaded())
     }
 
     pub(crate) fn streams(&self) -> bool {

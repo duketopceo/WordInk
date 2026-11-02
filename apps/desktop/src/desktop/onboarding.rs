@@ -113,12 +113,24 @@ pub fn permission_warnings(status: SetupStatus) -> Vec<PermissionWarning> {
 pub enum Step {
     Welcome,
     Setup,
+    /// Cloud or local, from the hardware recommendation: a Groq key, or the
+    /// Parakeet v3 download. Only in a flow built [`Flow::with_engine_setup`].
+    Engine,
+    /// Accept or change the dictation shortcut (same opt-in as `Engine`).
+    Hotkey,
     TryIt,
     Done,
 }
 
 impl Step {
-    const TOUR: [Self; 4] = [Self::Welcome, Self::Setup, Self::TryIt, Self::Done];
+    const TOUR: [Self; 6] = [
+        Self::Welcome,
+        Self::Setup,
+        Self::Engine,
+        Self::Hotkey,
+        Self::TryIt,
+        Self::Done,
+    ];
 
     fn position(self) -> usize {
         Self::TOUR
@@ -153,6 +165,24 @@ pub enum ItemStatus {
     /// Downloading, with progress from zero through one.
     Downloading(f32),
     Failed,
+}
+
+/// Which engine the first run set up.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EngineKind {
+    Cloud,
+    Local,
+}
+
+/// The engine step as the window shows it. Never holds a key.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EngineView {
+    pub recommendation: Option<crate::hardware::Recommendation>,
+    pub chosen: Option<EngineKind>,
+    /// A key was saved to the keyring or key file this run.
+    pub key_saved: bool,
+    /// Continue is enabled: a saved key, or a download under way.
+    pub can_continue: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -202,6 +232,12 @@ pub enum Input {
     Reopen,
     /// "Restart Hex" once every permission is on and one waits for it.
     Restart,
+    /// The hardware probe answered.
+    Recommend(crate::hardware::Recommendation),
+    ChooseEngine(EngineKind),
+    /// The Groq key was saved (see [`submit_key`]); the key itself never
+    /// comes here.
+    KeyStored,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -251,6 +287,8 @@ pub struct View {
     /// Every permission is on, and at least one applies only after Hex
     /// restarts: setup's primary action restarts Hex.
     pub restart: bool,
+    /// The engine step's state, when this flow has one.
+    pub engine: Option<EngineView>,
 }
 
 #[derive(Clone, Debug)]
@@ -276,12 +314,45 @@ pub struct Flow {
     advance_due: bool,
     reopen: bool,
     relaunching: bool,
+    engine: Option<EngineSetup>,
+}
+
+/// What the engine and hotkey steps know.
+#[derive(Clone, Copy, Debug)]
+struct EngineSetup {
+    recommendation: Option<crate::hardware::Recommendation>,
+    chosen: Option<EngineKind>,
+    key_saved: bool,
+    /// An engine was ready before the tour began: those steps are skipped.
+    returning: bool,
 }
 
 impl Flow {
     /// `permissions` is false where the OS has no privacy grants; `practice`
     /// is false where this window cannot observe dictation.
     pub fn new(start: Step, status: SetupStatus, permissions: bool, practice: bool) -> Self {
+        Self::build(start, status, permissions, practice, false)
+    }
+
+    /// [`Flow::new`] with the engine and hotkey steps (F1): after the
+    /// permissions, the recommended cloud or local engine, then the shortcut.
+    /// A computer that already has an engine skips both.
+    pub fn with_engine_setup(
+        start: Step,
+        status: SetupStatus,
+        permissions: bool,
+        practice: bool,
+    ) -> Self {
+        Self::build(start, status, permissions, practice, true)
+    }
+
+    fn build(
+        start: Step,
+        status: SetupStatus,
+        permissions: bool,
+        practice: bool,
+        engine_setup: bool,
+    ) -> Self {
         let mut flow = Self {
             step: Step::Welcome,
             status,
@@ -301,6 +372,12 @@ impl Flow {
             advance_due: false,
             reopen: false,
             relaunching: false,
+            engine: engine_setup.then_some(EngineSetup {
+                recommendation: None,
+                chosen: None,
+                key_saved: false,
+                returning: status.transcription_model,
+            }),
         };
         // `status` is read fresh at launch, so a tour resumed after macOS's
         // Quit & Reopen passes a setup whose grants are now real, and one
@@ -357,7 +434,42 @@ impl Flow {
                 Effect::Relaunch
             }
             Input::Restart => Effect::None,
+            Input::Recommend(recommendation) => {
+                if let Some(engine) = &mut self.engine {
+                    engine.recommendation = Some(recommendation);
+                }
+                Effect::None
+            }
+            Input::ChooseEngine(kind) => self.choose_engine(kind),
+            Input::KeyStored => {
+                if let Some(engine) = &mut self.engine {
+                    engine.key_saved = true;
+                }
+                Effect::None
+            }
         }
+    }
+
+    /// Picks cloud (the key comes next) or local (the download starts now,
+    /// once, and the tour goes on while it runs).
+    fn choose_engine(&mut self, kind: EngineKind) -> Effect {
+        if self.step != Step::Engine {
+            return Effect::None;
+        }
+        let Some(engine) = &mut self.engine else {
+            return Effect::None;
+        };
+        engine.chosen = Some(kind);
+        if kind == EngineKind::Local
+            && !self.status.transcription_model
+            && self.model.downloading.is_none()
+            && !self.download_requested
+        {
+            self.model.failed = false;
+            self.download_requested = true;
+            return Effect::DownloadModel;
+        }
+        Effect::None
     }
 
     pub fn view(&self) -> View {
@@ -365,13 +477,21 @@ impl Flow {
             step: self.step,
             rows: self.rows(),
             ready: self.setup_ready(),
-            dictation_ready: self.status.ready(),
+            dictation_ready: self.dictation_ready(),
             model: self.model_status(),
             show_download: self.download_requested && !self.model_in_setup(),
             practice: self.practice,
             reopen: self.reopen,
             restart: self.restart_needed(),
+            engine: self.engine_view(),
         }
+    }
+
+    /// Permissions on and an engine ready (a model, or a saved key).
+    fn dictation_ready(&self) -> bool {
+        self.status.microphone == PermissionState::Ready
+            && self.status.accessibility == PermissionState::Ready
+            && self.engine_ready()
     }
 
     fn restart_needed(&self) -> bool {
@@ -389,7 +509,29 @@ impl Flow {
     /// Where the practice step can wait for the model, the model is not a
     /// setup row: it downloads behind the permissions.
     fn model_in_setup(&self) -> bool {
-        !self.permissions || !self.practice_step
+        // With the engine step, the model (or a key) is chosen there.
+        self.engine.is_none() && (!self.permissions || !self.practice_step)
+    }
+
+    /// A local model is installed, or a cloud key was saved this run.
+    fn engine_ready(&self) -> bool {
+        self.status.transcription_model || self.engine.is_some_and(|engine| engine.key_saved)
+    }
+
+    fn engine_view(&self) -> Option<EngineView> {
+        let engine = self.engine?;
+        Some(EngineView {
+            recommendation: engine.recommendation,
+            chosen: engine.chosen,
+            key_saved: engine.key_saved,
+            can_continue: match engine.chosen {
+                Some(EngineKind::Cloud) => engine.key_saved,
+                Some(EngineKind::Local) => {
+                    self.download_requested || self.status.transcription_model
+                }
+                None => false,
+            },
+        })
     }
 
     fn permissions_ready(&self) -> bool {
@@ -398,11 +540,11 @@ impl Flow {
     }
 
     fn setup_ready(&self) -> bool {
-        self.permissions_ready() && (!self.model_in_setup() || self.status.transcription_model)
+        self.permissions_ready() && (!self.model_in_setup() || self.engine_ready())
     }
 
     fn model_status(&self) -> ItemStatus {
-        if self.status.transcription_model {
+        if self.engine_ready() {
             ItemStatus::Ready
         } else if let Some(progress) = self.model.downloading {
             ItemStatus::Downloading(progress)
@@ -433,6 +575,7 @@ impl Flow {
             && !model.failed
             && !self.download_requested
             && !self.download_held
+            && self.engine.is_none()
         {
             self.download_requested = true;
             return Effect::DownloadModel;
@@ -498,6 +641,7 @@ impl Flow {
         match step {
             Step::Setup => self.setup_ready(),
             Step::TryIt => !self.practice_step,
+            Step::Engine | Step::Hotkey => self.engine.is_none_or(|engine| engine.returning),
             _ => false,
         }
     }
@@ -520,6 +664,9 @@ impl Flow {
     fn primary(&mut self) -> Effect {
         match self.step {
             Step::Setup if !self.setup_ready() => Effect::None,
+            Step::Engine if !self.engine_view().is_some_and(|view| view.can_continue) => {
+                Effect::None
+            }
             Step::TryIt if self.practice != Practice::Landed => Effect::None,
             _ => self.advance(),
         }
@@ -825,6 +972,8 @@ pub(crate) fn record_step_at(directory: &Path, step: Step) -> color_eyre::Result
     let name = match step {
         Step::Welcome => "welcome",
         Step::Setup => "setup",
+        Step::Engine => "engine",
+        Step::Hotkey => "hotkey",
         Step::TryIt => "try-it",
         Step::Done => "done",
     };
@@ -839,10 +988,35 @@ pub(crate) fn saved_step_at(directory: &Path) -> Option<Step> {
         .trim()
     {
         "setup" => Some(Step::Setup),
+        "engine" => Some(Step::Engine),
+        "hotkey" => Some(Step::Hotkey),
         "try-it" => Some(Step::TryIt),
         "done" => Some(Step::Done),
         _ => None,
     }
+}
+
+/// Saves a pasted Groq key the way `wordink keys set groq` does (through
+/// [`crate::keys::set_from`] and the same `save`), then clears the buffer.
+/// Returns where it went; neither this nor its error carries the key.
+pub fn submit_key(
+    buffer: &mut String,
+    save: impl FnOnce(&str, &str) -> color_eyre::Result<crate::keys::KeySource>,
+) -> color_eyre::Result<crate::keys::KeySource> {
+    let mut source = None;
+    let mut input = std::io::Cursor::new(format!("{}\n", buffer.trim()));
+    crate::keys::set_from(
+        crate::transcription::cloud::Provider::Groq.id(),
+        &mut input,
+        |account, key| {
+            let saved = save(account, key)?;
+            source = Some(saved);
+            Ok(saved)
+        },
+    )?;
+    buffer.clear();
+    // `set_from` only returns Ok after `save` did.
+    source.ok_or_else(|| color_eyre::eyre::eyre!("the key was not saved"))
 }
 
 pub fn completion_recorded() -> bool {
@@ -2025,8 +2199,14 @@ mod tests {
             ]
         );
         assert_eq!(default_mac_bundle_id(None), "io.github.duketopceo.wordink");
-        assert_eq!(default_mac_bundle_id(Some("0")), "io.github.duketopceo.wordink");
-        assert_eq!(default_mac_bundle_id(Some("1")), "io.github.duketopceo.wordink.test");
+        assert_eq!(
+            default_mac_bundle_id(Some("0")),
+            "io.github.duketopceo.wordink"
+        );
+        assert_eq!(
+            default_mac_bundle_id(Some("1")),
+            "io.github.duketopceo.wordink.test"
+        );
 
         assert_eq!(
             own_tcc_services(PermissionKind::Accessibility),
@@ -2142,6 +2322,191 @@ mod tests {
         assert_eq!(
             statuses(&flow)[1],
             (SetupItem::Accessibility, ItemStatus::Waiting, false)
+        );
+    }
+
+    // -- The engine and hotkey steps (F1) ---------------------------------
+
+    use crate::hardware::{Choice, Reason, Recommendation};
+    use crate::transcription::cloud::Provider;
+
+    const SECRET: &str = "gsk_never_shown_0123456789";
+
+    fn groq_recommended() -> Recommendation {
+        Recommendation {
+            primary: Choice::Cloud(Provider::Groq),
+            alternative: Choice::Local(crate::hardware::PARAKEET_V3),
+            reason: Reason::NoGpu,
+        }
+    }
+
+    fn permissions_granted() -> SetupStatus {
+        SetupStatus {
+            microphone: PermissionState::Ready,
+            accessibility: PermissionState::Ready,
+            transcription_model: false,
+        }
+    }
+
+    /// A first run on a machine with permissions already on, at the engine step.
+    fn at_engine_step() -> Flow {
+        let mut flow = Flow::with_engine_setup(Step::Welcome, permissions_granted(), true, true);
+        assert_eq!(flow.on(Input::Continue), Effect::None);
+        // The tour no longer starts the download by itself.
+        assert_eq!(
+            flow.on(Input::Status(
+                permissions_granted(),
+                ModelProgress::default()
+            )),
+            Effect::None
+        );
+        assert_eq!(flow.step(), Step::Engine);
+        flow.on(Input::Recommend(groq_recommended()));
+        flow
+    }
+
+    #[test]
+    fn permissions_come_before_the_engine_step() {
+        let mut flow = Flow::with_engine_setup(Step::Welcome, fresh_status(), true, true);
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::Setup);
+        flow.on(Input::Status(
+            permissions_granted(),
+            ModelProgress::default(),
+        ));
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::Engine);
+    }
+
+    #[test]
+    fn the_cloud_path_stores_the_key_and_never_shows_it() {
+        let mut flow = at_engine_step();
+        assert_eq!(
+            flow.on(Input::ChooseEngine(EngineKind::Cloud)),
+            Effect::None
+        );
+        let view = flow.view().engine.unwrap();
+        assert_eq!(view.chosen, Some(EngineKind::Cloud));
+        assert!(!view.can_continue, "a cloud choice needs its key first");
+        assert_eq!(flow.on(Input::Continue), Effect::None);
+        assert_eq!(flow.step(), Step::Engine);
+
+        // A refused save keeps the person on the step, and says nothing of the key.
+        let mut buffer = SECRET.to_string();
+        let failed = submit_key(&mut buffer, |_, _| {
+            Err(color_eyre::eyre::eyre!("keyring locked"))
+        });
+        assert!(!format!("{:#}", failed.unwrap_err()).contains(SECRET));
+        assert!(!flow.view().engine.unwrap().key_saved);
+
+        // The save goes to the groq account through the keys API, then the
+        // buffer is empty.
+        let mut buffer = format!("  {SECRET}\n");
+        let mut saved = Vec::new();
+        let source = submit_key(&mut buffer, |account, key| {
+            saved.push((account.to_string(), key.to_string()));
+            Ok(crate::keys::KeySource::Keyring)
+        })
+        .unwrap();
+        assert_eq!(source, crate::keys::KeySource::Keyring);
+        assert_eq!(saved, [("groq".to_string(), SECRET.to_string())]);
+        assert!(buffer.is_empty(), "the pasted key is cleared");
+
+        assert_eq!(flow.on(Input::KeyStored), Effect::None);
+        let view = flow.view();
+        assert!(view.engine.unwrap().key_saved && view.engine.unwrap().can_continue);
+        assert!(view.dictation_ready, "a saved key makes dictation ready");
+        assert!(!format!("{view:?}").contains(SECRET));
+        assert!(!format!("{flow:?}").contains(SECRET));
+
+        // Hotkey, then the test dictation; no model download anywhere.
+        assert_eq!(flow.on(Input::Continue), Effect::None);
+        assert_eq!(flow.step(), Step::Hotkey);
+        assert_eq!(flow.on(Input::Continue), Effect::None);
+        assert_eq!(flow.step(), Step::TryIt);
+        assert_ne!(
+            flow.on(Input::Status(
+                permissions_granted(),
+                ModelProgress::default()
+            )),
+            Effect::DownloadModel
+        );
+    }
+
+    #[test]
+    fn the_local_path_starts_the_download_and_goes_on_while_it_runs() {
+        let mut flow = at_engine_step();
+        assert!(!flow.view().engine.unwrap().can_continue);
+        assert_eq!(
+            flow.on(Input::ChooseEngine(EngineKind::Local)),
+            Effect::DownloadModel
+        );
+        let view = flow.view();
+        assert_eq!(view.engine.unwrap().chosen, Some(EngineKind::Local));
+        assert!(view.engine.unwrap().can_continue);
+        assert_eq!(view.model, ItemStatus::Downloading(0.0));
+        // Progress arrives without a second request.
+        assert_eq!(
+            flow.on(Input::Status(permissions_granted(), downloading(0.4))),
+            Effect::None
+        );
+        assert_eq!(flow.view().model, ItemStatus::Downloading(0.4));
+        // Choosing it again does not start a second download.
+        assert_eq!(
+            flow.on(Input::ChooseEngine(EngineKind::Local)),
+            Effect::None
+        );
+
+        assert_eq!(flow.on(Input::Continue), Effect::None);
+        assert_eq!(flow.step(), Step::Hotkey);
+        assert_eq!(flow.on(Input::Continue), Effect::None);
+        assert_eq!(flow.step(), Step::TryIt);
+    }
+
+    #[test]
+    fn a_failed_local_download_can_be_retried_from_the_engine_step() {
+        let mut flow = at_engine_step();
+        flow.on(Input::ChooseEngine(EngineKind::Local));
+        let failed = ModelProgress {
+            failed: true,
+            ..ModelProgress::default()
+        };
+        flow.on(Input::Status(permissions_granted(), failed));
+        assert_eq!(flow.view().model, ItemStatus::Failed);
+        assert_eq!(
+            flow.on(Input::Grant(SetupItem::Model)),
+            Effect::DownloadModel
+        );
+    }
+
+    #[test]
+    fn a_computer_with_an_engine_skips_the_engine_and_hotkey_steps() {
+        let mut flow = Flow::with_engine_setup(Step::Welcome, ready_status(), true, true);
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::TryIt);
+        assert!(flow.view().engine.is_some());
+    }
+
+    #[test]
+    fn the_engine_steps_are_saved_and_resumed() {
+        let directory =
+            std::env::temp_dir().join(format!("wordink-engine-step-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        for (step, name) in [(Step::Engine, "engine"), (Step::Hotkey, "hotkey")] {
+            record_step_at(&directory, step).unwrap();
+            assert_eq!(saved_step_at(&directory), Some(step), "{name}");
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_flow_without_engine_setup_is_unchanged() {
+        let mut flow = Flow::new(Step::Welcome, fresh_status(), true, true);
+        assert!(flow.view().engine.is_none());
+        assert_eq!(
+            flow.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::DownloadModel
         );
     }
 }

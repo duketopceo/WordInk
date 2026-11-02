@@ -258,6 +258,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Voice Filter", "Filtre vocal"),
     ("Recordings", "Enregistrements"),
     ("Advanced", "Avancé"),
+    ("Replacements", "Remplacements"),
+    ("Privacy", "Confidentialité"),
     ("Output", "Sortie"),
     ("GPU", "GPU"),
     ("CPU", "CPU"),
