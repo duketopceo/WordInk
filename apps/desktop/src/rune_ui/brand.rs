@@ -55,11 +55,13 @@ pub(crate) fn ember(dark: bool, step: u8) -> Color {
     let base = accent(dark);
     let edge = if dark { Color::WHITE } else { Color::BLACK };
     // Steps 1..=12 run from a wash to a deep shade; 9 is the pure accent.
-    let t = (step as f32 - 9.0) / 3.0;
-    if t >= 0.0 {
-        base.mix(edge, t * 0.25)
+    // Mix factors stay within 0..=1 (Color::mix does not clamp).
+    let step = step.clamp(1, 12) as f32;
+    if step >= 9.0 {
+        base.mix(edge, ((step - 9.0) / 3.0) * 0.25)
     } else {
-        base.mix(rgb(if dark { "#0B0E12" } else { "#F8F9FA" }), -t * 0.9)
+        let wash = ((9.0 - step) / 8.0).clamp(0.0, 1.0) * 0.9;
+        base.mix(rgb(if dark { "#0B0E12" } else { "#F8F9FA" }), wash)
     }
 }
 
