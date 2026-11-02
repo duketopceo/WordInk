@@ -144,6 +144,11 @@ running Hex, which saves settings and reloads them as a window edit would.
 Terms match in any case; `add` of a term already listed only merges new
 spellings, and replies `changed: false` when there are none.
 
+`vocabulary suggest` prints words you might add, one per line with its reason:
+the outputs of your replacements and unusual words that recur in History. It
+reads the saved settings and History directly (the app needn't be running),
+sends nothing anywhere, and adds nothing; `--json` prints them as a list.
+
 `quit` and `restart` without `--force` are refused with `busy` when the
 listener doesn't answer whether it's recording; no listener, or one waiting for
 setup, counts as idle. On Linux a Hex its systemd unit runs restarts through

@@ -1993,6 +1993,10 @@ pub struct AppSettings {
     pub vocabulary: Vec<crate::dictation::vocabulary::VocabularyEntry>,
     /// How readily transcription swaps heard words for a vocabulary term.
     pub vocabulary_boost: crate::dictation::vocabulary::VocabularyBoost,
+    /// Words the person dismissed from the Vocabulary's suggestions, so they
+    /// aren't proposed again. Left out of the file while empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub vocabulary_dismissed: Vec<String>,
     /// One-time settings changes already applied. A file that predates a
     /// change lacks its ID, so the change runs once on the next load; new
     /// settings start with every ID because they need none.
@@ -2100,6 +2104,7 @@ impl Default for AppSettings {
             updates: UpdateSettings::default(),
             vocabulary: Vec::new(),
             vocabulary_boost: crate::dictation::vocabulary::VocabularyBoost::default(),
+            vocabulary_dismissed: Vec::new(),
             migrations: MIGRATIONS.iter().map(|id| id.to_string()).collect(),
             text_replacements: Vec::new(),
         }
@@ -3781,6 +3786,24 @@ mod tests {
             reloaded.transcription.model,
             TranscriptionModelId::ParakeetV3
         );
+    }
+
+    #[test]
+    fn dismissed_suggestions_round_trip_and_stay_out_of_older_files() {
+        let dir = TestSettingsDir::new("vocabulary-dismissed");
+        fs::write(&dir.path, r#"{"sound_effects": false}"#).unwrap();
+        let settings = AppSettings::load_from(&dir.path).unwrap();
+        assert!(settings.vocabulary_dismissed.is_empty());
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&dir.path).unwrap()).unwrap();
+        assert!(written.get("vocabulary_dismissed").is_none());
+        let dismissed = AppSettings {
+            vocabulary_dismissed: vec!["Zorp".into()],
+            ..settings
+        };
+        dismissed.write_to(&dir.path).unwrap();
+        let reloaded = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(reloaded.vocabulary_dismissed, ["Zorp"]);
     }
 
     #[test]
