@@ -1,6 +1,6 @@
 # WordInk design direction (proposal)
 
-Status: proposal for owner sign-off. Nothing in the packages or docs site uses these tokens yet; applying them is a later code change. Today the docs site and `<wordink-mic>` use indigo `#4f46e5` (`apps/docs/src/style.css`, `packages/web/src/styles.ts`).
+Status: proposal for maintainer sign-off. It covers the web SDK, the docs site and the brand assets; the desktop app (`apps/desktop`, based on Hex) will have its own window and indicator styles and adopts these tokens only where they fit. Nothing in the packages or docs site uses these tokens yet; applying them is a later code change. Today the docs site and `<wordink-mic>` use indigo `#4f46e5` (`apps/docs/src/style.css`, `packages/web/src/styles.ts`).
 
 ## Direction: "Pen and Signal"
 
@@ -61,7 +61,7 @@ All text pairs pass AA. `--wi-rule` is not checked because borders are never the
 
 ## Type tokens
 
-System stacks only, so the 34.7 KB core budget and the zero-dependency CDN build are not affected by font files.
+System stacks only, so the core size budget (150 KB gzip; the current build is about 35 KB) and the zero-dependency CDN build are not affected by font files.
 
 - **Sans:** `system-ui, -apple-system, "Segoe UI", sans-serif` (as today). Body 16/1.6; headings weight 650-700, tight tracking; `text-wrap: balance` on headings.
 - **Mono:** `ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace`. 0.9em inside prose; code blocks 14/1.5. Used for tokens, commands, endpoints.
@@ -93,6 +93,6 @@ System stacks only, so the 34.7 KB core budget and the zero-dependency CDN build
 | Social card | `assets/brand/social-card.svg`, dark, mark plus wordmark |
 | Bar widget / plugin panel / TUI | None exist in this repo |
 
-## Logo (proposal, owner signs off)
+## Logo (proposal, maintainer signs off)
 
 See `assets/brand/README.md`. Files: `logo.svg`, `logo-dark.svg`, `wordmark.svg`, `wordmark-dark.svg`, `lockup.svg`, `lockup-dark.svg`, `glyphs.svg`, `social-card.svg`; PNG previews in `assets/brand/preview/`.

@@ -7,19 +7,29 @@
 
 # WordInk
 
-**Dictation as a component.** An open-source, provider-agnostic engine that turns speech into finished text: a drop-in `<wordink-mic>` for any web app, standalone WordInk apps for Linux, Windows, macOS and iOS that work on default config, and an OpenAI-compatible gateway for any client that wants your keys and fallback rules.
+**Open-source dictation: hold a hotkey, speak, get finished text in the app you are using.**
+
+WordInk is one desktop app plus the pieces developers need to put dictation in their own products. It is MIT licensed, has no WordInk servers and sends no telemetry.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **Status: pre-release.** The Web SDK, relay, gateway and Python tooling are merged to `master` and the docs site is live. Nothing is published to npm yet. See [ROADMAP.md](ROADMAP.md) and the [program plan](docs/plans/2026-10-10-001-docs-wordink-program-plan.md). The original Windows dictation app lives in [`legacy/`](legacy/).
+## What you can use
 
-> Logo and brand assets in [`assets/brand/`](assets/brand/) are a proposal pending owner sign-off; see [DESIGN.md](DESIGN.md).
+| Product | For | State |
+|---|---|---|
+| **WordInk desktop app** (`apps/desktop`) | Anyone who wants system-wide dictation on Linux (any Wayland desktop), Windows, and macOS on Apple silicon | In progress. It is built on [Hex](https://github.com/kitlangton/Hex) (MIT) and arrives in a pull request; it is not on `master` yet. Groq is the default engine; Parakeet v3 runs locally with no key. See [ROADMAP.md](ROADMAP.md). |
+| **`wordink-dictd`** (`sdks/python`) | The interim dictation daemon for Linux, Windows and macOS | Works today (Groq Whisper, then clean-up, then typed into the focused window). Kept until the desktop app reaches parity on each OS. See [examples](examples/). |
+| **Web SDK** (`packages/*`) | Developers adding a `<wordink-mic>` button to a web app | Merged and documented. Not published to npm yet. |
+| **Gateway** (`packages/server`) | Anyone who wants an OpenAI-compatible transcription endpoint with provider fallback and per-device tokens | Merged and documented. Not published to npm yet. |
+| **iOS app** (`apps/ios`, `sdks/ios`) | Hold-to-talk on iPhone through a gateway | In progress; built from source. |
+
+The web SDK, the gateway and the iOS app are separate products from the desktop app. They share the transcription protocol and a clean-up contract, not code.
 
 **Docs and live demo: <https://duketopceo.github.io/WordInk/>**
 
-## Quickstart
+## Web SDK quickstart
 
-The packages are not on npm yet (see Status), so the CDN URL below becomes valid after the first release. Plain HTML, no build step:
+The packages are not on npm yet, so the CDN URL below becomes valid after the first release. Plain HTML, no build step:
 
 ```html
 <textarea id="message"></textarea>
@@ -63,11 +73,12 @@ flowchart LR
   A["Browser: wordink-mic"] -->|audio| B["@wordink/server relay (holds the key)"]
   A -.->|offline| L["@wordink/local (Moonshine)"]
   B --> P["Groq / OpenAI / Deepgram"]
-  D["Desktop app (e.g. Voxtype)"] -->|POST /v1/audio/transcriptions| G["wordink-gateway: tokens, fallback, vocabulary"]
+  D["Any OpenAI-compatible client"] -->|POST /v1/audio/transcriptions| G["wordink-gateway: tokens, fallback, vocabulary"]
   G --> P
+  W["WordInk desktop app / wordink-dictd"] -->|own key| P
 ```
 
-The Rust core (`crates/wordink-core`) does no I/O: it takes events and emits effects, and a host (the TypeScript browser host today) performs the I/O. The core compiles to WebAssembly at about 35 KB gzip (budget 150 KB). The gateway is a second, separate trust boundary: browsers authenticate to the relay with cookies and an Origin check, devices authenticate to the gateway with revocable bearer tokens.
+This diagram covers the web SDK and the gateway. The desktop app and `wordink-dictd` call providers directly with the user's own key. The Rust core (`crates/wordink-core`) does no I/O: it takes events and emits effects, and a host (the TypeScript browser host today) performs the I/O. The core compiles to WebAssembly at about 35 KB gzip (budget 150 KB). The gateway is a second, separate trust boundary: browsers authenticate to the relay with cookies and an Origin check, devices authenticate to the gateway with revocable bearer tokens.
 
 ![The docs demo: a text area and the push-to-talk `<wordink-mic>` button, idle](docs/screenshots/demo.png)
 
@@ -77,21 +88,23 @@ The docs demo in its idle state (static capture; a recording of dictation is sti
 
 | Path | What |
 |---|---|
-| `crates/wordink-core` | Rust sans-I/O dictation core (sessions, audio pipeline, provider protocols) |
-| `crates/wordink-wasm` | WebAssembly bindings for the core |
-| `packages/*` | npm packages: `@wordink/core`, `web`, `react`, `local`, `server` |
-| `apps/docs` | The docs site and live demo (deployed to GitHub Pages) |
-| `examples/*` | Plain HTML, React and relay examples |
-| `legacy/` | The original Python/Windows dictation app (groq_flow lineage) |
-| `docs/plans/`, `docs/research/` | Plans, the program roadmap and landscape research |
-| `sdks/python` | `wordink` CLI and `wordink-mcp` server |
+| `apps/desktop` | The WordInk desktop app, based on Hex (arrives in a pull request; not on `master` yet) |
+| `sdks/python` | `wordink-dictd` (the interim desktop daemon for Linux, Windows and macOS), the `wordink` CLI and the `wordink-mcp` server |
+| `crates/wordink-core`, `crates/wordink-wasm` | Rust sans-I/O dictation core and its WebAssembly bindings (used by the web SDK) |
+| `packages/*` | Web SDK and gateway: `@wordink/core`, `web`, `react`, `local`, `server` |
+| `apps/ios`, `sdks/ios` | The iOS app and its Swift SDK |
+| `apps/docs` | The docs site and live demo (GitHub Pages) |
+| `examples/*` | Install scripts for `wordink-dictd` (Linux, Windows, macOS), a gateway systemd service, and web examples |
+| `docs/` | Decisions, research, solutions, and `docs/archive/` (superseded plans) |
 | `assets/brand/` | Logo, wordmark and glyph proposals |
+| `tests/fixtures/` | Cross-platform contract fixtures shared by the TypeScript, Python and Swift tests |
 
 ## Develop
 
 ```bash
 cargo test --workspace                       # Rust core
 pnpm install && pnpm typecheck && pnpm test  # TypeScript packages
+cd sdks/python && uv run pytest              # wordink-dictd and the Python SDK
 pnpm --filter @wordink/docs dev               # docs site on localhost (offers a dev-key field)
 ```
 
@@ -99,18 +112,9 @@ pnpm --filter @wordink/docs dev               # docs site on localhost (offers a
 
 Changesets drives releases: add one with `pnpm changeset`, and `.github/workflows/release.yml` opens a version PR, then publishes to npm on merge through npm trusted publishing (OIDC, with provenance; no npm token is stored). The one-time npm setup is described at the top of that workflow. `.github/workflows/docs.yml` deploys `apps/docs` to GitHub Pages; it needs Settings > Pages > Source set to "GitHub Actions" once.
 
-## The legacy Windows app
+## Python, dictd and agents
 
-```bash
-cd legacy
-uv sync
-uv run wordink --onboard   # setup wizard at http://localhost:18981
-uv run wordink             # tray daemon
-```
-
-## Python and agents
-
-`sdks/python` provides a `wordink` CLI (`transcribe`, `dictate`) and a `wordink-mcp` MCP server (`transcribe`, `list_models`) over the gateway. See [sdks/python/README.md](sdks/python/README.md).
+`sdks/python` provides `wordink-dictd` (the interim desktop daemon), a `wordink` CLI (`transcribe`, `dictate`) and a `wordink-mcp` MCP server (`transcribe`, `list_models`) over the gateway. See [sdks/python/README.md](sdks/python/README.md).
 
 ## Contributing
 
@@ -118,8 +122,4 @@ Work on a branch, one PR per roadmap unit; `master` requires a PR and one review
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
-
-## Credits
-
-WordInk began as a fork of [groq_flow](https://github.com/ParthJain18/groq_flow) by Parth Jain (MIT). See [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The copyright line for Parth Jain stays because the project's early history includes code from his MIT-licensed [groq_flow](https://github.com/ParthJain18/groq_flow); the original app has since been removed from the tree.
