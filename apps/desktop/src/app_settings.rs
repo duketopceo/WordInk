@@ -2609,7 +2609,7 @@ impl AppSettings {
         }
         self.second_dictation_hotkey
             .as_ref()
-            .filter(|binding| !self.hotkey_in_use(HotkeySlot::SecondDictation, binding))
+            .filter(|binding| !self.hotkey_overlaps_others(HotkeySlot::SecondDictation, binding))
     }
 
     /// Annotate is on: the person hasn't turned it off.
@@ -2713,6 +2713,13 @@ impl AppSettings {
         if self.hotkey_saved(slot).as_ref() == Some(binding) {
             return false;
         }
+        self.hotkey_overlaps_others(slot, binding)
+    }
+
+    /// `binding` shares keys with another active slot, with no exemption
+    /// for the slot's own saved value (a saved overlap still matches twice
+    /// at runtime).
+    pub fn hotkey_overlaps_others(&self, slot: HotkeySlot, binding: &HotkeyBinding) -> bool {
         let mut others = Vec::new();
         if slot != HotkeySlot::Dictation {
             others.push(self.dictation_hotkey.clone());

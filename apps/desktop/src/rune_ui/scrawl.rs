@@ -31,7 +31,8 @@ fn description(enabled: bool) -> &'static str {
 /// collides with another, and leaves the shortcuts as they are.
 fn set_enabled(settings: &mut AppSettings, enabled: bool) -> Result<(), &'static str> {
     if enabled
-        && super::settings::conflicts(settings, ShortcutTarget::Capture, &settings.capture.hotkey)
+        && settings
+            .hotkey_overlaps_others(crate::app_settings::HotkeySlot::Capture, &settings.capture.hotkey)
     {
         return Err(tr(
             "The capture shortcut is already in use. Change it below before turning captures on.",
