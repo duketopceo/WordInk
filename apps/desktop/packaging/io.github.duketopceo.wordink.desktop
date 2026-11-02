@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=WordInk
-Comment=Local voice dictation
+Comment=Voice dictation, local or cloud
 Exec=@HEX_BIN@
 Icon=io.github.duketopceo.wordink
 Terminal=false

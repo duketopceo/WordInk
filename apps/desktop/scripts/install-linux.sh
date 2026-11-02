@@ -23,6 +23,15 @@ icons="$data_home/icons/hicolor"
 units="$config_home/systemd/user"
 app_id=io.github.duketopceo.wordink
 
+# The bin dir is substituted into sed replacements below, where a space, `&`,
+# `\`, `#` or `%` would corrupt the .desktop and unit files.
+case "$bin_dir" in
+  *[[:space:]\&\\#%]*)
+    echo "WORDINK_BIN_DIR ($bin_dir) can't contain a space or any of & \\ # %; pick another directory." >&2
+    exit 1
+    ;;
+esac
+
 if [ "$(id -u)" = 0 ]; then
   echo "Run this as your desktop user, not root." >&2
   exit 1

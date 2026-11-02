@@ -33,6 +33,7 @@ Every network host the desktop app can contact, audited in U2 (2026-11-02). Host
 
 | Host | Used by | When |
 |---|---|---|
+| `api.groq.com` | Cloud transcription (`src/transcription/cloud.rs`): sends the dictation audio (a 16 kHz mono WAV) with the user's Groq key | On each dictation when a Groq key is set and the engine is auto or groq. Never when the engine is local or no key resolves. |
 | `huggingface.co` | Model downloads (`src/transcription/models.rs`, `src/net/download.rs`): the speech models, the Silero VAD model, imported models | Only when the user installs a model. Kept on purpose. |
 | `127.0.0.1` / `localhost` | The owner-only local API, the control CLI, the MCP server, a local OpenCode server | Loopback only. |
 | `github.com/duketopceo/WordInk` | "Send feedback" link and the "Download" link of the updater (`RELEASES_URL`) | Only when the user clicks. Placeholder until U14 publishes releases. |
