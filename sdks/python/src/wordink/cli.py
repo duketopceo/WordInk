@@ -66,7 +66,7 @@ def _record(seconds: float | None) -> bytes:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="wordink",
+        prog="wordink-sdk",
         description="Dictation via a wordink-gateway (OpenAI-compatible endpoint)",
     )
     p.add_argument("--gateway", help="endpoint base URL (env WORDINK_GATEWAY_URL)")

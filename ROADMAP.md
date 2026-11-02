@@ -1,6 +1,6 @@
 # WordInk Roadmap
 
-WordInk is converging on **one desktop app** (`apps/desktop`, based on [Hex](https://github.com/kitlangton/Hex), MIT) that anyone can install on Linux, Windows or macOS, press a hotkey, see a recording indicator, and get their words typed into the focused app. The current plan is `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`; earlier plans are in [`docs/archive/`](docs/archive/) and are superseded.
+WordInk is converging on **one desktop app** (`apps/desktop`, based on [Hex](https://github.com/anomalyco/hex), MIT) that anyone can install on Linux, Windows or macOS, press a hotkey, see a recording indicator, and get their words typed into the focused app. The current plan is `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`; earlier plans are in [`docs/archive/`](docs/archive/) and are superseded.
 
 This page lists themes, not tickets. "Done" means merged to `master`. "Planned" means not started or not merged yet.
 
