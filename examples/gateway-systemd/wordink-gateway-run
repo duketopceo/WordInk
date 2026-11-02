@@ -1,12 +1,13 @@
 #!/bin/sh
-# wordink-gateway-run: start `wordink-gateway serve` with provider keys pulled from omaseal into its
-# environment, so no key ever lands on disk (the same pattern as a voxtype-daemon wrapper).
+# wordink-gateway-run: start `wordink-gateway serve` with provider keys pulled from the desktop
+# keyring (libsecret, via `secret-tool`) into its environment, so no key ever lands on disk.
+# To use another keyring helper, change the one `secret-tool lookup` line below.
 #
 # Key map, one `ENV_NAME=service/account` per line (names only, never key values):
 #   ${XDG_CONFIG_HOME:-$HOME/.config}/wordink/gateway-keys
 # e.g.
 #   GROQ_API_KEY=groq/default
-#   GROQ_API_KEY_2=Groq-Hermes-API
+#   GROQ_API_KEY_2=groq/backup
 set -eu
 
 MAP="${XDG_CONFIG_HOME:-$HOME/.config}/wordink/gateway-keys"
@@ -70,11 +71,11 @@ if [ -f "$MAP" ]; then
     esac
     service=${ref%%/*}
     account=${ref#*/}
-    if value=$(omaseal get "$service" "$account" 2>/dev/null); then
+    if value=$(secret-tool lookup service "$service" account "$account" 2>/dev/null) && [ -n "$value" ]; then
       value=$(printf '%s' "$value" | tr -d '[:space:]')
       export "$name=$value"
     else
-      echo "wordink-gateway-run: omaseal has no $service/$account for $name; that provider is skipped" >&2
+      echo "wordink-gateway-run: no secret for $service/$account ($name); that provider is skipped" >&2
     fi
   done < "$MAP"
 fi

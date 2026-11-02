@@ -75,7 +75,6 @@ tail_seconds = 0
         ("[cleanup]\ntimeout = 0", "timeout must be a number"),
         ("[record]\nmax_seconds = 'long'", "max_seconds"),
         ("[record]\ncommand = 'arecord'", "list of strings"),
-        ("[hotkey]\nhold = 'SUPER, D'", "wisp"),
         ("[hotkey]\nhold = 'SUPER ALT, S'", "different"),
         ("[hotkey", "cannot read"),
     ],

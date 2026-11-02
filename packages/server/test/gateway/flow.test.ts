@@ -112,21 +112,21 @@ describe("formatSpokenLists", () => {
 describe("expandSnippets", () => {
   it("expands phrase triggers case-insensitively on word boundaries", () => {
     const snippets = {
-      "my calendly": "https://cal.com/luke",
-      "my email": "luke@wordink.io",
+      "my calendly": "https://example.com/alex",
+      "my email": "alex@example.com",
     };
     expect(expandSnippets("send my calendly or My Email today", snippets)).toBe(
-      "send https://cal.com/luke or luke@wordink.io today",
+      "send https://example.com/alex or alex@example.com today",
     );
   });
 
   it("prefers longer triggers when triggers overlap", () => {
     const snippets = {
       "cal": "https://cal.com",
-      "cal link": "https://cal.com/luke/30min",
+      "cal link": "https://example.com/alex/30min",
     };
     expect(expandSnippets("here is my cal link", snippets)).toBe(
-      "here is my https://cal.com/luke/30min",
+      "here is my https://example.com/alex/30min",
     );
   });
 });
@@ -146,8 +146,8 @@ describe("applyTonePreset", () => {
 
   it("email: formats greeting, body paragraph, and sign-off with blank lines", () => {
     expect(
-      applyTonePreset("hi sarah thanks for sending the roadmap over best luke", "email"),
-    ).toBe("Hi Sarah,\n\nThanks for sending the roadmap over.\n\nBest,\nLuke");
+      applyTonePreset("hi sarah thanks for sending the roadmap over best alex", "email"),
+    ).toBe("Hi Sarah,\n\nThanks for sending the roadmap over.\n\nBest,\nAlex");
   });
 
   it("code: converts spoken casing and symbol phrases into identifiers", () => {
@@ -170,9 +170,9 @@ describe("applyFlowCleanup", () => {
     const raw = "um send it to Bob scratch that Alice with my calendly";
     const cleaned = applyFlowCleanup(raw, {
       tone: "work",
-      snippets: { "my calendly": "https://cal.com/luke" },
+      snippets: { "my calendly": "https://example.com/alex" },
     });
-    expect(cleaned).toBe("Send it to Alice with https://cal.com/luke.");
+    expect(cleaned).toBe("Send it to Alice with https://example.com/alex.");
   });
 });
 
@@ -181,11 +181,11 @@ describe("buildFlowCleanupPrompt", () => {
     const prompt = buildFlowCleanupPrompt({
       tone: "email",
       vocabulary: ["WordInk", "Omarchy"],
-      snippets: { "my calendly": "https://cal.com/luke" },
+      snippets: { "my calendly": "https://example.com/alex" },
     });
     expect(prompt).toContain("Tone preset: email");
     expect(prompt).toContain("WordInk, Omarchy");
-    expect(prompt).toContain('"my calendly" -> "https://cal.com/luke"');
+    expect(prompt).toContain('"my calendly" -> "https://example.com/alex"');
   });
 
   it("switches to Command mode when selectedText is provided", () => {
@@ -289,7 +289,7 @@ describe("gateway integration with flow post-processing", () => {
         providers: [{ provider: "groq", key: GROQ_KEY }],
         flow: {
           tone: "work",
-          snippets: { "my calendly": "https://cal.com/luke" },
+          snippets: { "my calendly": "https://example.com/alex" },
         },
       },
     });
@@ -308,7 +308,7 @@ describe("gateway integration with flow post-processing", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      text: "Let us meet at 3 pm with https://cal.com/luke.",
+      text: "Let us meet at 3 pm with https://example.com/alex.",
     });
   });
 });

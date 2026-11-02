@@ -9,8 +9,8 @@ WordInk provides a unified dictation and Wispr Flow post-processing stack across
 | Platform | Client / Integration | Audio & VAD Engine | Flow Cleanup & Learning |
 |---|---|---|---|
 | **iOS & iPadOS** | `apps/ios/WordInkApp` + `apps/ios/WordInkKeyboard` (`sdks/ios/WordInkIOS`) | Two-process App Group warm lease (`AVAudioSession` + `ActivityKit` Live Activity + `+20 dB` Whisper Gain) | Gateway `flow.ts` + on-device `LocalFallbackTranscriber` (`SFSpeechRecognizer` / `WhisperKit`) + 20s `EditVocabularyLearner` |
-| **Linux (Wayland / X11)** | `Voxtype` (`~/.config/voxtype/config.toml`) & `wisp` / `wordink` CLI | PipeWire / PulseAudio / SoundDevice 16 kHz mono PCM16 | Gateway `flow.ts` + Python `wordink.flow` (`--flow-cleanup --tone`) |
-| **macOS & Windows** | `TypeWhisper` (`openai-compatible` engine) | Native CoreAudio / WASAPI | Gateway `flow.ts` (`POST /v1/audio/transcriptions`) + shared vocabulary |
+| **Linux (Wayland / X11)** | `wordink-dictd` daemon, or Voxtype through the gateway (`~/.config/voxtype/config.toml`), plus the `wordink` CLI | PipeWire / PulseAudio / SoundDevice 16 kHz mono PCM16 | Gateway `flow.ts` + Python `wordink.flow` (`--flow-cleanup --tone`) |
+| **macOS & Windows** | `wordink-dictd` daemon, or `TypeWhisper` (`openai-compatible` engine) | Native CoreAudio / WASAPI | Gateway `flow.ts` (`POST /v1/audio/transcriptions`) + shared vocabulary |
 | **Web (Browser / React)** | `@wordink/web` (`<wordink-mic>`), `@wordink/react`, `@wordink/local` | Rust/WASM `wordink-core` (`SPEECH_RMS_THRESHOLD = 0.01`, 16 kHz resampler) + WebGPU/WASM Moonshine/Whisper | `@wordink/server` relay/gateway + `transform` hook |
 | **Python / MCP** | `sdks/python` (`wordink` CLI + FastMCP server) | `sounddevice` 16 kHz WAV capture | `wordink.flow` (`apply_flow_cleanup`, `learn_vocabulary_from_edit`) verified against `tests/fixtures/flow-contract.json` |
 
@@ -49,6 +49,6 @@ Every platform shares the exact same deterministic post-processing rules verifie
 - `stripFillers`: Removes spoken hesitations (`um`, `uh`, `erm`, `ah`) and comma-flanked discourse fillers (`like`, `you know`) while preserving sentence capitalization and real words.
 - `resolveCourseCorrections`: Resolves mid-sentence backtracking markers (`no wait`, `wait no`, `scratch that`, `actually no`); ordinary phrases such as `I mean` are left alone so only the intended replacement phrase remains.
 - `formatSpokenLists`: Formats spoken ordinal sequences (`first ... second ... third ...`) and spoken bullets (`bullet one ... bullet two ...`) into numbered or bulleted lists.
-- `expandSnippets`: Expands case-insensitive spoken triggers (`"my calendly"` -> `"https://cal.com/luke"`) on word boundaries with longest-match precedence.
+- `expandSnippets`: Expands case-insensitive spoken triggers (`"my calendly"` -> `"https://example.com/alex"`) on word boundaries with longest-match precedence.
 - `applyTonePreset`: Formats output for `casual`, `work`, `email`, `code` (`camel case`, `snake case`, `pascal case`, `kebab case`, `screaming snake case`), or `verbatim`.
 - `learnVocabularyFromEdit`: Token-level LCS diff learner that extracts corrected proper nouns and custom spellings while ignoring pure deletions and large rewrites (> 40% changed tokens).

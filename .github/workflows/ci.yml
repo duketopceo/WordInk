@@ -165,19 +165,6 @@ jobs:
           $c.Run.Exit = $true
           $c.Output.Verbosity = 'Detailed'
           Invoke-Pester -Configuration $c
-  legacy:
-    runs-on: ubuntu-latest
-    defaults:
-      run: { working-directory: legacy }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - name: Install system audio deps (PyAudio build)
-        run: sudo apt-get update && sudo apt-get install -y portaudio19-dev
-      - uses: astral-sh/setup-uv@v3
-      - run: uv sync
-      - run: uv run python -m compileall wordink
   ios:
     runs-on: macos-15
     defaults:

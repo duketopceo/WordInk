@@ -92,7 +92,7 @@ public final class AppGroupSettingsStore: @unchecked Sendable {
             return dict
         }
         return [
-            "my calendly": "https://cal.com/luke",
+            "my calendly": "https://example.com/alex",
             "my github": "https://github.com/duketopceo"
         ]
     }
@@ -323,7 +323,7 @@ public struct ContentView: View {
             Section("New Spoken Trigger → Expansion") {
                 TextField("Spoken trigger (e.g. my calendly)", text: $newSnippetTrigger)
                     .autocorrectionDisabled()
-                TextField("Expanded text (e.g. https://cal.com/luke)", text: $newSnippetExpansion)
+                TextField("Expanded text (e.g. https://example.com/alex)", text: $newSnippetExpansion)
                     .autocorrectionDisabled()
                 Button("Save Snippet") {
                     let trigger = newSnippetTrigger.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

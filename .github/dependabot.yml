@@ -1,23 +1,34 @@
 version: 2
 updates:
-  - package-ecosystem: pip
-    directory: /legacy
-    schedule: { interval: weekly }
-    groups:
-      python-deps:
-        patterns: ["*"]
-  - package-ecosystem: cargo
-    directory: /
-    schedule: { interval: weekly }
-    groups:
-      rust-deps:
-        patterns: ["*"]
+  # npm/pnpm workspace root (packages/*, apps/docs)
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly }
     groups:
       npm-deps:
         patterns: ["*"]
+  # Python SDK (uv)
+  - package-ecosystem: uv
+    directory: /sdks/python
+    schedule: { interval: weekly }
+    groups:
+      python-deps:
+        patterns: ["*"]
+  # Rust workspace (crates/*)
+  - package-ecosystem: cargo
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      rust-deps:
+        patterns: ["*"]
+  # Add a cargo entry for /apps/desktop in the change that creates it.
+  # Swift packages
+  - package-ecosystem: swift
+    directory: /sdks/ios
+    schedule: { interval: weekly }
+  - package-ecosystem: swift
+    directory: /apps/ios/xtool
+    schedule: { interval: weekly }
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }

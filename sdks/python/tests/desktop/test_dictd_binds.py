@@ -23,15 +23,7 @@ def test_a_bare_key_with_no_modifier_is_rejected():
         normalize_bind(" , D")
 
 
-def test_wisps_push_to_talk_key_is_reserved_in_any_spelling():
-    for clash in ("SUPER, D", "super,d", "SUPER , D"):
-        with pytest.raises(WordInkError, match="wisp"):
-            validate_binds(clash, "SUPER ALT, S")
-        with pytest.raises(WordInkError, match="wisp"):
-            validate_binds("SUPER ALT, D", clash)
-
-
-def test_super_alt_d_does_not_clash_with_wisp():
+def test_default_binds_are_valid():
     validate_binds("SUPER ALT, D", "SUPER ALT, S")
 
 
@@ -60,10 +52,3 @@ def test_lua_lines_use_omarchy_o_bind_with_an_absolute_exe_and_a_release_bind():
     assert lines[0] == 'o.bind("SUPER + ALT + D", "WordInk dictation (hold)", { launch = "/home/u/.local/bin/wordink-dictd trigger start" })'
     assert lines[1].endswith('{ release = true })') and "trigger stop" in lines[1]
     assert lines[2].startswith('o.bind("SUPER + ALT + V"') and "trigger toggle" in lines[2]
-
-
-def test_lua_lines_refuse_wisps_key():
-    from wordink.desktop.binds import hyprland_lua_lines
-
-    with pytest.raises(WordInkError, match="wisp"):
-        hyprland_lua_lines("SUPER, D", "SUPER ALT, V")

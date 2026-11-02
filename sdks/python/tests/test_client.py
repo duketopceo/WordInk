@@ -57,7 +57,7 @@ def test_transcribe_optional_fields(monkeypatch):
         b"x",
         transport=httpx.MockTransport(check),
         language="en",
-        prompt="Kurultai",
+        prompt="Acmeapp",
     )
 
 
@@ -128,7 +128,7 @@ def _vocab_route(request: httpx.Request) -> httpx.Response:
     assert request.url.path == "/v1/vocabulary"
     if request.method == "GET":
         return httpx.Response(200, json={"object": "list", "data": [], "prompt_chars": 0, "keyterm_count": 0})
-    return httpx.Response(200, json={"object": "list", "data": [{"term": "kurultai", "outcome": "added"}]})
+    return httpx.Response(200, json={"object": "list", "data": [{"term": "acmeapp", "outcome": "added"}]})
 
 
 def test_vocab_token_preference(monkeypatch):
@@ -169,14 +169,14 @@ def test_vocab_add_sends_terms_and_flags(monkeypatch):
     def check(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
         assert json.loads(request.content) == {
-            "terms": ["kurultai", "wisp"],
+            "terms": ["acmeapp", "ptt-tool"],
             "remove": ["old-term"],
             "dryRun": True,
         }
-        return httpx.Response(200, json={"object": "list", "data": [{"term": "kurultai", "outcome": "added"}]})
+        return httpx.Response(200, json={"object": "list", "data": [{"term": "acmeapp", "outcome": "added"}]})
 
     resp = vocab_add(
-        ["kurultai", "wisp"], remove=["old-term"], dry_run=True, transport=httpx.MockTransport(check)
+        ["acmeapp", "ptt-tool"], remove=["old-term"], dry_run=True, transport=httpx.MockTransport(check)
     )
     assert resp["data"][0]["outcome"] == "added"
 
@@ -186,10 +186,10 @@ def test_vocab_remove_sends_term_body(monkeypatch):
 
     def check(request: httpx.Request) -> httpx.Response:
         assert request.method == "DELETE"
-        assert json.loads(request.content) == {"term": "Kurultai"}
-        return httpx.Response(200, json={"object": "list", "data": [{"term": "Kurultai", "outcome": "removed"}]})
+        assert json.loads(request.content) == {"term": "Acmeapp"}
+        return httpx.Response(200, json={"object": "list", "data": [{"term": "Acmeapp", "outcome": "removed"}]})
 
-    resp = vocab_remove("Kurultai", transport=httpx.MockTransport(check))
+    resp = vocab_remove("Acmeapp", transport=httpx.MockTransport(check))
     assert resp["data"][0]["outcome"] == "removed"
 
 
@@ -209,11 +209,11 @@ def test_gateway_error_code_is_preserved_for_agents(monkeypatch):
     monkeypatch.setenv("WORDINK_ADMIN_TOKEN", "wdk_admin")
     transport = httpx.MockTransport(
         lambda r: httpx.Response(
-            409, json={"error": {"message": "Kurultai is config-pinned", "code": "term_pinned"}}
+            409, json={"error": {"message": "Acmeapp is config-pinned", "code": "term_pinned"}}
         )
     )
     with pytest.raises(WordInkError) as caught:
-        vocab_remove("Kurultai", transport=transport)
+        vocab_remove("Acmeapp", transport=transport)
     assert caught.value.code == "term_pinned"
     assert caught.value.status == 409
     assert "term_pinned" in str(caught.value)
@@ -251,10 +251,10 @@ def test_vocab_remove_via_post_sends_remove_body(monkeypatch):
 
     def check(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
-        assert json.loads(request.content) == {"remove": ["Kurultai"]}
-        return httpx.Response(200, json={"object": "list", "data": [{"term": "Kurultai", "outcome": "removed"}]})
+        assert json.loads(request.content) == {"remove": ["Acmeapp"]}
+        return httpx.Response(200, json={"object": "list", "data": [{"term": "Acmeapp", "outcome": "removed"}]})
 
-    resp = vocab_remove("Kurultai", via_post=True, transport=httpx.MockTransport(check))
+    resp = vocab_remove("Acmeapp", via_post=True, transport=httpx.MockTransport(check))
     assert resp["data"][0]["outcome"] == "removed"
 
 
@@ -267,9 +267,9 @@ def test_cli_vocab_add_prints_json(monkeypatch, capsys):
         return {"object": "list", "data": [{"term": t, "outcome": "added"} for t in terms]}
 
     monkeypatch.setattr("wordink.cli.vocab_add", fake_add)
-    assert main(["vocab", "add", "kurultai"]) == 0
+    assert main(["vocab", "add", "acmeapp"]) == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["data"] == [{"term": "kurultai", "outcome": "added"}]
+    assert out["data"] == [{"term": "acmeapp", "outcome": "added"}]
     assert seen["dry_run"] is False
 
 
@@ -280,7 +280,7 @@ def test_cli_vocab_add_dry_run_reaches_the_client(monkeypatch):
         "wordink.cli.vocab_add",
         lambda terms, **kw: seen.update(kw) or {"object": "list", "data": []},
     )
-    assert main(["vocab", "add", "--dry-run", "kurultai"]) == 0
+    assert main(["vocab", "add", "--dry-run", "acmeapp"]) == 0
     assert seen["dry_run"] is True
 
 
@@ -293,7 +293,7 @@ def test_cli_vocab_list_and_remove(monkeypatch, capsys):
     )
     assert main(["vocab", "list"]) == 0
     assert json.loads(capsys.readouterr().out)["data"] == []
-    assert main(["vocab", "remove", "kurultai"]) == 0
+    assert main(["vocab", "remove", "acmeapp"]) == 0
     assert json.loads(capsys.readouterr().out)["data"][0]["outcome"] == "removed"
 
 
@@ -304,5 +304,5 @@ def test_cli_vocab_remove_via_post_flag(monkeypatch):
         "wordink.cli.vocab_remove",
         lambda term, **kw: seen.update(kw) or {"object": "list", "data": []},
     )
-    assert main(["vocab", "remove", "--via-post", "kurultai"]) == 0
+    assert main(["vocab", "remove", "--via-post", "acmeapp"]) == 0
     assert seen["via_post"] is True

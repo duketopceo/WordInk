@@ -1,7 +1,7 @@
 # WordInk dictation on macOS
 
 Hold a hotkey, speak, release: cleaned text appears in the focused app. Same Groq Whisper and LLM
-cleanup pipeline as the Linux and Windows daemons. Plan: `docs/plans/2026-10-28-0400-feat-macos-dictation-plan.md`.
+cleanup pipeline as the Linux and Windows daemons. Plan: `docs/archive/2026-10-28-0400-feat-macos-dictation-plan.md`.
 
 > Status: nothing here has run on a real Mac. The tests run `install.sh` on Linux against fake `uv`,
 > `launchctl` and `uname`. Read the plan's M9 checks before the first real run, and treat "works on macOS"
