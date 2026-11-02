@@ -143,7 +143,11 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             ld::HISTORY_ICON,
             tr("No usage in this period."),
             Some(tr(
-                "Dictations are counted here while History keeps them. Turn History on to start.",
+                if ui.settings.history_retention == crate::history::HistoryRetention::Off {
+                    "Dictations are counted here while History keeps them. Turn History on to start."
+                } else {
+                    "No dictations in the selected period."
+                },
             )),
         );
         return (

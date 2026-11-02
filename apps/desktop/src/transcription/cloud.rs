@@ -363,6 +363,16 @@ pub fn route_with(cloud_only: bool) -> Option<Provider> {
     )
 }
 
+/// The provider `choice` runs now, for the window to name: the same answer
+/// as [`route`] for `choice`, from the cached Groq key (never blocks).
+pub fn route_for_choice(choice: EngineChoice) -> Option<Provider> {
+    #[cfg(test)]
+    if let Some(forced) = ROUTE_OVERRIDE.with(std::cell::Cell::get) {
+        return forced;
+    }
+    route_for(choice, cached_key(Provider::Groq).is_some())
+}
+
 /// How long a resolved key is trusted before a background refresh picks up
 /// a key saved by `wordink keys set` in another process.
 const KEY_STALE_AFTER: Duration = Duration::from_secs(30);
