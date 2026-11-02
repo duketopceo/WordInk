@@ -778,6 +778,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Engine", "Moteur"),
     ("{} (auto)", "{} (auto)"),
     ("{} (local)", "{} (local)"),
+    ("Local model: {}", "Modèle local : {}"),
     ("No dictations in the selected period.", "Aucune dictée sur la période sélectionnée."),
     ("Language", "Langue"),
     ("{model} doesn't support {previous}, so the language changed to {language}", "{model} ne prend pas en charge {previous}, la langue est donc passée à {language}"),

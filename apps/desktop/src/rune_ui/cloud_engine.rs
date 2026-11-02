@@ -40,6 +40,23 @@ pub(super) fn active_engine_label(ui: &Ui, local_model: &str) -> String {
     }
 }
 
+/// The model dictation transcribes with when it routes to the cloud: the
+/// provider and its model, such as "Groq · whisper-large-v3-turbo".
+/// `None` when the local model transcribes.
+pub(super) fn active_cloud_model(ui: &Ui) -> Option<String> {
+    let provider = cloud::route_for_choice(ui.settings.engine)?;
+    let label = match provider {
+        // The gateway picks its own model.
+        Provider::Gateway => provider.name().to_owned(),
+        _ => format!(
+            "{} \u{b7} {}",
+            provider.name(),
+            cloud::model_for(provider, ui.settings.engine_model.as_deref())
+        ),
+    };
+    Some(label)
+}
+
 /// The engine row, and the model row under it when the engine has models
 /// to choose between.
 pub(super) fn rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
