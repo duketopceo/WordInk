@@ -1,5 +1,7 @@
 # WordInk dictation on Omarchy (Hyprland)
 
+> **On Linux, use the WordInk desktop app instead.** The app (`apps/desktop`, installed with `apps/desktop/scripts/install-linux.sh`) does everything below and more: a recording indicator, local models, more providers, history, and settings. `wordink-dictd` stays here for existing installs and is no longer developed for Linux. To move over, pick your microphone in WordInk's settings, test with `wordink dictation start` / `wordink dictation stop`, then point your dictation binding at `wordink dictation toggle` and run `systemctl --user disable --now wordink-dictd`.
+
 `wordink-dictd` is a small push-to-talk daemon: hold a key, speak, release, and cleaned-up text is typed into the focused window. Groq Whisper transcribes (with your vocabulary as a hint), a Groq LLM pass tidies it, and the offline `flow.py` rules take over if that pass is slow or down. It needs only a Groq key; a WordInk gateway is optional.
 
 Plan: [`docs/archive/2026-10-28-0005-feat-standalone-linux-dictation-app-plan.md`](../../docs/archive/2026-10-28-0005-feat-standalone-linux-dictation-app-plan.md).
