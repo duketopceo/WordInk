@@ -49,11 +49,14 @@ mod platform;
 mod platform_settings;
 pub(crate) mod playground;
 mod practice;
+mod privacy;
+mod replacements;
 #[cfg(hex_capture)]
 mod scrawl;
 mod settings;
 mod sidebar_update;
 mod sound_sets;
+mod sounds;
 mod spark;
 #[cfg(target_os = "macos")]
 pub(crate) mod story_link;
@@ -643,9 +646,15 @@ enum Pane {
     Output,
     /// The old per-app editor, kept for its scenes until it is removed.
     Modes,
+    /// The Global mode's spoken-phrase corrections.
+    Replacements,
+    /// Sound volume and sound set.
+    Sounds,
     /// Recorded calls and their settings, or the opt-in (macOS beta).
     Meetings,
     History,
+    /// What leaves this computer, where keys live, what is kept.
+    Privacy,
     /// Annotate (Scrawl's captures inside Hex): the switch, shortcuts,
     /// permission, transcriber, folder, retention, and Scrawl's own app.
     /// Dev builds, macOS and Linux only.
@@ -666,8 +675,11 @@ impl Pane {
         Pane::General,
         Pane::Output,
         Pane::Modes,
+        Pane::Replacements,
+        Pane::Sounds,
         Pane::Meetings,
         Pane::History,
+        Pane::Privacy,
         #[cfg(hex_capture)]
         Pane::Annotate,
         Pane::VoiceFilter,
@@ -693,7 +705,10 @@ impl Pane {
             Pane::General => tr("General"),
             Pane::Output => tr("Output"),
             Pane::Modes => tr("Modes"),
+            Pane::Replacements => tr("Replacements"),
+            Pane::Sounds => tr("Sounds"),
             Pane::History => tr("History"),
+            Pane::Privacy => tr("Privacy"),
             Pane::Meetings => tr("Meetings"),
             #[cfg(hex_capture)]
             Pane::Annotate => tr("Annotate"),
@@ -708,7 +723,10 @@ impl Pane {
             Pane::General => "nav-general",
             Pane::Output => "nav-output",
             Pane::Modes => "nav-modes",
+            Pane::Replacements => "nav-replacements",
+            Pane::Sounds => "nav-sounds",
             Pane::History => "nav-history",
+            Pane::Privacy => "nav-privacy",
             Pane::Meetings => "nav-meetings",
             #[cfg(hex_capture)]
             Pane::Annotate => "nav-annotate",
@@ -723,7 +741,10 @@ impl Pane {
             Pane::General => &SETTINGS_ICON,
             Pane::Output => &OUTPUT_ICON,
             Pane::Modes => &MODES_ICON,
+            Pane::Replacements => &icons::REFRESH,
+            Pane::Sounds => &icons::SPEAKER,
             Pane::History => &HISTORY_ICON,
+            Pane::Privacy => &icons::LOCK,
             Pane::Meetings => &MEETINGS_ICON,
             #[cfg(hex_capture)]
             Pane::Annotate => &SCRAWL_ICON,
@@ -819,6 +840,8 @@ pub(crate) struct Ui {
     tour: Option<onboarding::Tour>,
     /// The new first run over the tour (Labs).
     first_run: Option<onboarding_kit::Onboard>,
+    /// The first run's engine step: the pasted key, the probe, the choice.
+    engine_setup: onboarding_kit::EngineSetup,
     /// The OS's capabilities and the OS-only state its panes show.
     platform: platform::PlatformState,
     host: platform::PlatformHost,
@@ -917,6 +940,7 @@ impl Ui {
             sound_sets: sound_sets::SoundSets::default(),
             tour: None,
             first_run: None,
+            engine_setup: onboarding_kit::EngineSetup::default(),
             platform: platform::PlatformState::new(platform::Capabilities::current()),
             host: platform::PlatformHost::Local(Default::default()),
             meetings: meetings::MeetingsPane::default(),
@@ -1211,6 +1235,9 @@ impl Ui {
         sound_sets::close(self);
         vocabulary::close(self);
         self.output.prompt_copied = false;
+        if pane == Pane::Replacements {
+            replacements::open(self);
+        }
         if self.pane == Pane::HudLab {
             self.ask(platform::PlatformRequest::EndHudDemo);
         }
@@ -1467,7 +1494,10 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         Pane::General => (Vec::new(), general::pane(ui, p, &mut layer)),
         Pane::Output => (Vec::new(), output::pane(ui, p, cx.is_reduced_motion())),
         Pane::Modes => modes::pane(ui, p, &mut layer),
+        Pane::Replacements => (Vec::new(), replacements::pane(ui, p)),
+        Pane::Sounds => (Vec::new(), sounds::pane(ui, p, &mut layer)),
         Pane::History => history::pane(ui, p, &mut layer),
+        Pane::Privacy => (Vec::new(), privacy::pane(ui, p)),
         Pane::Meetings => meetings::pane(ui, p, &mut layer),
         #[cfg(hex_capture)]
         Pane::Annotate => (Vec::new(), scrawl::pane(ui, p, &mut layer)),
@@ -1997,6 +2027,68 @@ const SCENES: &[Scene] = &[
         ui.output.expanded = Some(0);
         ui.output.prompt_copied = true;
         ui.pane = Pane::Output;
+    }),
+    // Settings panes R27 lists that General doesn't hold: the Global
+    // corrections, sound volume and set, and what leaves the computer.
+    ("replacements", |ui| {
+        *ui = portal_fixture();
+        ui.settings.dictation_processing.default_mode.replacements = [
+            ("open code", "OpenCode"),
+            ("dash dash", "--"),
+            ("smiley face", ":)"),
+        ]
+        .map(
+            |(spoken, written)| crate::dictation::text_replacements::TextReplacement {
+                matched_phrase: spoken.into(),
+                output: written.into(),
+            },
+        )
+        .to_vec();
+        ui.modes.reload(&ui.settings);
+        ui.pane = Pane::Replacements;
+    }),
+    ("sounds", |ui| {
+        *ui = portal_fixture();
+        ui.pane = Pane::Sounds;
+    }),
+    ("privacy", |ui| {
+        *ui = portal_fixture();
+        ui.pane = Pane::Privacy;
+    }),
+    // The first run's engine step (F1): a computer with no GPU, where the
+    // cloud is recommended; the cloud's key field; one with a GPU, where the
+    // local model is, downloading; the shortcut step.
+    ("onboarding-engine", |ui| {
+        engine_step(ui, engine_probe(false), |_| {});
+    }),
+    ("onboarding-engine-cloud", |ui| {
+        engine_step(
+            ui,
+            engine_probe(false),
+            onboarding_kit::engine_setup::choose_cloud,
+        );
+    }),
+    ("onboarding-engine-local", |ui| {
+        engine_step(ui, engine_probe(true), |ui| {
+            onboarding_kit::engine_setup::choose_local(ui);
+            if let Some(view) = &mut ui.view {
+                let model = TranscriptionModelId::ParakeetV3;
+                view.transcription.preparing = Some(model);
+                view.transcription.downloaded_bytes =
+                    crate::transcription::models::definition(model)
+                        .download_bytes()
+                        .unwrap_or(0)
+                        * 31
+                        / 100;
+            }
+            onboarding::poll(ui);
+        });
+    }),
+    ("onboarding-hotkey", |ui| {
+        engine_step(ui, engine_probe(true), |ui| {
+            onboarding_kit::engine_setup::choose_local(ui);
+            onboarding::input(ui, crate::desktop::onboarding::Input::Continue);
+        });
     }),
     ("output-trust", |ui| {
         *ui = portal_fixture();
@@ -2583,6 +2675,31 @@ enum FirstRun {
     Failed,
     /// The model is installed.
     Ready,
+}
+
+/// What a computer with (or without) a GPU probes as, for the engine step.
+fn engine_probe(gpu: bool) -> crate::hardware::Probed {
+    use crate::hardware::{CpuFeatures, GpuApi, Probe, Probed};
+    Probed {
+        probe: Probe {
+            gpu_api: if gpu { GpuApi::Vulkan } else { GpuApi::None },
+            vram_or_unified_gb: if gpu { 48.0 } else { 0.0 },
+            ram_gb: if gpu { 64.0 } else { 16.0 },
+            cpu_features: CpuFeatures {
+                x86: false,
+                avx2: false,
+            },
+        },
+        has_groq_key: false,
+    }
+}
+
+/// The first run at its engine step, then `then` as a person would act.
+fn engine_step(ui: &mut Ui, probed: crate::hardware::Probed, then: impl FnOnce(&mut Ui)) {
+    *ui = portal_fixture();
+    onboarding::engine_fixture(ui, probed);
+    onboarding_kit::live::fixture(ui, Page::Permissions);
+    then(ui);
 }
 
 fn first_run(ui: &mut Ui, state: FirstRun, page: Page) {

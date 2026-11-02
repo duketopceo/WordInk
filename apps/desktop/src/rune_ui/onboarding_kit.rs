@@ -24,6 +24,7 @@
 
 mod cards;
 mod dictated;
+pub(super) mod engine_setup;
 mod field_text;
 mod first_run;
 mod fixture;
@@ -48,6 +49,7 @@ mod typing;
 mod versus;
 mod words;
 
+pub(super) use engine_setup::State as EngineSetup;
 pub(crate) use game::add as game;
 pub(super) use stories::Onboard;
 pub(crate) use stories::{add as stories, set_live_window};

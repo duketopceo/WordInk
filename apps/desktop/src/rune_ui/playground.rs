@@ -173,6 +173,9 @@ const PATHS: &[(&str, &str)] = &[
         "meetings-calendar-denied",
         "Window/Meetings/Calendar denied",
     ),
+    ("replacements", "Window/Replacements/Global"),
+    ("sounds", "Window/Sounds/Pane"),
+    ("privacy", "Window/Privacy/Privacy"),
     ("history", "Window/History/History"),
     ("history-empty", "Window/History/Empty"),
     #[cfg(hex_capture)]
@@ -265,6 +268,19 @@ const PATHS: &[(&str, &str)] = &[
         "Linux & Windows/Onboarding · almost ready",
     ),
     ("onboarding-try", "Linux & Windows/Onboarding · your turn"),
+    (
+        "onboarding-engine",
+        "Linux & Windows/Onboarding · engine (no GPU)",
+    ),
+    (
+        "onboarding-engine-cloud",
+        "Linux & Windows/Onboarding · engine, Groq key",
+    ),
+    (
+        "onboarding-engine-local",
+        "Linux & Windows/Onboarding · engine, downloading",
+    ),
+    ("onboarding-hotkey", "Linux & Windows/Onboarding · shortcut"),
     ("onboarding-ready", "Linux & Windows/Onboarding · ready"),
     (
         "windows-onboarding-microphone",

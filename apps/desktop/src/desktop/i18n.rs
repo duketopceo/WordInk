@@ -507,6 +507,8 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Voice Filter", ["Filtr głosu", "声音滤镜", "ボイスフィルター", "Stimmfilter", "Filtro de voz", "Голосовий фільтр"]),
     ("Recordings", ["Nagrania", "录音", "録音", "Aufnahmen", "Grabaciones", "Записи"]),
     ("Advanced", ["Zaawansowane", "高级", "詳細", "Erweitert", "Avanzado", "Додатково"]),
+    ("Replacements", ["Zamienniki", "替换", "置き換え", "Ersetzungen", "Reemplazos", "Заміни"]),
+    ("Privacy", ["Prywatność", "隐私", "プライバシー", "Datenschutz", "Privacidad", "Конфіденційність"]),
     ("Output", ["Wyjście", "输出", "出力", "Ausgabe", "Salida", "Виведення"]),
     ("GPU", ["GPU", "GPU", "GPU", "GPU", "GPU", "GPU"]),
     ("CPU", ["CPU", "CPU", "CPU", "CPU", "CPU", "CPU"]),

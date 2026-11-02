@@ -114,6 +114,13 @@ struct Checked {
 }
 
 impl Live {
+    /// The model this run downloads and shows progress for.
+    pub(super) fn set_choice(&mut self, selection: TranscriptionSelection) {
+        self.choice = selection;
+        self.failed = false;
+        self.checked = None;
+    }
+
     pub(crate) fn granted_for(&self, now: f64) -> bool {
         self.granted_at.is_some_and(|at| now - at >= GRANTED_BEAT)
     }
@@ -161,6 +168,7 @@ fn other_selection(current: &TranscriptionSelection) -> TranscriptionSelection {
 fn installed(ui: &Ui, selection: &TranscriptionSelection) -> bool {
     transcription_models::validate(selection)
         .is_ok_and(|model| ui.picker.installed(model, &selection.language))
+        || onboarding::cloud_ready(ui)
 }
 
 /// Opens the first run over the tour, at the tour's step: at launch when
@@ -169,6 +177,10 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     let Some(tour_step) = ui.tour.as_ref().map(|tour| tour.flow.step()) else {
         return;
     };
+    let engine_steps = ui
+        .tour
+        .as_ref()
+        .is_some_and(|tour| tour.flow.view().engine.is_some());
     if ui.first_run.is_some() {
         return;
     }
@@ -225,8 +237,11 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     let now = clock(ui);
     s.now = now;
     match tour_step {
+        // With the engine steps, the story starts at the permissions: the
+        // model (or a key) is chosen on their page, after them.
+        TourStep::Welcome if engine_steps => s.jump_to_permissions(),
         TourStep::Welcome => s.begin_live(now),
-        TourStep::Setup => s.jump_to_permissions(),
+        TourStep::Setup | TourStep::Engine | TourStep::Hotkey => s.jump_to_permissions(),
         TourStep::TryIt if had_model => s.jump_to_try(),
         TourStep::TryIt => s.jump_to_waiting(),
         TourStep::Done => s.jump_to_ready(),
@@ -395,6 +410,10 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     {
         onboarding::input(ui, Input::Continue);
     }
+    let engine_hold = ui
+        .tour
+        .as_ref()
+        .is_some_and(|tour| matches!(tour.flow.step(), TourStep::Engine | TourStep::Hotkey));
     let asks_permissions = ui.platform.caps.permissions;
     let accessibility_renamed = ui.platform.accessibility_renamed;
     let relaunch_failed = ui.platform.relaunch_failed;
@@ -406,6 +425,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         return false;
     };
     live.checked = Some(checked);
+    s.engine_hold = engine_hold;
     // Linux and Windows ask for no permissions: both rows are ready.
     if !asks_permissions {
         live.microphone = ItemStatus::Ready;
@@ -486,6 +506,10 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
 pub(in crate::rune_ui) fn overlay(ui: &Ui, p: Paint, reduced: bool) -> Option<El> {
     let s = ui.first_run.as_ref()?;
     s.reduced.set(reduced);
+    // The engine and hotkey steps cover the story, which waits underneath.
+    if let Some(page) = super::engine_setup::overlay(ui, p) {
+        return Some(page);
+    }
     Some(
         super::flows::view(p, s)
             .key("first-run")
@@ -512,7 +536,7 @@ pub(super) fn press_continue(ui: &mut Ui) {
 
 /// "Start using Hex": closes the first run and the tour under it.
 pub(super) fn finish(ui: &mut Ui) {
-    let installed = ui.picker.selected_installed(&ui.settings);
+    let installed = onboarding::engine_installed(ui);
     if ui.live()
         && ui.platform.setup_status(installed).ready()
         && !crate::desktop::onboarding::completion_recorded()

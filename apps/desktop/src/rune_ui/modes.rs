@@ -259,6 +259,13 @@ impl ModesPane {
         self.drag = None;
     }
 
+    /// Shows the Global mode's drafts (the Replacements pane edits them).
+    pub(super) fn show_global(&mut self, settings: &AppSettings) {
+        if self.selected != Selection::Default {
+            self.select_in(settings, Selection::Default);
+        }
+    }
+
     fn select_in(&mut self, settings: &AppSettings, selection: Selection) {
         self.select(selection);
         self.editor = Editor::of(mode(settings, selection));
@@ -1010,7 +1017,7 @@ pub(super) fn monogram(p: Paint, name: &str) -> El {
         )
 }
 
-fn corrections(ui: &Ui, p: Paint) -> El {
+pub(super) fn corrections(ui: &Ui, p: Paint) -> El {
     let add = IconButton::new(PLUS)
         .variant(IconButtonVariant::Ghost)
         .control_size(ControlSize::Regular)

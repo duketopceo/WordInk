@@ -38,6 +38,12 @@ pub(super) const SCENES: &[&str] = &[
     "onboarding-try",
     "mac-onboarding-try",
     "mac-onboarding-reopen",
+    // The engine step: recommendation with no GPU; the cloud's key field;
+    // the local model downloading; the shortcut step.
+    "onboarding-engine",
+    "onboarding-engine-cloud",
+    "onboarding-engine-local",
+    "onboarding-hotkey",
     // Hex is ready.
     "onboarding-ready",
     "mac-onboarding-ready",
@@ -104,7 +110,10 @@ fn onboarding_walkthrough() {
     let mut rt = runtime_for(ui, true, PANE_SIZE);
     let step = |rt: &Runtime<Ui>| rt.state.tour.as_ref().map(|tour| tour.flow.step());
     let shown = texts(&rt);
-    assert!(shown.contains(&"Setting up WordInk".to_owned()), "{shown:?}");
+    assert!(
+        shown.contains(&"Setting up WordInk".to_owned()),
+        "{shown:?}"
+    );
     assert!(
         !shown.contains(&"Choose a speech model".to_owned()),
         "nothing found, so no model step"
@@ -151,7 +160,10 @@ fn onboarding_walkthrough() {
     tap(&mut rt, "done");
     assert!(texts(&rt).contains(&"WordInk is ready".to_owned()));
     tap(&mut rt, "start-using-hex");
-    assert!(rt.state.tour.is_none(), "Start using WordInk closes onboarding");
+    assert!(
+        rt.state.tour.is_none(),
+        "Start using WordInk closes onboarding"
+    );
     assert!(rt.state.first_run.is_none());
     println!(
         "onboarding walkthrough: Setting up WordInk -> {} downloaded ({} bytes) -> Your turn -> WordInk is ready",

@@ -24,57 +24,102 @@ pub(super) struct Tour {
     pub(super) flow: Flow,
     advance_at: Option<Instant>,
     completed: bool,
+    /// A Groq key was already set, and the engine isn't Local, when the tour
+    /// opened: cloud dictation works without a local model.
+    cloud_ready: bool,
+}
+
+/// Whether dictation already runs on the cloud: a key resolves (once, here,
+/// since the keyring can be slow) and the engine setting doesn't say Local.
+/// Tests never see this machine's keys.
+fn key_already_set(settings: &AppSettings) -> bool {
+    #[cfg(test)]
+    {
+        let _ = settings;
+        false
+    }
+    #[cfg(not(test))]
+    {
+        use crate::transcription::cloud::{EngineChoice, Provider};
+        settings.engine != EngineChoice::Local
+            && crate::keys::status(Provider::Groq.id(), Provider::Groq.key_env()).is_some()
+    }
 }
 
 impl Tour {
-    fn new(flow: Flow, completed: bool) -> Self {
+    fn new(flow: Flow, completed: bool, cloud_ready: bool) -> Self {
         Self {
             flow,
             advance_at: None,
             completed,
+            cloud_ready,
         }
     }
 
     /// The tour from Welcome, as on a new install: Run setup again.
     pub(super) fn replay(settings: &AppSettings, platform: &PlatformState) -> Tour {
-        let installed = super::picker::Picker::default().selected_installed(settings);
+        let cloud = key_already_set(settings);
+        let installed = super::picker::Picker::default().selected_installed(settings) || cloud;
         Tour::new(
-            Flow::new(
+            Flow::with_engine_setup(
                 Step::Welcome,
                 platform.setup_status(installed),
                 platform.caps.permissions,
                 platform.caps.practice_dictation,
             ),
             false,
+            cloud,
         )
     }
 
     /// The tour when this run still needs it.
     pub(super) fn start(settings: &AppSettings, platform: &PlatformState) -> Option<Tour> {
-        let installed = super::picker::Picker::default().selected_installed(settings);
-        let status = platform.setup_status(installed);
         let completed = crate::desktop::onboarding::completion_recorded();
+        // The keyring is asked only for a run that may still need the tour.
+        let cloud = !completed && key_already_set(settings);
+        let installed = super::picker::Picker::default().selected_installed(settings) || cloud;
+        let status = platform.setup_status(installed);
         let resume = crate::desktop::onboarding::take_resume();
         let saved = (!completed)
             .then(crate::desktop::onboarding::saved_step)
             .flatten();
         (resume.is_some() || (!completed && (!status.ready() || saved.is_some()))).then(|| {
             Tour::new(
-                Flow::new(
+                Flow::with_engine_setup(
                     resume.or(saved).unwrap_or(Step::Welcome),
                     status,
                     platform.caps.permissions,
                     platform.caps.practice_dictation,
                 ),
                 completed,
+                cloud,
             )
         })
     }
 }
 
+/// A cloud key was set when the tour opened or saved on its engine step.
+pub(super) fn cloud_ready(ui: &Ui) -> bool {
+    ui.tour.as_ref().is_some_and(|tour| {
+        tour.cloud_ready
+            || tour
+                .flow
+                .view()
+                .engine
+                .is_some_and(|engine| engine.key_saved)
+    })
+}
+
+/// An engine is ready: the selected model is installed, or the cloud is set.
+pub(super) fn engine_installed(ui: &Ui) -> bool {
+    ui.picker.selected_installed(&ui.settings) || cloud_ready(ui)
+}
+
 pub(super) fn progress(ui: &Ui) -> (bool, ModelProgress) {
-    let installed = ui.picker.selected_installed(&ui.settings);
-    let selected = crate::transcription::models::validate(&ui.settings.transcription).ok();
+    let selection = super::onboarding_kit::engine_setup::selection(ui);
+    let selected = crate::transcription::models::validate(&selection).ok();
+    let local = selected.is_some_and(|model| ui.picker.installed(model, &selection.language));
+    let installed = local || cloud_ready(ui);
     let transcription = ui.view.as_ref().map(|view| &view.transcription);
     let downloading = selected.and_then(|model| {
         (transcription.and_then(|t| t.preparing) == Some(model.id)).then(|| {
@@ -87,7 +132,7 @@ pub(super) fn progress(ui: &Ui) -> (bool, ModelProgress) {
     (
         installed,
         ModelProgress {
-            installed,
+            installed: local || cloud_ready(ui),
             downloading,
             failed: downloading.is_none() && transcription.is_some_and(|t| t.error.is_some()),
         },
@@ -121,6 +166,7 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
             tour.flow.hold_download(held);
         }
     }
+    probe_hardware(ui);
     let (installed, model) = progress(ui);
     let status = ui.platform.setup_status(installed);
     let accessibility_stale = ui
@@ -161,6 +207,30 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
     changed || after.as_ref() != Some(&before)
 }
 
+/// Starts the hardware probe with the tour and hands the flow the
+/// recommendation when it answers. A scene or test sets `engine_setup.probed`
+/// itself and never probes.
+fn probe_hardware(ui: &mut Ui) {
+    if ui.tour.is_none() {
+        return;
+    }
+    if ui.engine_setup.probed.is_none() && !ui.is_fixture() {
+        crate::hardware::start();
+        ui.engine_setup.probed = crate::hardware::cached();
+    }
+    let Some(probed) = ui.engine_setup.probed else {
+        return;
+    };
+    let waiting = ui
+        .tour
+        .as_ref()
+        .and_then(|tour| tour.flow.view().engine)
+        .is_some_and(|engine| engine.recommendation.is_none());
+    if waiting {
+        input(ui, Input::Recommend(probed.recommendation()));
+    }
+}
+
 pub(super) fn input(ui: &mut Ui, input: Input) {
     let Some(tour) = &mut ui.tour else {
         return;
@@ -190,7 +260,7 @@ fn apply(ui: &mut Ui, effect: Effect) {
                 .found
                 .choice
                 .take()
-                .unwrap_or_else(|| ui.settings.transcription.clone());
+                .unwrap_or_else(|| super::onboarding_kit::engine_setup::selection(ui));
             if crate::transcription::models::validate(&selection).is_ok() {
                 ui.send(Request::ChooseModel {
                     model: selection.model,
@@ -235,12 +305,30 @@ pub(super) fn fixture(ui: &mut Ui, step: Step, downloading: bool) {
     if step != Step::Welcome {
         flow.on(Input::Continue);
     }
-    ui.tour = Some(Tour::new(flow, false));
+    ui.tour = Some(Tour::new(flow, false, false));
     if downloading {
         input(ui, Input::Grant(SetupItem::Model));
         set_downloaded(ui, 62);
         poll(ui);
     }
+}
+
+/// A first run at the engine step on a computer that probed as `probed`
+/// (scenes and tests): nothing installed, no key, permissions on.
+pub(super) fn engine_fixture(ui: &mut Ui, probed: crate::hardware::Probed) {
+    ui.engine_setup.probed = Some(probed);
+    ui.picker.installed = Some(Vec::new());
+    let status = ui.platform.setup_status(false);
+    let flow = Flow::with_engine_setup(
+        Step::Welcome,
+        status,
+        ui.platform.caps.permissions,
+        ui.platform.caps.practice_dictation,
+    );
+    ui.tour = Some(Tour::new(flow, false, false));
+    input(ui, Input::Continue);
+    // One poll hands the flow the recommendation.
+    poll(ui);
 }
 
 pub(super) fn set_downloaded(ui: &mut Ui, percent: u64) {
@@ -303,6 +391,7 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
     ui.picker.installed = Some(Vec::new());
     ui.tour = Some(Tour::new(
         Flow::new(Step::Welcome, fresh, true, true),
+        false,
         false,
     ));
     // The tour starts the download as soon as it sees no model.

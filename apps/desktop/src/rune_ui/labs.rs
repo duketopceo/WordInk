@@ -20,11 +20,18 @@ pub(super) static LABS_ICON: Icon = Icon {
     body: r#"<path d="M6.25 2.5h3.5M6.75 2.5v4L3.2 12.3a.8.8 0 0 0 .7 1.2h8.2a.8.8 0 0 0 .7-1.2L9.25 6.5v-4M4.8 10h6.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>"#,
 };
 
-/// The main sidebar's panes, in order: General, Output, History, then the
-/// features turned on (Meetings and Voice Filter from Labs, Annotate in dev
-/// builds).
+/// The main sidebar's panes, in order: General, Output, Replacements,
+/// Sounds, History, Privacy, then the features turned on (Meetings and
+/// Voice Filter from Labs, Annotate in dev builds).
 pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
-    let mut panes = vec![Pane::General, Pane::Output, Pane::History];
+    let mut panes = vec![
+        Pane::General,
+        Pane::Output,
+        Pane::Replacements,
+        Pane::Sounds,
+        Pane::History,
+        Pane::Privacy,
+    ];
     #[cfg(hex_capture)]
     let optional = [Pane::Meetings, Pane::Annotate, Pane::VoiceFilter];
     #[cfg(not(hex_capture))]
@@ -116,7 +123,10 @@ pub(super) fn reveal(ui: &mut Ui, name: Option<&str>, tx: &mut Tx) {
             tx.scroll_center(row_key(feature));
             tx.wake_after(FLASH);
         }
-        None => tracing::warn!(feature = name, "a Labs link named no feature this WordInk has"),
+        None => tracing::warn!(
+            feature = name,
+            "a Labs link named no feature this WordInk has"
+        ),
     }
 }
 
