@@ -62,9 +62,9 @@ The owner does not use WordInk day to day because it has no Hex-style pill and n
 - R4. The Python daemon `wordink-dictd` is retired once the app matches it on each OS. Until then it stays installable and is not broken.
 
 **Dictation surface**
-- R5. The default dictation hotkey is Option+Space when the detected physical keyboard has an Option key, including Apple keyboards on Linux; otherwise it is Alt+Space. When the desktop reserves that chord, use its documented conflict-free default. The shortcut can be changed in settings.
-- R6. The app detects the keyboard type and labels the hotkey to match.
-- R7. While dictating, one non-focusing HUD combines Hex's pill status and timer with Voxtype's audio-reactive meter in the same overlay. Live text remains an optional alternate style; a separate audio-bar popup is not shown. Start/stop/error feedback sounds remain a separate optional setting.
+- R5. The default dictation hotkey is Option+Space when the keyboard is identified as having an Option key, including Apple keyboards on Linux; otherwise it is Alt+Space. When the desktop reserves that chord, use its documented conflict-free default. The shortcut can be changed in settings.
+- R6. The app detects keyboard type and labels the hotkey to match. If Linux cannot identify an Apple keyboard reliably, it uses the Alt+Space event and label; users can still change the shortcut in settings.
+- R7. While recording, one non-focusing HUD combines Hex's pill status and timer with Voxtype's audio-reactive meter in the same overlay. The meter clears when recording stops while the pill continues to show transcription and completion or error. Live text remains an optional alternate style; a separate audio-bar popup is not shown. Start/stop/error feedback sounds remain a separate optional setting.
 - R8. Live text streams words as they are recognised for models that can stream. With other models it shows the phases: ready, loading model, recording, transcribing, done, copied, error.
 - R9. A dictation can be cancelled with a dedicated, rebindable Cancel shortcut, or by pressing Esc twice while the indicator shows. Pressing the dictation hotkey again stops and inserts.
 - R10. Text is inserted into the focused app with terminal-safe paste and clipboard restore, and is never typed into a detected password field.
@@ -127,19 +127,19 @@ Product Contract update: R5 now names Option+Space for Apple keyboards on Linux;
 - Sign Linux now and defer paid macOS/Windows signing (session-settled: user-directed — chosen over paying for signing now and over no signing: Linux gets a verified updater at no cost).
 - Rewrite git history to remove personal details (session-settled: user-directed — chosen over cleaning current files only: the repo is public and history is readable). It is one force-push after a backup, at the end of the run.
 - Clean-up scope is all four audit items: delete `legacy/`, archive plans and fix docs, scrub personal details, add the open-source basics (session-settled: user-directed — chosen from the audit's recommendation list).
-- Groq is the baseline engine; the default is Option+Space on a physical keyboard with an Option key, including on Linux, and Alt+Space otherwise. It is changeable, with keyboard auto-detect (session-settled: user-directed — chosen over OS-based naming that would show Alt on an Apple keyboard: the shortcut should match the keycap).
+- Groq is the baseline engine; the default is Option+Space when keyboard data identifies an Option key, including on Linux, and Alt+Space otherwise. On Linux, the underlying key event is Alt+Space. It is changeable, with keyboard auto-detect (session-settled: user-directed — chosen over OS-based naming that would show Alt on an identified Apple keyboard: the shortcut label should match the keycap).
 - The default HUD combines the Hex status pill and Voxtype audio-reactive meter in one overlay; live text remains an optional alternate style (session-settled: user-directed — chosen over separate pill and audio-bar popups: one WordInk popup should show both state and voice activity).
 - The PR process is merge-when-green: the agent may squash-merge its own PRs when CI passes and review has no open blocking finding, and may use `--admin` only when a stale CodeRabbit change request is the sole block (session-settled: user-directed — chosen over stacking for the owner to merge).
 
 ### Key Flows
 
 - F1. **First run** (covers R18, R20, R22, R28): install, grant permissions, see the hardware recommendation, choose Groq (paste a key) or local (download Parakeet v3 with progress), set or accept the hotkey, then do a test dictation.
-- F2. **Dictate** (covers R5, R7, R8, R10, R12-R15): press the key labeled Option+Space on an Apple keyboard, or Alt+Space otherwise. Media pauses and the combined HUD appears; live text streams words where the model supports it. Release or press again: the text is processed and inserted into the focused app, media resumes, and the HUD shows done.
+- F2. **Dictate** (covers R5, R7, R8, R10, R12-R15): press Option+Space on an identified Apple keyboard, or Alt+Space otherwise. Media pauses and the combined HUD appears; live text streams words where the model supports it. Release or press again: the text is processed and inserted into the focused app, media resumes, and the HUD shows done.
 - F3. **Cancel or recover** (covers R9, R11): press the Cancel shortcut, or Esc twice while the indicator shows, and nothing is inserted. If the provider fails, the clip is kept and History offers retry with another model.
 
 ### Acceptance Examples
 
-- AE1. (covers R7, R8) With the default HUD, dictating "hello world" with Groq on Omarchy shows one pill containing a timer/status and a voice-reactive meter through record and transcribe, then done; no second popup opens, and "hello world" lands in a foot terminal. With live text selected, a streaming-capable model shows words as they arrive and a non-streaming model shows phase labels.
+- AE1. (covers R7, R8) With the default HUD, dictating "hello world" with Groq on Omarchy shows one pill containing a timer/status and a voice-reactive meter during recording. When recording stops, the meter clears while the same pill shows transcribing then done; no second popup opens, and "hello world" lands in a foot terminal. With live text selected, a streaming-capable model shows words as they arrive and a non-streaming model shows phase labels.
 - AE2. (covers R20, R22) On a machine with no API key and Vulkan available, onboarding recommends Parakeet v3, and dictation works offline after the download.
 - AE3. (covers R12, R13) With the owner's Voxtype replacement table imported, a spoken replacement term comes out written, and "um" is dropped when filler removal is on.
 - AE4. (covers R10) Dictating while a password manager field is focused inserts nothing and shows why.
@@ -217,9 +217,9 @@ Public sources:
   - Feedback sounds stay Hex's sound sets. A "synth" set may be added later.
 - KTD7. The defaults change to:
   - Groq as the engine when a Groq key exists. Otherwise, Parakeet TDT 0.6B v3, local.
-  - Option+Space when the physical keyboard has an Option key, and Alt+Space otherwise.
+  - Option+Space when keyboard data identifies an Option key, and Alt+Space otherwise; Linux maps both to the Alt+Space event.
 
-  The keyboard type is detected from Hex's `keyboard_input_sources` and layout data, so labels read Option or Alt. GNOME binds Alt+Space to its window menu, so GNOME sessions default to Ctrl+Alt+Space, labeled Ctrl+Option+Space on an Apple keyboard. Windows keeps Alt+Space unless the Windows device pass finds a conflict. Hex's Parakeet Unified stays in the catalogue, labelled with its license, and is never the default. (Covers R5, R6, R18, R20, R21.)
+  Keyboard type is detected from Hex's `keyboard_input_sources` and layout data, so labels read Option or Alt. When Linux data is unavailable or inconclusive, use the Alt+Space event and label and allow the shortcut to be changed in settings. GNOME binds Alt+Space to its window menu, so GNOME sessions default to Ctrl+Alt+Space, labeled Ctrl+Option+Space on an identified Apple keyboard. Windows keeps Alt+Space unless the Windows device pass finds a conflict. Hex's Parakeet Unified stays in the catalogue, labelled with its license, and is never the default. (Covers R5, R6, R18, R20, R21.)
 - KTD8. Hardware recommendation reuses Hex's Auto device logic (the GPU/CPU probe, and remembered hangs) and adds the RAM and CPU-feature probe. Onboarding shows one recommended choice and one alternative. Machines without Vulkan or AVX2 are recommended Groq. "No Vulkan" here means no GPU Vulkan device: the window still runs on a software Vulkan driver (Mesa lavapipe), which the docs list as the fallback. With no Vulkan driver at all, or no AVX2, the app exits with a message naming the fix. A no-window CLI mode is deferred. (Resolves the open area on fallback.)
 - KTD9. Merge when green. The agent may squash-merge its own PRs when CI passes and review has no open blocking finding, and may use `--admin` only when a stale CodeRabbit CHANGES_REQUESTED is the sole block. (session-settled: user-directed — chosen over stacking every PR for the owner to merge: overnight progress.)
 - KTD10. The owner switches over on Linux in U5:
@@ -366,7 +366,7 @@ packages/* (web SDK, gateway) and apps/ios → separate products, cleaned (R36)
   - Keep Hex's double-Esc cancel and hotkey cancel.
 - **Test scenarios:**
   - HUD stories show the timer/status and changing audio bars together in one surface during recording.
-  - Transcribing, completed, cancelled and error states update the same compact overlay; no second popup or focusable settings window appears.
+  - Audio bars animate only while recording; after stop, the meter clears and the same compact overlay shows transcribing, completion, cancellation or error. No second popup or focusable settings window appears.
   - Live text falls back to phase labels for a non-streaming engine.
 - **Verification:** HUD stories pass on Linux, Windows and macOS CI. A real Omarchy dictation shows one combined popup and inserts text; the Mac keyboard chord is labeled Option+Space.
 
@@ -446,7 +446,7 @@ packages/* (web SDK, gateway) and apps/ios → separate products, cleaned (R36)
   - Change the defaults per KTD7.
   - Detect Apple keyboards from layout and vendor info where available, falling back to the OS.
   - Keep the user's chosen shortcut on upgrade.
-- **Test scenarios:** an Apple keyboard on Linux shows Option+Space and its Alt key event triggers dictation; GNOME selects and labels the conflict-free chord; a non-Apple keyboard shows Alt+Space; an existing custom shortcut is preserved.
+- **Test scenarios:** identified Apple keyboard data on Linux shows Option+Space and its Alt event triggers dictation; missing or inconclusive data falls back to Alt+Space; GNOME selects and labels its conflict-free chord; a non-Apple keyboard shows Alt+Space; an existing custom shortcut is preserved.
 - **Verification:** tests pass.
 
 ### U11. Meeting mode port
