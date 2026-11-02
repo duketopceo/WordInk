@@ -7,7 +7,7 @@
 //!    Manager on Windows;
 //!    An instance with its own data folder (`HEX_APPLICATION_SUPPORT_DIR`)
 //!    skips 1 and 2 unless `WORDINK_ALLOW_SYSTEM_KEYS=1`.
-//! 3. a user-only (0600) file named for the provider (`groq.key`) beside
+//! 3. a user-only (0600 on Unix; on Windows it takes the folder's access) file named for the provider (`groq.key`) beside
 //!    `settings.json`, for Linux sessions with no Secret Service.
 //!
 //! A key is never written to the settings file or to a log, and no function
@@ -398,9 +398,12 @@ mod tests {
     fn a_custom_support_dir_ignores_the_environment_and_the_keyring() {
         let found = resolve_isolated(false, some("env-key"), || some("ring-key"), || None);
         assert_eq!(found, None);
-        let found = resolve_isolated(false, some("env-key"), || some("ring-key"), || {
-            some("file-key")
-        });
+        let found = resolve_isolated(
+            false,
+            some("env-key"),
+            || some("ring-key"),
+            || some("file-key"),
+        );
         assert_eq!(found, Some(("file-key".into(), KeySource::File)));
     }
 

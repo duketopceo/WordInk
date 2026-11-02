@@ -830,7 +830,7 @@ pub fn apply(
             }
         }
         "engine_model" => {
-            if let Some(model) = candidate.engine_model.as_deref() {
+            if let Some(model) = candidate.engine_model.as_deref().map(str::trim) {
                 let warning = engine_model_check(candidate.engine, model)
                     .map_err(|why| invalid(name, &why))?;
                 if let Some(warning) = warning {
@@ -923,7 +923,8 @@ pub fn apply(
         #[cfg(hex_capture)]
         "capture.enabled"
             if candidate.capture.enabled
-                && candidate.hotkey_in_use(HotkeySlot::Capture, &candidate.capture.hotkey) =>
+                && candidate
+                    .hotkey_overlaps_others(HotkeySlot::Capture, &candidate.capture.hotkey) =>
         {
             return Err(ControlError::new(
                 "shortcut-in-use",
@@ -1028,10 +1029,17 @@ pub fn apply_all(
         }
         pending = failed;
     }
+    let mut message = format!("Applied {} settings", values.len());
+    if values.contains_key("engine_model")
+        && let Some(model) = candidate.engine_model.as_deref().map(str::trim)
+        && let Ok(Some(warning)) = engine_model_check(candidate.engine, model)
+    {
+        message = format!("{message} (warning: {warning})");
+    }
     Ok(Change {
         settings: candidate,
         effects,
-        message: format!("Applied {} settings", values.len()),
+        message,
     })
 }
 
@@ -1082,7 +1090,10 @@ fn engine_model_check(
     };
     match provider {
         Some(Provider::OpenRouter) => {
-            if !Provider::OpenRouter.accepts_model(model) {
+            let has_vendor_and_model = model
+                .split_once('/')
+                .is_some_and(|(vendor, name)| !vendor.is_empty() && !name.is_empty());
+            if !Provider::OpenRouter.accepts_model(model) || !has_vendor_and_model {
                 return Err(format!(
                     "`{model}` is not an OpenRouter model id; ids look like vendor/model"
                 ));
@@ -1110,10 +1121,19 @@ fn engine_model_check(
                 .into_iter()
                 .find(|provider| *provider != Provider::Gateway && provider.accepts_model(model))
             {
-                Ok(Some(format!(
-                    "`{model}` takes effect only when engine is set to {}; the current engine ignores it",
-                    owner.name()
-                )))
+                let note = if matches!(engine, crate::transcription::cloud::EngineChoice::Auto)
+                    && matches!(owner, Provider::Groq)
+                {
+                    format!(
+                        "`{model}` is used when Auto routes to Groq; Auto never routes to other providers"
+                    )
+                } else {
+                    format!(
+                        "`{model}` takes effect only when engine is set to {}; the current engine ignores it",
+                        owner.name()
+                    )
+                };
+                Ok(Some(note))
             } else {
                 let all = [Provider::Groq, Provider::OpenAi, Provider::Deepgram]
                     .map(known)
@@ -1794,6 +1814,28 @@ mod tests {
         assert_eq!(error.code, "invalid-value");
         assert!(error.message.contains("alt+space"), "{}", error.message);
         assert!(!error.message.contains("option+none"), "{}", error.message);
+    }
+
+    #[cfg(hex_capture)]
+    #[test]
+    fn enabling_annotate_refuses_a_saved_overlapping_chord() {
+        let mut base = AppSettings::default();
+        base.capture.enabled = false;
+        base.cancel_hotkey = Some(base.capture.hotkey.clone());
+        let refused = apply(&base, "capture.enabled", "true", &rules()).unwrap_err();
+        assert_eq!(refused.code, "shortcut-in-use");
+    }
+
+    #[test]
+    fn openrouter_model_needs_vendor_and_name() {
+        use crate::transcription::cloud::EngineChoice;
+        for bad in ["/", "vendor/", "/model"] {
+            assert!(
+                engine_model_check(EngineChoice::Openrouter, bad).is_err(),
+                "{bad}"
+            );
+        }
+        assert!(engine_model_check(EngineChoice::Openrouter, "vendor/model").is_ok());
     }
 
     /// R9: the cancel shortcut and the other WordInk shortcuts never share a

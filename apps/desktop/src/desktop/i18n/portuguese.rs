@@ -15,6 +15,7 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("In a private file beside your settings, <provider>.key. This instance has its own data folder, so keys come only from <folder>/<provider>.key; set WORDINK_ALLOW_SYSTEM_KEYS=1 to also use the environment and the OS keyring. Never in the settings file or a log.", "Em um arquivo privado ao lado das suas configurações, <provider>.key. Esta instância tem a própria pasta de dados, então as chaves vêm apenas de <folder>/<provider>.key; defina WORDINK_ALLOW_SYSTEM_KEYS=1 para usar também o ambiente e o chaveiro do sistema. Nunca no arquivo de configurações nem em um registro."),
     ("Turn off the mic when not dictating", "Desligar o microfone quando não estiver ditando"),
     ("The mic opens only while you dictate; the first moment can be clipped", "O microfone abre só enquanto você dita; o primeiro instante pode ser cortado"),
     ("The mic stays ready so dictation starts instantly; your system shows it in use", "O microfone fica pronto para o ditado começar na hora; o sistema mostra que ele está em uso"),

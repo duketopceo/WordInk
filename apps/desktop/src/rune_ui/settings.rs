@@ -471,7 +471,7 @@ const PERCENT_LABELS: [&str; 101] = [
 /// not one of them (`0.8` shows as 80%, not as the nearest step).
 pub(super) fn sound_volume_options(settings: &AppSettings) -> Vec<(&'static str, f32)> {
     let mut options = SOUND_VOLUME_STEPS.to_vec();
-    let volume = settings.sound_effect_volume;
+    let volume = settings.sound_effect_volume.clamp(0.0, 1.0);
     if settings.sound_effects
         && volume > 0.0
         && !SOUND_VOLUME_STEPS

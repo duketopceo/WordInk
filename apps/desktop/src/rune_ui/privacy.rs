@@ -113,10 +113,8 @@ fn keys_copy() -> String {
 
 fn keys_copy_for(isolated: bool) -> String {
     if isolated {
-        format!(
-            "In a private file beside your settings, <provider>.key. {} Never in the settings file or a log.",
-            tr(crate::keys::ISOLATED_KEYS_HINT)
-        )
+        tr("In a private file beside your settings, <provider>.key. This instance has its own data folder, so keys come only from <folder>/<provider>.key; set WORDINK_ALLOW_SYSTEM_KEYS=1 to also use the environment and the OS keyring. Never in the settings file or a log.")
+            .to_string()
     } else {
         tr(
             "In the OS keyring (or, where there is none, a private file beside your settings), or read from GROQ_API_KEY. Never in the settings file or a log.",
@@ -133,5 +131,6 @@ mod keys_copy_tests {
     fn the_keys_text_names_the_opt_in_only_when_isolated() {
         assert!(!keys_copy_for(false).contains("WORDINK_ALLOW_SYSTEM_KEYS"));
         assert!(keys_copy_for(true).contains("WORDINK_ALLOW_SYSTEM_KEYS=1"));
+        assert!(keys_copy_for(true).contains(crate::keys::ISOLATED_KEYS_HINT));
     }
 }
