@@ -20,7 +20,7 @@ use crate::hardware::{Choice, Probed, Reason, Recommendation};
 use crate::keys::KeySource;
 use crate::transcription::cloud::Provider;
 use crate::transcription::models::{
-    self as transcription_models, AUTO_LANGUAGE, TranscriptionModelId, TranscriptionSelection,
+    self as transcription_models, TranscriptionModelId, TranscriptionSelection,
 };
 
 const PAGE_W: f32 = 520.0;
@@ -67,15 +67,13 @@ pub(in crate::rune_ui) fn selection(ui: &Ui) -> TranscriptionSelection {
         .unwrap_or_else(|| ui.settings.transcription.clone())
 }
 
-/// Parakeet v3 in the person's language where it speaks it, else detection.
+/// Parakeet v3 in the person's language where it speaks it, else English.
 fn local_selection() -> TranscriptionSelection {
     let v3 = transcription_models::definition(TranscriptionModelId::ParakeetV3);
     let preferred = crate::desktop::i18n::preferred_language();
-    let language = if v3.supports_language(&preferred) {
-        preferred
-    } else {
-        AUTO_LANGUAGE.to_string()
-    };
+    // Parakeet v3 cannot detect a language, so a locale it lacks (or none at
+    // all, as in a bare environment) falls to its default, English.
+    let language = v3.language_for(&preferred).to_string();
     TranscriptionSelection {
         model: TranscriptionModelId::ParakeetV3,
         language,

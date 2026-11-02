@@ -345,6 +345,7 @@ pub fn refresh_catalogue_in_background() {
 
 /// The provider the current settings route dictation to, or `None` for the
 /// local model. Reads only the in-memory key; never touches the keyring.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn route() -> Option<Provider> {
     route_with(false)
 }

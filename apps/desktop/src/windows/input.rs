@@ -1692,12 +1692,12 @@ mod tests {
         // its release, so tracking events alone leaves it held.
         let mut tracked = ModifierState::default();
         tracked.update(u32::from(VK_LWIN), true);
-        tracked.update(u32::from(VK_LCONTROL), true);
+        tracked.update(u32::from(VK_LMENU), true);
         assert!(!tracked.matches(&binding));
         // After unlocking, the system reports every key up before this
-        // Ctrl press, which `update` then applies.
+        // Alt press, which `update` then applies.
         let mut synced = ModifierState::read(|_| false);
-        synced.update(u32::from(VK_LCONTROL), true);
+        synced.update(u32::from(VK_LMENU), true);
         assert!(synced.matches(&binding));
     }
 

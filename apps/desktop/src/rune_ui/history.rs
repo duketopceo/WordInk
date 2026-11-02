@@ -112,7 +112,7 @@ impl HistoryPane {
     }
 
     /// A retry is running or, in a fixture, was requested.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(super) fn is_retrying(&self) -> bool {
         self.retrying.is_some()
     }

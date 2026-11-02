@@ -315,6 +315,7 @@ pub enum Modifier {
 impl Modifier {
     /// The Mac's symbols; Windows names Command the Windows key and Option
     /// Alt, and Linux names them Super and Alt.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn keycap(self) -> &'static str {
         self.keycap_for(keyboard_kind::detected())
     }

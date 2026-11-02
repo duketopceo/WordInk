@@ -12,6 +12,7 @@ pub enum KeyboardKind {
 
 impl KeyboardKind {
     /// What the key beside Command (or Windows) is called.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub const fn option_label(self) -> &'static str {
         match self {
             Self::Apple => "Option",
