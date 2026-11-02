@@ -1392,11 +1392,15 @@ impl Backend {
             if let Some(event) = connection.poll_for_event()? {
                 match event {
                     Event::KeyPress(event) if event.detail == grabs.escape => {
-                        // A held key's repeats are not new presses.
-                        if !escape_down {
-                            inputs.push(Input::Escape);
+                        // Only bare Escape counts: a modified Escape reaching
+                        // here (another of Hex's shortcuts) is not a cancel.
+                        if is_bare_escape(u16::from(event.state), lock_bits) {
+                            // A held key's repeats are not new presses.
+                            if !escape_down {
+                                inputs.push(Input::Escape);
+                            }
+                            escape_down = true;
                         }
-                        escape_down = true;
                     }
                     Event::KeyRelease(event) if event.detail == grabs.escape => {
                         escape_down = false;
@@ -1703,22 +1707,23 @@ fn is_grab_conflict(error: &ReplyError) -> bool {
     )
 }
 
+/// Whether a key event's modifier state is bare: nothing but the lock keys.
+fn is_bare_escape(state: u16, lock_bits: u16) -> bool {
+    state & 0xff & !lock_bits == 0
+}
+
+/// Grabs Escape with no modifiers (and each Caps/Num Lock combination), so
+/// Ctrl+Esc, Alt+Esc and the like keep going to their apps. Returns the masks
+/// grabbed: empty when another client holds bare Escape.
 fn grab_escape(
     connection: &RustConnection,
     root: Window,
     escape: u8,
     bare_modifiers: &[ModMask],
 ) -> Result<Vec<ModMask>> {
-    match grab_variants(connection, root, escape, &[ModMask::ANY]) {
-        Ok(()) => Ok(vec![ModMask::ANY]),
-        Err(error) if is_grab_conflict(&error) => {
-            // A modified Escape shortcut must not prevent grabbing plain Escape.
-            match grab_variants(connection, root, escape, bare_modifiers) {
-                Ok(()) => Ok(bare_modifiers.to_vec()),
-                Err(error) if is_grab_conflict(&error) => Ok(Vec::new()),
-                Err(error) => Err(error).wrap_err("could not grab the Escape key"),
-            }
-        }
+    match grab_variants(connection, root, escape, bare_modifiers) {
+        Ok(()) => Ok(bare_modifiers.to_vec()),
+        Err(error) if is_grab_conflict(&error) => Ok(Vec::new()),
         Err(error) => Err(error).wrap_err("could not grab the Escape key"),
     }
 }
@@ -2846,6 +2851,28 @@ mod tests {
                 ModMask::M1 | ModMask::LOCK | ModMask::M2,
             ]
         );
+    }
+
+    #[test]
+    fn only_bare_escape_counts_toward_a_cancel() {
+        let lock_bits = u16::from(ModMask::LOCK) | u16::from(ModMask::M2);
+        assert!(is_bare_escape(0, lock_bits));
+        // Caps Lock and Num Lock are not modifiers for this purpose.
+        assert!(is_bare_escape(lock_bits, lock_bits));
+        for modified in [ModMask::CONTROL, ModMask::SHIFT, ModMask::M1, ModMask::M4] {
+            assert!(!is_bare_escape(u16::from(modified), lock_bits));
+            assert!(!is_bare_escape(u16::from(modified) | lock_bits, lock_bits));
+        }
+    }
+
+    #[test]
+    fn the_escape_grab_masks_are_bare_and_never_any_modifier() {
+        let masks = lock_variants(ModMask::default(), ModMask::M2);
+        let lock_bits = u16::from(ModMask::LOCK) | u16::from(ModMask::M2);
+        for mask in masks {
+            assert_ne!(mask, ModMask::ANY, "ANY would take Ctrl+Esc from other apps");
+            assert_eq!(u16::from(mask) & !lock_bits, 0, "only lock keys vary");
+        }
     }
 
     #[test]

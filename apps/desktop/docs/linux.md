@@ -482,8 +482,11 @@ so its key returns to your applications.
 Shortcuts need a non-modifier key. Modifier-only shortcuts, such as Super
 alone, are not supported on Linux.
 
-On X11, Hex grabs Escape only while Annotate draws, where it stops drawing. If
-another application holds it, drawing goes on and Hex logs it once.
+On X11, Hex grabs bare Escape only while Annotate draws or a dictation records
+(Esc twice cancels it). Modified Escape, such as Ctrl-Esc, always stays with
+your applications. If another application holds Escape, Hex logs it once. On
+Wayland there is no Esc path: set a Cancel shortcut in Settings to be able to
+cancel a dictation.
 
 Recording sounds are enabled at 50% volume by default, including when upgrading
 older settings. A start sound is queued immediately when the shortcut starts capture,

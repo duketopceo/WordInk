@@ -215,6 +215,10 @@ fn missing_model(ui: &Ui) -> Option<crate::desktop::onboarding::ModelProgress> {
 
 /// A shortcut's row with what a shortcuts portal granted, and the note when
 /// the desktop kept it.
+/// Said beside the Cancel shortcut: Esc can't cancel on Wayland.
+#[cfg(target_os = "linux")]
+const CANCEL_WAYLAND_NOTE: &str = "On Wayland, Esc can't cancel; set a Cancel shortcut here.";
+
 pub(super) fn shortcut_rows(
     ui: &Ui,
     p: Paint,
@@ -917,15 +921,23 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         ));
         // Only Linux's listener acts on it so far.
         #[cfg(target_os = "linux")]
-        rows.extend(shortcut_rows(
-            ui,
-            p,
-            "cancel",
-            &KEYBOARD,
-            tr("Cancel dictation"),
-            ShortcutTarget::Cancel,
-            Some(tr("Discards the recording; pressing Esc twice does too")),
-        ));
+        {
+            // Esc works only on X11; Wayland has no Esc path.
+            let help = format!(
+                "{} {}",
+                tr("Discards the recording; pressing Esc twice does too"),
+                tr(CANCEL_WAYLAND_NOTE)
+            );
+            rows.extend(shortcut_rows(
+                ui,
+                p,
+                "cancel",
+                &KEYBOARD,
+                tr("Cancel dictation"),
+                ShortcutTarget::Cancel,
+                Some(&help),
+            ));
+        }
     }
     let behaviors = RecordingAudioBehavior::ALL;
     rows.push(pick_row(
