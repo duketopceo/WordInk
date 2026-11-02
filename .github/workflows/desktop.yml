@@ -98,4 +98,7 @@ jobs:
         # the suite runs in full.
         run: cargo clippy --locked --bin wordink ${{ runner.os == 'Linux' && '--tests' || '' }} -- -D warnings
       - run: cargo build --locked --release
-      - run: cargo test --locked -- ${{ matrix.skip }}
+      # Split, because tests/keyboard_layout.rs has its own harness that
+      # rejects libtest's --skip.
+      - run: cargo test --locked --bin wordink -- ${{ matrix.skip }}
+      - run: cargo test --locked --test '*'
