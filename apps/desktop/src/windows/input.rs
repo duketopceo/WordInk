@@ -84,9 +84,9 @@ pub struct WindowsHotkey {
 impl Default for WindowsHotkey {
     fn default() -> Self {
         Self {
-            control: Some(ModifierSide::Either),
+            control: None,
             windows: None,
-            alt: None,
+            alt: Some(ModifierSide::Either),
             shift: None,
             key: Some("space".into()),
         }
@@ -1514,9 +1514,9 @@ mod tests {
     }
 
     #[test]
-    fn default_binding_is_ctrl_space() {
+    fn default_binding_is_alt_space() {
         let binding = WindowsHotkey::default();
-        assert_eq!(binding.label(), "Ctrl+Space");
+        assert_eq!(binding.label(), "Alt+Space");
         assert!(binding.validate().is_ok());
     }
 
