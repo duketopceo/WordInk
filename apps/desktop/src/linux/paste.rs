@@ -3,7 +3,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -42,8 +42,8 @@ const MODIFIER_WAIT_LIMIT: Duration = Duration::from_secs(2);
 pub(crate) struct LinuxPaster {
     backend: Backend,
     stop: Arc<AtomicBool>,
-    /// The terminal-paste preference, which the window changes live.
-    paste_with_shift: Arc<AtomicBool>,
+    /// When the paste shortcut is Ctrl+Shift+V: the terminal-paste preference, which the window changes live.
+    paste_with_shift: Arc<AtomicU8>,
     /// When the shortcut that asked for the paste has let go of its keys.
     keys: ShortcutKeys,
     selection: Selection,
@@ -243,7 +243,7 @@ fn copied_only(
 impl LinuxPaster {
     pub(crate) fn new(
         stop: Arc<AtomicBool>,
-        paste_with_shift: Arc<AtomicBool>,
+        paste_with_shift: Arc<AtomicU8>,
         keys: ShortcutKeys,
     ) -> Result<Self> {
         let (backend, selection) = match LinuxSession::detect() {
@@ -344,7 +344,10 @@ impl LinuxPaster {
     }
 
     fn send_paste(&mut self, mime: Mime, bytes: &[u8]) -> Result<()> {
-        let paste_with_shift = self.paste_with_shift.load(Ordering::Relaxed);
+        let paste_with_shift = crate::terminal_paste::paste_with_shift(
+            crate::terminal_paste::load(&self.paste_with_shift),
+            crate::linux::context::focused_app_id,
+        );
         match &mut self.backend {
             Backend::X11(paster) => {
                 paster.paste(mime, bytes, &self.stop, &self.keys, paste_with_shift)?

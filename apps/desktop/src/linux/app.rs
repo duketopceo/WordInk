@@ -1706,7 +1706,7 @@ mod tests {
         let (mut host, received) = listening_host();
         let before = host.snapshot();
         let mut candidate = host.settings.clone();
-        candidate.paste_with_shift = !candidate.paste_with_shift;
+        candidate.terminal_paste = crate::app_settings::TerminalPaste::Never;
         candidate.indicator_position = crate::app_settings::IndicatorPosition::Bottom;
         candidate.sound_effect_volume = 0.25;
         host.adopt_settings(candidate.clone());

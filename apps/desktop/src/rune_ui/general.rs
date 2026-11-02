@@ -21,7 +21,7 @@ use super::platform::PlatformRequest;
 use super::settings::{self as s, Capture, Face};
 use super::{Menu, Pane, Request, ShortcutTarget, Ui};
 use crate::app_settings::{
-    IndicatorPosition, IndicatorStyle, RecordingAudioBehavior, UpdateChannel,
+    IndicatorPosition, IndicatorStyle, RecordingAudioBehavior, TerminalPaste, UpdateChannel,
 };
 use crate::desktop::host::DesktopAction;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
@@ -1068,18 +1068,36 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         layer,
     ));
     if ui.platform.caps.terminal_paste {
+        let control = pick_select(
+            ui,
+            p,
+            "terminal-paste",
+            vec![tr("Auto"), tr("Always"), tr("Never")],
+            match settings.terminal_paste {
+                TerminalPaste::Auto => 0,
+                TerminalPaste::Always => 1,
+                TerminalPaste::Never => 2,
+            },
+            |ui, index| {
+                let mode = [
+                    TerminalPaste::Auto,
+                    TerminalPaste::Always,
+                    TerminalPaste::Never,
+                ][index];
+                if ui.settings.terminal_paste != mode {
+                    ui.update(|settings| settings.terminal_paste = mode);
+                }
+            },
+            layer,
+        );
         rows.push(
-            icon_toggle_row(
+            icon_row(
                 p,
                 "terminal-paste",
                 &TERMINAL,
                 tr("Terminal paste"),
-                tr("Paste with Ctrl+Shift+V so terminals accept it"),
-                settings.paste_with_shift,
-                |ui: &mut Ui| {
-                    let enabled = !ui.settings.paste_with_shift;
-                    ui.update(|settings| settings.paste_with_shift = enabled);
-                },
+                Some(tr("Auto pastes with Ctrl+Shift+V in terminals; desktops that hide the focused window use Ctrl+V")),
+                control,
             )
             .into(),
         );

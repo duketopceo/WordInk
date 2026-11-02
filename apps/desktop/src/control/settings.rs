@@ -480,9 +480,9 @@ const KEYS: &[Key] = &[
         "Start listening when WordInk opens (Windows and Linux)",
     ),
     key(
-        "paste_with_shift",
-        Kind::Bool,
-        "Paste with Ctrl-Shift-V for terminals (Linux and Windows)",
+        "terminal_paste",
+        Kind::Choice(&["auto", "always", "never"]),
+        "Paste with Ctrl-Shift-V: in terminals only (auto), always, or never (Linux and Windows)",
     ),
     key(
         "gnome_keyboard_shortcuts",
@@ -2080,6 +2080,27 @@ mod tests {
         assert!(change.settings.double_tap_only);
         let change = apply(&change.settings, "double_tap_lock", "off", &rules()).unwrap();
         assert!(!change.settings.double_tap_only);
+    }
+
+    #[test]
+    fn terminal_paste_sets_and_reads_back_as_a_choice() {
+        let settings = AppSettings::default();
+        let read = |settings: &AppSettings| get(settings, "terminal_paste").unwrap().remove(0);
+        let value = read(&settings);
+        assert_eq!(value.value, "auto");
+        assert_eq!(value.choices, ["auto", "always", "never"]);
+        for (raw, expected) in [
+            ("always", crate::app_settings::TerminalPaste::Always),
+            ("never", crate::app_settings::TerminalPaste::Never),
+            ("auto", crate::app_settings::TerminalPaste::Auto),
+        ] {
+            let changed = apply(&settings, "terminal_paste", raw, &rules())
+                .unwrap()
+                .settings;
+            assert_eq!(changed.terminal_paste, expected);
+            assert_eq!(read(&changed).value, raw);
+        }
+        assert!(apply(&settings, "terminal_paste", "sometimes", &rules()).is_err());
     }
 
     #[test]

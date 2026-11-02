@@ -61,6 +61,41 @@ pub(crate) fn capture() -> ContextSnapshot {
     }
 }
 
+/// The focused window's Wayland app ID or X11 window class, for choosing
+/// the paste shortcut. `None` where the desktop reports no focused window
+/// (GNOME and KDE on Wayland). Reads no accessibility data.
+pub(crate) fn focused_app_id() -> Option<String> {
+    if crate::linux::session::LinuxSession::detect().is_wayland() {
+        wayland_focused_window()?.app_id
+    } else {
+        x11_focused_class()
+    }
+}
+
+/// `WM_CLASS` of the active window: the instance and class names, joined by a
+/// space, so either can name a terminal.
+fn x11_focused_class() -> Option<String> {
+    let (connection, screen) = x11rb::connect(None).ok()?;
+    let root = connection.setup().roots.get(screen)?.root;
+    let active = intern(&connection, b"_NET_ACTIVE_WINDOW")?;
+    let window = property(&connection, root, active, AtomEnum::WINDOW.into())?;
+    if window == 0 {
+        return None;
+    }
+    let reply = connection
+        .get_property(false, window, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 256)
+        .ok()?
+        .reply()
+        .ok()?;
+    let names = reply
+        .value
+        .split(|byte| *byte == 0)
+        .filter(|name| !name.is_empty())
+        .map(|name| String::from_utf8_lossy(name).into_owned())
+        .collect::<Vec<_>>();
+    (!names.is_empty()).then(|| names.join(" "))
+}
+
 fn x11_focused_window() -> Option<FocusedWindow> {
     let (connection, screen) = x11rb::connect(None).ok()?;
     let root = connection.setup().roots.get(screen)?.root;

@@ -3219,12 +3219,12 @@ fn with_linux_paster(
     let mut paster = PASTER.lock().unwrap_or_else(|error| error.into_inner());
     if paster.is_none() {
         let shift = crate::app_settings::AppSettings::load()
-            .map(|settings| settings.paste_with_shift)
-            .unwrap_or(false);
+            .map(|settings| settings.terminal_paste)
+            .unwrap_or_default();
         *paster = Some(
             crate::linux::paste::LinuxPaster::new(
                 Arc::default(),
-                Arc::new(AtomicBool::new(shift)),
+                crate::terminal_paste::share(shift),
                 Default::default(),
             )
             .map_err(|error| anyhow::anyhow!("{error:#}"))?,

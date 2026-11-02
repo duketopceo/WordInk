@@ -72,6 +72,7 @@ impl AppSettings {
         settings.repair_special_keys();
         settings.normalize_double_tap_settings();
         settings.migrate_legacy_replacements();
+        settings.migrate_legacy_terminal_paste();
         settings.normalize_mode_application_names();
         settings.migrate_disabled_transcription_model();
         for hints in &hints {
