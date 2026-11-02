@@ -290,10 +290,7 @@ impl LocalTranscriber {
     ) -> Result<Self> {
         let definition = validate(selection)?;
         if !crate::transcription::models::is_installed(definition, &selection.language) {
-            return Err(eyre!(
-                "{} is not installed; run `cargo run -- model install`",
-                definition.name
-            ));
+            return Err(eyre!("{}", model_missing_message()));
         }
         let path = model_path(definition)?;
         let model = Model::load_with(
@@ -757,10 +754,23 @@ pub(crate) struct SwapFailed {
     pub(crate) error: String,
 }
 
+/// What a user sees when the chosen speech model is not on disk.
+fn model_missing_message() -> String {
+    "No speech model installed. Install one in Settings \u{203a} Speech model, or run `wordink model install`.".to_string()
+}
+
 #[cfg(test)]
 mod model_swap_tests {
     use super::*;
     use crate::transcription::models::TranscriptionModelId;
+
+    #[test]
+    fn a_missing_model_points_to_settings_not_to_cargo() {
+        let message = model_missing_message();
+        assert!(message.contains("Settings \u{203a} Speech model"), "{message}");
+        assert!(message.contains("wordink model install"), "{message}");
+        assert!(!message.contains("cargo"), "{message}");
+    }
 
     #[test]
     fn an_unchanged_selection_loads_nothing() {
