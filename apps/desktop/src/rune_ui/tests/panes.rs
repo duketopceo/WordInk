@@ -2300,3 +2300,35 @@ fn an_empty_period_says_so_instead_of_showing_zeros() {
     assert!(rt.find("usage-empty").is_some());
     assert!(rt.find("usage-words").is_none());
 }
+
+/// General's Speech model row names the model that transcribes: the cloud
+/// provider's model when dictation routes there, else the local model.
+#[test]
+fn speech_model_row_names_the_model_that_transcribes() {
+    use crate::transcription::cloud::{EngineChoice, Provider, force_route};
+    let speech_row = |engine: EngineChoice, route: Option<Provider>, model: Option<&str>| {
+        force_route(route);
+        let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+        state.settings.engine = engine;
+        state.settings.engine_model = model.map(str::to_owned);
+        let mut rt = runtime_for(state, true, PANE_SIZE);
+        rt.update(|ui, _| ui.pane = Pane::General);
+        settle(&mut rt);
+        let label = element(&rt, "transcription-control").label;
+        (label, texts(&rt).join(" | "))
+    };
+    let (label, shown) = speech_row(EngineChoice::Auto, Some(Provider::Groq), None);
+    assert_eq!(label.as_deref(), Some("Groq \u{b7} whisper-large-v3-turbo"));
+    assert!(shown.contains("Local model: Parakeet v3"), "{shown}");
+    let (label, _) = speech_row(
+        EngineChoice::Openai,
+        Some(Provider::OpenAi),
+        Some("whisper-1"),
+    );
+    assert_eq!(label.as_deref(), Some("OpenAI \u{b7} whisper-1"));
+    let (label, _) = speech_row(EngineChoice::Gateway, Some(Provider::Gateway), None);
+    assert_eq!(label.as_deref(), Some("WordInk gateway"));
+    let (label, shown) = speech_row(EngineChoice::Auto, None, None);
+    assert_eq!(label.as_deref(), Some("Parakeet v3"));
+    assert!(!shown.contains("Local model:"), "{shown}");
+}

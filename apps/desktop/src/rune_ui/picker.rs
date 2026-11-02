@@ -19,6 +19,7 @@ use super::lists::error_panel;
 use super::{Request, Ui};
 use crate::app_settings::AppSettings;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
+use crate::transcription::cloud::{self, EngineChoice, Provider};
 use crate::transcription::models::{
     self as transcription_models, AUTO_LANGUAGE, BenchmarkRecord, ModelDefinition,
     ModelPreparationStage, ModelRuntime, Recommendation, TranscriptionModelId,
@@ -270,6 +271,10 @@ fn cancel(ui: &mut Ui) {
 /// its default language, which Settings then names.
 fn choose(ui: &mut Ui, model: &'static ModelDefinition) {
     ui.picker.clear_deletion();
+    // Picking a local model moves dictation off a cloud engine.
+    if cloud::route_for_choice(ui.settings.engine).is_some() {
+        ui.update(|settings| settings.engine = EngineChoice::Local);
+    }
     let current = &ui.settings.transcription;
     let installed = ui.picker.installed(model, &current.language);
     if transcription_selection_is_active(current, model, installed) {
@@ -384,9 +389,23 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     if let Some(found) = super::found::section(ui, p) {
         models = models.child(found);
     }
+    // The group that transcribes now comes first.
+    let mut cloud = vec![group_heading(p, "cloud-heading", tr("Cloud"))];
+    for (index, (provider, model)) in cloud_models(ui).into_iter().enumerate() {
+        cloud.push(cloud_card(ui, p, index, provider, model));
+    }
+    let mut local = vec![group_heading(p, "local-heading", tr("On this computer"))];
     let shown = shown_models(ui, &language);
     for (index, (model, recommendation)) in shown.iter().copied().enumerate() {
-        models = models.child(model_card(ui, p, index, model, recommendation, &language));
+        local.push(model_card(ui, p, index, model, recommendation, &language));
+    }
+    let groups = if cloud::route_for_choice(ui.settings.engine).is_some() {
+        [cloud, local]
+    } else {
+        [local, cloud]
+    };
+    for child in groups.into_iter().flatten() {
+        models = models.child(child);
     }
     let header = row()
         .key("picker-header")
@@ -395,7 +414,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         .pr(12.0)
         .center_y()
         .child(
-            text(tr("Local transcription"))
+            text(tr("Speech model"))
                 .key("title")
                 .font(p.k.ty.body_medium)
                 .color(p.text())
@@ -602,6 +621,164 @@ enum Status {
     },
 }
 
+/// A small heading over the picker's Cloud and On this computer groups.
+fn group_heading(p: Paint, key: &'static str, label: &str) -> El {
+    text(label)
+        .key(key)
+        .font(p.k.ty.small_medium)
+        .color(p.muted())
+        .pt(4.0)
+}
+
+/// The cloud models the picker offers: each provider's fixed models, and
+/// for OpenRouter (a catalogue too long to list here) and the gateway, the
+/// one model dictation would use.
+fn cloud_models(ui: &Ui) -> Vec<(Provider, String)> {
+    Provider::ALL
+        .iter()
+        .flat_map(|&provider| match provider {
+            Provider::OpenRouter | Provider::Gateway => vec![(
+                provider,
+                cloud::model_for(provider, ui.settings.engine_model.as_deref()),
+            )],
+            _ => provider
+                .fixed_models()
+                .iter()
+                .map(|model| (provider, (*model).to_owned()))
+                .collect(),
+        })
+        .collect()
+}
+
+/// Whether dictation transcribes with `provider`'s `model` now.
+fn cloud_model_is_active(ui: &Ui, provider: Provider, model: &str) -> bool {
+    cloud::route_for_choice(ui.settings.engine) == Some(provider)
+        && (provider == Provider::Gateway
+            || cloud::model_for(provider, ui.settings.engine_model.as_deref()) == model)
+}
+
+/// Moves dictation to `provider`'s `model`. Auto stays Auto when it already
+/// runs on that provider, so it still falls back to the local model
+/// without a key.
+fn choose_cloud(ui: &mut Ui, provider: Provider, model: &str) {
+    let engine = if cloud::route_for_choice(ui.settings.engine) == Some(provider)
+        && ui.settings.engine == EngineChoice::Auto
+    {
+        EngineChoice::Auto
+    } else {
+        EngineChoice::ALL
+            .into_iter()
+            .find(|choice| choice.provider() == Some(provider))
+            .unwrap_or(EngineChoice::Auto)
+    };
+    let model = (provider != Provider::Gateway).then(|| model.to_owned());
+    ui.update(|settings| {
+        settings.engine = engine;
+        settings.engine_model = model;
+    });
+    close(ui);
+}
+
+/// One cloud model's card, laid out like the local cards: name, provider,
+/// price, and Use, or how to add the key when the provider has none.
+fn cloud_card(ui: &Ui, p: Paint, index: usize, provider: Provider, model: String) -> El {
+    let c = &p.k.c;
+    let active = cloud_model_is_active(ui, provider, &model);
+    let keyed = cloud::has_key(provider);
+    let name = if provider == Provider::Gateway {
+        provider.name().to_owned()
+    } else {
+        model.clone()
+    };
+    let mut actions = row().key("actions").gap(8.0).center_y();
+    if active {
+        actions = actions.child(
+            row()
+                .key("active")
+                .gap(6.0)
+                .center_y()
+                .child(super::controls::status_dot(p.accent()))
+                .child(
+                    text(tr("Active"))
+                        .key("label")
+                        .font(p.k.ty.ui_medium)
+                        .color(p.text()),
+                ),
+        );
+    } else if keyed {
+        let chosen = model.clone();
+        actions = actions.child(button(
+            p,
+            "choose-cloud-model",
+            tr("Use"),
+            ButtonKind::Secondary,
+            move |ui: &mut Ui, _| choose_cloud(ui, provider, &chosen),
+        ));
+    }
+    let price = cloud::PRICES
+        .iter()
+        .find(|price| price.provider == provider.id() && price.model == model)
+        .map(|price| tr_fill("${} / hour", &format!("{:.3}", price.usd_per_hour)));
+    let metadata = if keyed {
+        tr("Audio is sent to this provider").to_owned()
+    } else if provider == Provider::Gateway {
+        tr("Set gateway_url in settings.json and the token with `wordink keys set gateway`")
+            .to_owned()
+    } else {
+        tr_fill("Set the key with `wordink keys set {}`", provider.id())
+    };
+    let details = [Some(provider.name().to_owned()), price, Some(metadata)]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ");
+    let mut card = col()
+        .key(format!("cloud{index}"))
+        .px(16.0)
+        .py(10.0)
+        .gap(4.0)
+        .radius(p.k.radius.lg)
+        .fill(if active { c.layer_02 } else { c.bg_base })
+        .border(
+            p.hair,
+            if active {
+                c.border_focus
+            } else {
+                c.border_weak
+            },
+        )
+        .child(
+            row()
+                .key("top")
+                .gap(12.0)
+                .center_y()
+                .child(
+                    text(name)
+                        .key("name")
+                        .font(p.k.ty.body_medium)
+                        .color(if keyed { p.text() } else { p.muted() })
+                        .grow(1.0)
+                        .shrink(),
+                )
+                .child(actions),
+        )
+        .child(
+            text(details)
+                .key("metadata")
+                .font(p.k.ty.small)
+                .color(p.muted())
+                .wrap(),
+        );
+    if !active && keyed {
+        card = card
+            .role("button")
+            .hover(c.hover)
+            .press(c.pressed)
+            .on_press(move |ui: &mut Ui| choose_cloud(ui, provider, &model));
+    }
+    card
+}
+
 fn model_card(
     ui: &Ui,
     p: Paint,
@@ -614,7 +791,8 @@ fn model_card(
     let installed = ui.picker.installed(model, model.language_for(language));
     let preparation = preparation(ui, model);
     let preparing = preparation.is_some();
-    let active = transcription_selection_is_active(&ui.settings.transcription, model, installed);
+    let active = cloud::route_for_choice(ui.settings.engine).is_none()
+        && transcription_selection_is_active(&ui.settings.transcription, model, installed);
     let status = if let Some((label, progress)) = preparation {
         Status::Preparing { label, progress }
     } else if active {

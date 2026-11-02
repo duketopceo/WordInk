@@ -91,7 +91,7 @@ impl Provider {
     /// from its catalogue.
     pub const fn fixed_models(self) -> &'static [&'static str] {
         match self {
-            Self::Groq => &["whisper-large-v3-turbo"],
+            Self::Groq => &["whisper-large-v3-turbo", "whisper-large-v3"],
             Self::OpenAi => &["gpt-4o-mini-transcribe", "whisper-1"],
             Self::Deepgram => &["nova-3"],
             Self::Gateway => &["gateway"],
@@ -451,6 +451,19 @@ thread_local! {
         const { std::cell::Cell::new(None) };
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The providers [`has_key`] reports on this test thread.
+    static KEYS_OVERRIDE: std::cell::Cell<Option<&'static [Provider]>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Forces [`has_key`] on this thread to report only `keys`, for tests.
+#[cfg(test)]
+pub(crate) fn force_keys(keys: &'static [Provider]) {
+    KEYS_OVERRIDE.with(|forced| forced.set(Some(keys)));
+}
+
 /// Forces [`route_with`] on this thread to `route`, for tests.
 #[cfg(test)]
 pub(crate) fn force_route(route: Option<Provider>) {
@@ -521,6 +534,18 @@ pub fn refresh_key_in_background() {
     if spawned.is_err() {
         guard.end_refresh();
     }
+}
+
+/// Whether `provider` has a key (the gateway: a token) the window can use.
+/// Reads only the in-memory cache, so it never blocks.
+pub fn has_key(provider: Provider) -> bool {
+    // Tests never see this machine's keys: only what they force.
+    #[cfg(test)]
+    return KEYS_OVERRIDE
+        .with(std::cell::Cell::get)
+        .is_some_and(|keys| keys.contains(&provider));
+    #[cfg(not(test))]
+    cached_key(provider).is_some()
 }
 
 /// The cached key. Never blocks: a stale or missing entry schedules a
@@ -691,8 +716,8 @@ pub struct Price {
 /// priced from the catalogue instead.
 ///
 /// Sources, checked 2026-11-02:
-/// - Groq whisper-large-v3-turbo: $0.04/hour, 10 s minimum per request
-///   (groq.com/pricing).
+/// - Groq whisper-large-v3-turbo: $0.04/hour and whisper-large-v3:
+///   $0.111/hour, 10 s minimum per request (console.groq.com/docs/speech-to-text).
 /// - OpenAI gpt-4o-mini-transcribe: $0.003/minute and whisper-1: $0.006/minute
 ///   (developers.openai.com/api/docs/pricing; OpenAI calls the first an
 ///   estimate, since the model bills by token).
@@ -703,6 +728,12 @@ pub const PRICES: &[Price] = &[
         provider: "groq",
         model: "whisper-large-v3-turbo",
         usd_per_hour: 0.04,
+        minimum_seconds: MINIMUM_BILLED_SECONDS,
+    },
+    Price {
+        provider: "groq",
+        model: "whisper-large-v3",
+        usd_per_hour: 0.111,
         minimum_seconds: MINIMUM_BILLED_SECONDS,
     },
     Price {
