@@ -124,6 +124,16 @@ pub enum MeetingsCommand {
         #[arg(long, conflicts_with_all = ["from", "to"])]
         chapter: Option<usize>,
     },
+    /// Export a meeting's whole transcript as a file or to stdout, by id,
+    /// unique prefix, or latest.
+    Export {
+        id: String,
+        #[arg(long, value_enum, default_value_t = ExportFormat::Md)]
+        format: ExportFormat,
+        /// Write here instead of stdout; never replaces an existing file.
+        #[arg(long, short)]
+        output: Option<std::path::PathBuf>,
+    },
     /// List a meeting's chapters (Labs), by id, unique
     /// prefix, or latest.
     Chapters {
@@ -161,6 +171,34 @@ pub enum MeetingsCommand {
         #[command(flatten)]
         output: crate::control::cli::Output,
     },
+}
+
+/// What `meetings export` writes. Markdown only: speaker turns labelled by
+/// source, the same text `meetings show --md` prints.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum ExportFormat {
+    Md,
+}
+
+/// Writes meeting `id`'s whole transcript in `format` to `out`.
+pub(crate) fn export_meeting(
+    library: &Library,
+    id: &str,
+    format: ExportFormat,
+    out: &mut impl Write,
+    now: u64,
+) -> Result<()> {
+    let meeting = resolve(library, id)?;
+    match format {
+        ExportFormat::Md => {
+            write!(
+                out,
+                "{}",
+                library.markdown(&meeting.id, OffsetRange::default(), now)?
+            )?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -629,6 +667,20 @@ pub fn meetings(command: &MeetingsCommand) -> Result<()> {
                 }
             }
         }
+        MeetingsCommand::Export { id, format, output } => match output {
+            None => export_meeting(&library, id, *format, &mut out, now),
+            Some(path) => {
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(path)
+                    .wrap_err_with(|| format!("could not create {}", path.display()))?;
+                export_meeting(&library, id, *format, &mut file, now)?;
+                file.sync_all()?;
+                writeln!(out, "Exported {id} to {}", path.display())?;
+                Ok(())
+            }
+        },
         MeetingsCommand::Chapters { id, json } => {
             let meeting = resolve(&library, id)?;
             if *json {
