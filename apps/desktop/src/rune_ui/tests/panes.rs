@@ -786,8 +786,10 @@ fn the_practice_game_fits_an_823_px_window() {
 #[test]
 fn the_sounds_pane_shows_a_stored_volume_at_its_true_value() {
     use super::super::settings::{sound_volume_index, sound_volume_options};
-    let mut settings = AppSettings::default();
-    settings.sound_effect_volume = 0.8;
+    let mut settings = AppSettings {
+        sound_effect_volume: 0.8,
+        ..AppSettings::default()
+    };
     let options = sound_volume_options(&settings);
     let index = sound_volume_index(&settings);
     assert_eq!(options[index], ("80%", 0.8));
