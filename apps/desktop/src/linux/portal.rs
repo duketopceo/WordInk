@@ -1008,9 +1008,6 @@ mod tests {
         (root, entries)
     }
 
-    const OLD: &str =
-        "[Desktop Entry]\nName=WordInk\nExec=\"/home/a/.local/bin/hex\"\nX-Hex-Managed=true\n";
-
     #[test]
     fn entries_hex_wrote_name_its_icon() {
         let (root, entries) = entries("icon");

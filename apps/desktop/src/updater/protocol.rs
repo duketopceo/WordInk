@@ -566,4 +566,69 @@ mod tests {
             assert_eq!(resolve_url(manifest, refused), None, "{refused}");
         }
     }
+
+    /// The shape `packaging/linux/write-manifest.sh` writes for a release.
+    #[test]
+    fn the_release_workflows_manifest_is_accepted_and_names_the_signed_linux_target() {
+        let sha = |c: char| c.to_string().repeat(64);
+        let url = |name: &str| {
+            format!("https://github.com/duketopceo/WordInk/releases/download/desktop-v1.0.0/{name}")
+        };
+        let manifest = serde_json::json!({
+            "schema": 1, "app": "hex", "artifact": "desktop", "channel": "stable",
+            "sequence": 1793613921u64, "published_at": "2026-11-02T10:05:21Z",
+            "release": {
+                "version": "1.0.0",
+                "notes_url": "https://github.com/duketopceo/WordInk/releases/tag/desktop-v1.0.0",
+                "rollout_percent": 100, "required": false, "revoked_versions": [],
+                "distributions": [{ "kind": "direct" }],
+                "targets": {
+                    "linux-x64": { "url": url("wordink-1.0.0-linux-x64"), "sha256": sha('a'), "size": 10 },
+                    "linux-x64-sig": { "url": url("wordink-1.0.0-linux-x64.sig"), "sha256": sha('b'), "size": 64 },
+                    "macos-arm64": { "url": url("wordink-1.0.0-macos-arm64.zip"), "sha256": sha('c'), "size": 10 },
+                    "windows-x64": { "url": url("wordink-1.0.0-windows-x64.zip"), "sha256": sha('d'), "size": 10 }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_manifest(&manifest).expect("the release manifest parses");
+        assert!(parsed.release.target("linux-x64-sig").is_some());
+        let install = |version: &str, sha256: Option<String>| Install {
+            version: version.into(),
+            target: "linux-x64".into(),
+            distribution: "direct".into(),
+            rollout_bucket: 0,
+            sha256,
+            channel: Some("stable".into()),
+        };
+        // An older install is told to take the signed Linux executable...
+        match decide(
+            "hex",
+            "desktop",
+            "stable",
+            &manifest,
+            &install("0.9.0", Some(sha('z'))),
+        ) {
+            Decision::Install {
+                version, target, ..
+            } => {
+                assert_eq!(version, "1.0.0");
+                assert_eq!(target.url, url("wordink-1.0.0-linux-x64"));
+            }
+            other => panic!("{other:?}"),
+        }
+        // ...and the running release is up to date.
+        assert!(matches!(
+            decide(
+                "hex",
+                "desktop",
+                "stable",
+                &manifest,
+                &install("1.0.0", Some(sha('a')))
+            ),
+            Decision::None {
+                reason: "up_to_date"
+            }
+        ));
+    }
 }

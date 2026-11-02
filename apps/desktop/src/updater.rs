@@ -38,13 +38,18 @@ pub use platform::finish_on_launch;
 
 const APP: &str = "hex";
 const ARTIFACT: &str = "desktop";
-/// WordInk's GitHub Releases page: where "download" links point. A placeholder
-/// until U14 publishes releases there.
+/// WordInk's GitHub Releases page: where "download" links point, and the
+/// fallback for a download-only install whose release names no file.
 pub(crate) const RELEASES_URL: &str = "https://github.com/duketopceo/WordInk/releases";
-/// The release-manifest origin. `None` until U14 publishes a manifest, which
-/// keeps update checks off: nothing contacts Anomaly's release service.
-/// `HEX_RELEASE_BASE_URL` (HTTPS) still points a build at a fixture service.
-const ORIGIN: Option<&str> = None;
+/// The stable manifest, a schema-1 release asset (`stable.json`) of the
+/// newest `desktop-v*` GitHub Release. Its targets name that release's assets
+/// by absolute `github.com` URLs, the manifest's own host, which
+/// `protocol::resolve_url` requires; GitHub then redirects the download to
+/// `objects.githubusercontent.com`, and the transport follows HTTPS redirects.
+/// Only a stable channel is published here. `HEX_RELEASE_BASE_URL` (HTTPS)
+/// points a build at a fixture service that serves every channel.
+const STABLE_MANIFEST_URL: &str =
+    "https://github.com/duketopceo/WordInk/releases/latest/download/stable.json";
 const STARTUP_DELAY: Duration = Duration::from_secs(10);
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// Dev builds land on every push to dev, so the Dev channel checks often.
@@ -94,6 +99,39 @@ impl Method {
             Self::Direct { channel } => channel,
             _ => "stable",
         }
+    }
+}
+
+/// Why this build never checks for updates, if it doesn't. A local build
+/// (`HEX_LOCAL_BUILD=1`, made from a checkout) is a source build: its
+/// checkout updates it, never a release.
+fn disabled_status(
+    test_build: bool,
+    local_build: bool,
+    managed: impl FnOnce() -> bool,
+    method: &Method,
+) -> Option<DesktopUpdateStatus> {
+    if test_build {
+        Some(DesktopUpdateStatus::Unavailable)
+    } else if local_build || *method == Method::Source {
+        Some(DesktopUpdateStatus::SourceBuild)
+    } else if managed() {
+        Some(DesktopUpdateStatus::Managed)
+    } else {
+        None
+    }
+}
+
+/// Only Linux builds are signed (ed25519, `updater/linux.rs`), so only Linux
+/// installs itself. macOS and Windows ship unsigned until signing exists
+/// (R30): whatever this install looks like, their updater links to the
+/// release and never downloads, stages or runs anything. A checkout build
+/// stays a source build.
+fn update_method(method: Method, signed_platform: bool) -> Method {
+    if signed_platform || method == Method::Source {
+        method
+    } else {
+        Method::DownloadOnly
     }
 }
 
@@ -252,20 +290,13 @@ pub struct Updater {
 
 impl Updater {
     pub fn start() -> Self {
-        let method = platform::method();
-        let disabled = if option_env!("HEX_TEST_BUILD") == Some("1") {
-            Some(DesktopUpdateStatus::Unavailable)
-        } else if release_origin().is_none() {
-            Some(DesktopUpdateStatus::Unavailable)
-        } else if crate::app_paths::is_local_build() {
-            Some(DesktopUpdateStatus::SourceBuild)
-        } else if managed_by_policy() {
-            Some(DesktopUpdateStatus::Managed)
-        } else if method == Method::Source {
-            Some(DesktopUpdateStatus::SourceBuild)
-        } else {
-            None
-        };
+        let method = update_method(platform::method(), cfg!(target_os = "linux"));
+        let disabled = disabled_status(
+            option_env!("HEX_TEST_BUILD") == Some("1"),
+            crate::app_paths::is_local_build(),
+            managed_by_policy,
+            &method,
+        );
         let checks = disabled.is_none();
         let shared = Arc::new(Shared::new(
             match disabled {
@@ -607,7 +638,8 @@ fn check(
     let channel = channel(method, setting, &home);
     let user_agent = transport::user_agent(&home, crate::VERSION);
     *lock(&shared.last) = Some((channel.clone(), std::time::Instant::now()));
-    let manifest_url = manifest_url(&channel);
+    let manifest_url = manifest_url(&channel)
+        .ok_or_else(|| eyre!("WordInk publishes only the stable update channel"))?;
     let timeout = if restarting {
         RESTART_MANIFEST_TIMEOUT
     } else {
@@ -670,15 +702,7 @@ fn check(
             version, target, ..
         } => {
             if *method == Method::DownloadOnly {
-                let url = protocol::parse_manifest(&manifest)
-                    .and_then(|manifest| {
-                        manifest
-                            .release
-                            .target(platform::DOWNLOAD_TARGET)
-                            .and_then(|target| protocol::resolve_url(&manifest_url, &target.url))
-                            .or(manifest.release.notes_url)
-                    })
-                    .unwrap_or_else(|| RELEASES_URL.into());
+                let url = download_page_url(&manifest, &manifest_url, platform::DOWNLOAD_TARGET);
                 return Ok(State::Download { url });
             }
             let url = protocol::resolve_url(&manifest_url, &target.url)
@@ -708,6 +732,20 @@ fn check(
             Ok(State::Ready)
         }
     }
+}
+
+/// Where a download-only install is sent: its target's file in the release,
+/// else the release notes, else the Releases page.
+fn download_page_url(manifest: &str, manifest_url: &str, target: &str) -> String {
+    protocol::parse_manifest(manifest)
+        .and_then(|manifest| {
+            manifest
+                .release
+                .target(target)
+                .and_then(|target| protocol::resolve_url(manifest_url, &target.url))
+                .or(manifest.release.notes_url)
+        })
+        .unwrap_or_else(|| RELEASES_URL.into())
 }
 
 /// What the staged dev build changed; nothing for other channels or when
@@ -761,17 +799,27 @@ fn replaces_staged(decision: &Decision, staged_sha256: &str) -> bool {
 }
 
 /// `HEX_RELEASE_BASE_URL` (HTTPS only) points a build at a service origin,
-/// for local tests against a fixture service; otherwise [`ORIGIN`].
+/// for local tests against a fixture service.
 fn release_origin() -> Option<String> {
     std::env::var("HEX_RELEASE_BASE_URL")
         .ok()
         .filter(|origin| origin.starts_with("https://"))
-        .or_else(|| ORIGIN.map(str::to_owned))
 }
 
-fn manifest_url(channel: &str) -> String {
-    let origin = release_origin().unwrap_or_default();
-    format!("{}/{APP}/{ARTIFACT}/{channel}.json", origin.trim_end_matches('/'))
+/// The manifest of `channel`: the fixture service's, when one is set, else
+/// WordInk's GitHub Release, which publishes stable only.
+fn manifest_url(channel: &str) -> Option<String> {
+    manifest_url_for(release_origin().as_deref(), channel)
+}
+
+fn manifest_url_for(origin: Option<&str>, channel: &str) -> Option<String> {
+    match origin {
+        Some(origin) => Some(format!(
+            "{}/{APP}/{ARTIFACT}/{channel}.json",
+            origin.trim_end_matches('/')
+        )),
+        None => (channel == "stable").then(|| STABLE_MANIFEST_URL.to_owned()),
+    }
 }
 
 /// This build's target SHA-256, when the platform can tell (the target is
@@ -1161,12 +1209,137 @@ mod tests {
     }
 
     #[test]
-    fn no_release_service_is_contacted_until_one_is_configured() {
-        if std::env::var_os("HEX_RELEASE_BASE_URL").is_none() {
-            assert!(release_origin().is_none());
-        }
+    fn the_stable_manifest_is_a_release_asset_of_this_repository() {
         assert_eq!(
-            notes::fetch("ua", Path::new("/nonexistent/scratch"), "0.0.0-dev-1", "0.0.0-dev-2"),
+            manifest_url_for(None, "stable").as_deref(),
+            Some("https://github.com/duketopceo/WordInk/releases/latest/download/stable.json")
+        );
+        // GitHub publishes no other channel; the fixture service serves any.
+        assert_eq!(manifest_url_for(None, "dev"), None);
+        assert_eq!(
+            manifest_url_for(Some("https://fixture.test/"), "dev").as_deref(),
+            Some("https://fixture.test/hex/desktop/dev.json")
+        );
+        // Nothing contacts Anomaly's release service.
+        assert!(!STABLE_MANIFEST_URL.contains("anoma"));
+    }
+
+    #[test]
+    fn release_asset_urls_resolve_on_github_and_nowhere_else() {
+        let manifest = STABLE_MANIFEST_URL;
+        let asset = "https://github.com/duketopceo/WordInk/releases/download/desktop-v1.0.0/wordink-1.0.0-linux-x64";
+        // Absolute and path-absolute references on the manifest's host work.
+        assert_eq!(
+            protocol::resolve_url(manifest, asset).as_deref(),
+            Some(asset)
+        );
+        assert_eq!(
+            protocol::resolve_url(
+                manifest,
+                "/duketopceo/WordInk/releases/download/desktop-v1.0.0/wordink-1.0.0-linux-x64"
+            )
+            .as_deref(),
+            Some(asset)
+        );
+        // A manifest cannot name the redirect target or any other host: GitHub
+        // sends the download there itself, and the transport follows it.
+        for elsewhere in [
+            "https://objects.githubusercontent.com/github-production-release-asset/1",
+            "https://github.com.example.com/a",
+            "https://github.com@example.com/a",
+            "http://github.com/duketopceo/WordInk/a",
+        ] {
+            assert_eq!(
+                protocol::resolve_url(manifest, elsewhere),
+                None,
+                "{elsewhere}"
+            );
+        }
+    }
+
+    #[test]
+    fn macos_and_windows_only_link_to_the_release() {
+        let direct = || Method::Direct {
+            channel: "stable".into(),
+        };
+        // Where nothing is signed, every install kind is download-only...
+        for method in [direct(), Method::Unknown, Method::Package("aur")] {
+            assert_eq!(update_method(method, false), Method::DownloadOnly);
+        }
+        // ...except a checkout build, which its checkout updates.
+        assert_eq!(update_method(Method::Source, false), Method::Source);
+        // Linux keeps its signed, direct path.
+        assert_eq!(update_method(direct(), true), direct());
+        assert_eq!(update_method(Method::Unknown, true), Method::Unknown);
+        // Download-only is never an installing method: no staging, and the
+        // "direct" distribution carries no running-build hash.
+        assert_ne!(Method::DownloadOnly, direct());
+        assert_eq!(Method::DownloadOnly.distribution(), "direct");
+    }
+
+    #[test]
+    fn a_download_only_install_is_sent_to_its_release_file() {
+        let sha = "e".repeat(64);
+        let file = "https://github.com/duketopceo/WordInk/releases/download/desktop-v1.0.0/wordink-1.0.0-windows-x64.zip";
+        let manifest = serde_json::json!({
+            "schema": 1, "app": APP, "artifact": ARTIFACT, "channel": "stable",
+            "sequence": 1, "published_at": "2026-11-02T00:00:00Z",
+            "release": {
+                "version": "1.0.0", "rollout_percent": 100,
+                "distributions": [{ "kind": "direct" }],
+                "targets": { platform::DOWNLOAD_TARGET: { "url": file, "sha256": sha, "size": 1 } }
+            }
+        })
+        .to_string();
+        assert_eq!(
+            download_page_url(&manifest, STABLE_MANIFEST_URL, platform::DOWNLOAD_TARGET),
+            file
+        );
+        // No file for this platform, or a bad manifest: the Releases page.
+        assert_eq!(
+            download_page_url(&manifest, STABLE_MANIFEST_URL, "freebsd-x64"),
+            RELEASES_URL
+        );
+        assert_eq!(
+            download_page_url("{}", STABLE_MANIFEST_URL, platform::DOWNLOAD_TARGET),
+            RELEASES_URL
+        );
+    }
+
+    #[test]
+    fn a_local_build_never_checks_for_updates() {
+        let never = || unreachable!("a source build never asks the policy");
+        assert_eq!(
+            disabled_status(false, true, never, &Method::DownloadOnly),
+            Some(DesktopUpdateStatus::SourceBuild)
+        );
+        assert_eq!(
+            disabled_status(false, false, never, &Method::Source),
+            Some(DesktopUpdateStatus::SourceBuild)
+        );
+        assert_eq!(
+            disabled_status(true, false, never, &Method::DownloadOnly),
+            Some(DesktopUpdateStatus::Unavailable)
+        );
+        assert_eq!(
+            disabled_status(false, false, || true, &Method::DownloadOnly),
+            Some(DesktopUpdateStatus::Managed)
+        );
+        assert_eq!(
+            disabled_status(false, false, || false, &Method::DownloadOnly),
+            None
+        );
+    }
+
+    #[test]
+    fn nothing_contacts_the_old_release_service() {
+        assert_eq!(
+            notes::fetch(
+                "ua",
+                Path::new("/nonexistent/scratch"),
+                "0.0.0-dev-1",
+                "0.0.0-dev-2"
+            ),
             None
         );
     }

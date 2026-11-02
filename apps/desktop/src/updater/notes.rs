@@ -117,7 +117,10 @@ mod tests {
         let notes = parse(NOTES, "0.0.0-dev-2", "0.0.0-dev-9").unwrap();
         assert_eq!(notes.items, ["Fix A", "Fix C", "Already running"]);
         let from_stable = parse(NOTES, "3.1.1", "0.0.0-dev-9").unwrap();
-        assert_eq!(from_stable.url, "https://github.com/duketopceo/WordInk/releases#0.0.0-dev-9");
+        assert_eq!(
+            from_stable.url,
+            "https://github.com/duketopceo/WordInk/releases#0.0.0-dev-9"
+        );
     }
 
     #[test]

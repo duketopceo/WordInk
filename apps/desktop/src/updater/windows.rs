@@ -20,15 +20,14 @@ use crate::desktop::background_process;
 pub const TARGET: &str = "windows-x64";
 #[cfg(target_arch = "aarch64")]
 pub const TARGET: &str = "windows-arm64";
-#[cfg(target_arch = "x86_64")]
-pub const DOWNLOAD_TARGET: &str = "windows-x64-setup";
-#[cfg(target_arch = "aarch64")]
-pub const DOWNLOAD_TARGET: &str = "windows-arm64-setup";
+/// The zip of `wordink.exe`: the unsigned release has no installer yet.
+pub const DOWNLOAD_TARGET: &str = TARGET;
 
 /// The common name of the certificate Azure Artifact Signing issues to
 /// Anomaly (as on OpenCode's signed Windows builds); updates signed by
 /// anyone else are refused.
-pub const AUTHENTICODE_SIGNER: &str = "WordInk contributors (Authenticode signing is deferred; set in U14)";
+pub const AUTHENTICODE_SIGNER: &str =
+    "WordInk contributors (Authenticode signing is deferred; set in U14)";
 /// `HKLM` (or `HKCU`) `\SOFTWARE\Policies\WordInk`, value `DisableUpdates`.
 const POLICY_KEY: &str = r"SOFTWARE\Policies\WordInk";
 /// The Apps & Features entry that packaging/windows/wordink.iss registers.

@@ -20,7 +20,7 @@ use objc2_foundation::{NSString, NSUserDefaults};
 use super::Method;
 
 pub const TARGET: &str = "macos-arm64";
-pub const DOWNLOAD_TARGET: &str = "macos-arm64-dmg";
+pub const DOWNLOAD_TARGET: &str = TARGET;
 const BUNDLE_ID: &str = "io.github.duketopceo.wordink";
 /// A Developer ID application from Anomaly's team (5NZ4Q7NXJ4), identified
 /// as `io.github.duketopceo.wordink`, and notarized. The release build checks its artifacts
@@ -117,7 +117,8 @@ fn remove_staging(parent: &Path) {
 }
 
 pub fn stage(archive: &Path, version: &str) -> Result<Staged> {
-    let installed = installed_bundle().ok_or_else(|| eyre!("WordInk is not running from WordInk.app"))?;
+    let installed =
+        installed_bundle().ok_or_else(|| eyre!("WordInk is not running from WordInk.app"))?;
     let parent = installed
         .parent()
         .ok_or_else(|| eyre!("WordInk.app has no parent folder"))?;
@@ -285,12 +286,16 @@ mod tests {
         // …but never Anomaly's Developer ID requirement.
         let error = verify_bundle(&app, "9.9.9", REQUIREMENT).unwrap_err();
         assert!(error.to_string().contains("code signature"), "{error}");
-        assert!(verify_bundle(&app, "9.9.8", "identifier \"io.github.duketopceo.wordink\"").is_err());
+        assert!(
+            verify_bundle(&app, "9.9.8", "identifier \"io.github.duketopceo.wordink\"").is_err()
+        );
         let other = bundle(&root.join("other"), "com.kitlangton.hex2", "9.9.9");
         assert!(verify_bundle(&other, "9.9.9", "identifier \"com.kitlangton.hex2\"").is_err());
         // A modified bundle no longer satisfies its signature.
         fs::write(app.join("Contents/MacOS/hex"), b"tampered").unwrap();
-        assert!(verify_bundle(&app, "9.9.9", "identifier \"io.github.duketopceo.wordink\"").is_err());
+        assert!(
+            verify_bundle(&app, "9.9.9", "identifier \"io.github.duketopceo.wordink\"").is_err()
+        );
         let _ = fs::remove_dir_all(root);
     }
 

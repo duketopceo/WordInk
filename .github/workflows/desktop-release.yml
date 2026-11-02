@@ -1,0 +1,274 @@
+# Desktop release: a `desktop-v<version>` tag builds the app on the four
+# platforms, signs the Linux executables, and publishes one GitHub Release with
+# SHA256SUMS, an SBOM, build-provenance attestations and the update manifest
+# (stable.json) the in-app updater reads. See apps/desktop/README.md ("Releasing").
+#
+# Trust boundaries (the same split Hex's release workflow uses):
+#   build       runs repository code (cargo, build.rs); no secrets, read-only.
+#   sign-linux  the only job that can read WORDINK_LINUX_SIGNING_KEY. It sits in
+#               the protected `release` environment, so the owner approves it,
+#               and it runs only packaging/linux/sign-linux.sh on the build
+#               output as data: it never builds, installs or runs it.
+#   publish     writes the release; holds no signing key.
+# macOS and Windows ship unsigned; their updater only links to the release.
+name: Desktop release
+on:
+  push:
+    tags: ["desktop-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=${TAG#desktop-v}
+          # The version names a directory and is compared by the updater, so
+          # it must be X.Y.Z or X.Y.Z-prerelease.
+          printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
+            || { echo "::error::$TAG is not desktop-vX.Y.Z"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in *-*) echo "prerelease=true" ;; *) echo "prerelease=false" ;; esac >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { label: linux-x64, os: ubuntu-24.04 }
+          - { label: linux-arm64, os: ubuntu-24.04-arm }
+          - { label: windows-x64, os: windows-latest }
+          - { label: macos-arm64, os: macos-15 }
+    defaults:
+      run:
+        working-directory: apps/desktop
+    env:
+      # The binary reports this version (build.rs), which the updater checks
+      # a downloaded executable against, and belongs to the stable channel.
+      HEX_VERSION: ${{ needs.prepare.outputs.version }}
+      HEX_BUILD_CHANNEL: stable
+      # Portable CPU kernels: ggml otherwise tunes to the build machine and the
+      # release would crash on older CPUs. No system BLAS either, so the
+      # executable needs no OpenBLAS runtime.
+      TRANSCRIBE_CMAKE_ARGS: ${{ runner.os == 'Linux' && '-DGGML_NATIVE=OFF -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF' || '-DGGML_NATIVE=OFF' }}
+      MACOSX_DEPLOYMENT_TARGET: "15.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      # No build cache: a release is built from scratch from the tagged commit.
+      - name: Install native libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # libopenblas-dev only satisfies build.rs's -lopenblas, which
+          # --as-needed drops: the release links no system BLAS.
+          sudo apt-get install -y clang cmake pkg-config python3 libasound2-dev \
+            libssl-dev libgtk-3-dev libxkbcommon-x11-dev libx11-xcb-dev \
+            libfontconfig1-dev libfreetype-dev libxcursor-dev libxi-dev \
+            libxrandr-dev libopenblas-dev libvulkan-dev glslc libshaderc-dev
+          {
+            echo BLA_VENDOR=OpenBLAS
+            echo OPENSSL_NO_VENDOR=1
+            echo CC=clang
+            echo CXX=clang++
+          } >> "$GITHUB_ENV"
+      - name: Install the Vulkan SDK (Windows)
+        if: runner.os == 'Windows'
+        uses: humbletim/install-vulkan-sdk@30ba978f977e81b72d091fc8888feb1fb26f9aff # v1.2
+        with:
+          version: 1.4.309.0
+          cache: true
+      - name: Install SPIRV-Headers for the Vulkan backend (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          vcpkg install spirv-headers:x64-windows
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install spirv-headers failed" }
+          $prefix = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows" -replace '\\','/'
+          $combined = if ($env:CMAKE_PREFIX_PATH) { "$prefix;$env:CMAKE_PREFIX_PATH" } else { $prefix }
+          Add-Content $env:GITHUB_ENV "CMAKE_PREFIX_PATH=$combined"
+      - name: Install the Metal toolchain (macOS)
+        if: runner.os == 'macOS'
+        run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
+
+      - run: cargo build --locked --release
+
+      - name: Collect the release file
+        shell: bash
+        env:
+          LABEL: ${{ matrix.label }}
+        run: |
+          set -euo pipefail
+          # Windows runners give D:\a\_temp style paths; Git Bash wants /d/a/_temp.
+          temp=$RUNNER_TEMP
+          if command -v cygpath > /dev/null; then temp=$(cygpath -u "$RUNNER_TEMP"); fi
+          dist="$temp/dist"
+          mkdir -p "$dist"
+          exe=target/release/wordink
+          if [ "$RUNNER_OS" = Windows ]; then exe=target/release/wordink.exe; fi
+          reported=$("$exe" --version | awk 'NF { value=$NF } END { print value }')
+          [ "$reported" = "$HEX_VERSION" ] || { echo "::error::wordink reports $reported, not $HEX_VERSION"; exit 1; }
+          name="wordink-$HEX_VERSION-$LABEL"
+          case "$RUNNER_OS" in
+            Linux)
+              # The bare executable: what the updater downloads and the
+              # signature covers. The tarball is made after signing.
+              install -m 755 "$exe" "$dist/$name"
+              ;;
+            macOS)
+              # The bare executable in a zip: Hex's build-app.sh needs its
+              # Developer ID signing inputs, so there is no .app yet.
+              stage=$(mktemp -d)/wordink
+              mkdir -p "$stage"
+              install -m 755 "$exe" "$stage/wordink"
+              cp LICENSE THIRD_PARTY_NOTICES.md "$stage/"
+              (cd "$(dirname "$stage")" && zip -qr "$dist/$name.zip" wordink)
+              ;;
+            Windows)
+              stage=$(mktemp -d)/wordink
+              mkdir -p "$stage"
+              cp "$exe" LICENSE THIRD_PARTY_NOTICES.md "$stage/"
+              powershell -NoProfile -Command "Compress-Archive -Path '$(cygpath -w "$stage")' -DestinationPath '$(cygpath -w "$dist/$name.zip")'"
+              ;;
+          esac
+          ls -l "$dist"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: build-${{ matrix.label }}
+          path: ${{ runner.temp }}/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  sbom:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: apps/desktop
+          format: cyclonedx-json
+          output-file: wordink-${{ needs.prepare.outputs.version }}.sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sbom
+          path: wordink-${{ needs.prepare.outputs.version }}.sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # The only job with the signing key. The `release` environment requires the
+  # owner's approval before it starts.
+  sign-linux:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      # Only the signing script and the public key it checks against.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: apps/desktop/packaging/linux
+          sparse-checkout-cone-mode: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: build-linux-*
+          path: ${{ runner.temp }}/in
+          merge-multiple: true
+      - name: Sign the Linux executables
+        env:
+          WORDINK_LINUX_SIGNING_KEY: ${{ secrets.WORDINK_LINUX_SIGNING_KEY }}
+          WORDINK_VERSION: ${{ needs.prepare.outputs.version }}
+        run: apps/desktop/packaging/linux/sign-linux.sh "$RUNNER_TEMP/in"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: signed-linux
+          path: ${{ runner.temp }}/in/*.sig
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [prepare, build, sbom, sign-linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      WORDINK_VERSION: ${{ needs.prepare.outputs.version }}
+      WORDINK_TAG: ${{ github.ref_name }}
+      WORDINK_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: "{build-*,signed-linux,sbom}"
+          path: ${{ runner.temp }}/in
+          merge-multiple: true
+      - name: Assemble the release
+        run: |
+          set -euo pipefail
+          dist="$RUNNER_TEMP/release"
+          mkdir -p "$dist"
+          v=$WORDINK_VERSION
+          # Only the files this release defines, no more.
+          for name in \
+            "wordink-$v-linux-x64" "wordink-$v-linux-x64.sig" \
+            "wordink-$v-linux-arm64" "wordink-$v-linux-arm64.sig" \
+            "wordink-$v-windows-x64.zip" "wordink-$v-macos-arm64.zip" \
+            "wordink-$v.sbom.cdx.json"; do
+            [ -f "$RUNNER_TEMP/in/$name" ] || { echo "::error::$name is missing"; exit 1; }
+            cp "$RUNNER_TEMP/in/$name" "$dist/$name"
+          done
+          for arch in x64 arm64; do
+            apps/desktop/packaging/linux/make-tarball.sh "$dist" "$arch"
+          done
+          apps/desktop/packaging/linux/write-manifest.sh "$dist"
+          (cd "$dist" && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release/*
+      - name: Publish the GitHub Release
+        env:
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          notes=$(mktemp)
+          cat > "$notes" <<NOTES
+          WordInk desktop $WORDINK_VERSION.
+
+          - Linux (x86_64, aarch64): ed25519-signed. Unpack the tarball and run \`./install.sh\`; the app then updates itself and verifies each update's signature.
+          - macOS (Apple silicon) and Windows (x64): **unsigned**. Download the zip; the in-app updater only links to the newest release and never installs one.
+          - \`SHA256SUMS\` lists every file, \`*.sbom.cdx.json\` is the CycloneDX SBOM, and each file has a build-provenance attestation (\`gh attestation verify <file> -R $WORDINK_REPO\`).
+          NOTES
+          flags=(--draft --verify-tag --title "WordInk desktop $WORDINK_VERSION" --notes-file "$notes")
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); else flags+=(--latest); fi
+          gh release create "$WORDINK_TAG" -R "$WORDINK_REPO" "${flags[@]}" "$RUNNER_TEMP"/release/*
+          # Published only once every asset, stable.json included, is in place.
+          gh release edit "$WORDINK_TAG" -R "$WORDINK_REPO" --draft=false
