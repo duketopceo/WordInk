@@ -109,6 +109,7 @@ pub struct UsageRecord {
 
 impl UsageRecord {
     /// A transcription that ran on this computer: free, so only its size.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn local(model: &str, audio_ms: u64, text: &str) -> Self {
         Self {
             provider: "local".into(),

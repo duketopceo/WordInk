@@ -56,10 +56,13 @@ pub enum DictationIndicatorEvent {
     Discarded,
     Cancelled,
     /// The speech model is loading (Live text says so).
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     ModelLoading,
     /// The speech model finished loading.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     ModelReady,
     /// The words were left on the clipboard instead of typed.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     Copied,
     JobCompleted {
         job_id: u64,
