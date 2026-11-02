@@ -2725,7 +2725,7 @@ impl AppSettings {
             others.push(HotkeyBinding::paste_meeting_default());
         }
         #[cfg(hex_capture)]
-        if slot != HotkeySlot::Capture && self.capture_on() {
+        if slot != HotkeySlot::Capture {
             others.push(self.capture.hotkey.clone());
         }
         hotkey_conflicts(binding, others)

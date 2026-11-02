@@ -1784,6 +1784,68 @@ mod tests {
         assert!(!error.message.contains("option+none"), "{}", error.message);
     }
 
+    /// R9: the cancel shortcut and the other WordInk shortcuts never share a
+    /// chord, in either order, whether or not Annotate is on.
+    #[cfg(hex_capture)]
+    #[test]
+    fn cancel_and_capture_shortcuts_never_share_a_chord() {
+        for annotate_on in [false, true] {
+            let mut base = AppSettings::default();
+            base.capture.enabled = annotate_on;
+            let with_capture = apply(&base, "capture.hotkey", "control+shift+k", &rules())
+                .unwrap()
+                .settings;
+            let refused =
+                apply(&with_capture, "cancel_hotkey", "control+shift+k", &rules()).unwrap_err();
+            assert_eq!(
+                refused.code, "shortcut-in-use",
+                "cancel = capture, on={annotate_on}"
+            );
+
+            let with_cancel = apply(&base, "cancel_hotkey", "f5", &rules())
+                .unwrap()
+                .settings;
+            let refused = apply(&with_cancel, "capture.hotkey", "f5", &rules()).unwrap_err();
+            assert_eq!(
+                refused.code, "shortcut-in-use",
+                "capture = cancel, on={annotate_on}"
+            );
+            let ok = apply(&with_cancel, "capture.hotkey", "control+shift+k", &rules());
+            assert!(ok.is_ok(), "an unrelated chord is accepted: {ok:?}");
+        }
+    }
+
+    #[test]
+    fn cancel_refuses_every_other_shortcut_and_accepts_an_unrelated_chord() {
+        let mut settings = AppSettings::default();
+        settings.paste_last_hotkey =
+            apply(&settings, "paste_last_hotkey", "control+shift+v", &rules())
+                .unwrap()
+                .settings
+                .paste_last_hotkey;
+        settings.raw_dictation_hotkey = apply(
+            &settings,
+            "raw_dictation_hotkey",
+            "control+shift+r",
+            &rules(),
+        )
+        .unwrap()
+        .settings
+        .raw_dictation_hotkey;
+        for chord in ["control+shift+v", "control+shift+r"] {
+            let refused = apply(&settings, "cancel_hotkey", chord, &rules()).unwrap_err();
+            assert_eq!(refused.code, "shortcut-in-use", "{chord}");
+        }
+        let dictation = format_hotkey(&settings.dictation_hotkey);
+        assert_eq!(
+            apply(&settings, "cancel_hotkey", &dictation, &rules())
+                .unwrap_err()
+                .code,
+            "shortcut-in-use"
+        );
+        assert!(apply(&settings, "cancel_hotkey", "control+shift+x", &rules()).is_ok());
+    }
+
     /// Issue 767: Menu alone (Caps Lock remapped to it) is a Linux
     /// shortcut only with Labs › Special keys alone on, and turning the
     /// toggle off puts it back to the default. Windows takes it alone
