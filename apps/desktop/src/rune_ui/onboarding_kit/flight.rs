@@ -283,13 +283,13 @@ pub(crate) fn caret_x(x0: f32, targets: &[(f64, f32)], now: f64) -> f32 {
 pub(crate) fn ember_tone(p: Paint, h: f32) -> Color {
     let dark = p.k.dark;
     let stops = [
-        rune_theme_opencode::ember(dark, 6),
-        rune_theme_opencode::ember(dark, 9),
-        rune_theme_opencode::ember(dark, 11),
+        super::super::brand::ember(dark, 6),
+        super::super::brand::ember(dark, 9),
+        super::super::brand::ember(dark, 11),
         if dark {
             p.k.c.text_strong
         } else {
-            rune_theme_opencode::ember(false, 10)
+            super::super::brand::ember(false, 10)
         },
     ];
     let scaled = h.clamp(0.0, 1.0) * 3.0;
@@ -303,17 +303,17 @@ pub(crate) fn ink(p: Paint, heat: f32) -> Color {
         let warm_peak =
             p.k.c
                 .text_strong
-                .mix(rune_theme_opencode::ember(true, 11), 0.28);
+                .mix(super::super::brand::ember(true, 11), 0.28);
         p.k.c.text_base.mix(warm_peak, heat)
     } else {
         p.k.c
             .text_base
-            .mix(rune_theme_opencode::ember(false, 9), heat * 0.65)
+            .mix(super::super::brand::ember(false, 9), heat * 0.65)
     }
 }
 
 fn landed_glow(p: Paint, heat: f32) -> Color {
-    let base = rune_theme_opencode::ember(p.k.dark, 9);
+    let base = super::super::brand::ember(p.k.dark, 9);
     let strength = if p.k.dark { 0.34 } else { 0.20 };
     base.alpha(strength * heat)
 }

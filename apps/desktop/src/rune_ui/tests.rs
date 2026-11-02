@@ -2207,7 +2207,13 @@ fn read_png(path: &std::path::Path) -> (u32, u32, Vec<u8>) {
 }
 
 fn check_golden(scene: &str, dark: bool, size: (f32, f32)) {
-    let name = format!("{scene}-{}", if dark { "dark" } else { "light" });
+    check_golden_as(scene, scene, dark, size);
+}
+
+/// [`check_golden`] with the golden saved under `label`, for a scene drawn
+/// at a second size.
+fn check_golden_as(scene: &str, label: &str, dark: bool, size: (f32, f32)) {
+    let name = format!("{label}-{}", if dark { "dark" } else { "light" });
     let Some((width, height, pixels)) = render(scene, dark, size) else {
         assert!(
             std::env::var_os("HEX_REQUIRE_GPU").is_none(),

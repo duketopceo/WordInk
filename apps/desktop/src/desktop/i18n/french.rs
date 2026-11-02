@@ -15,6 +15,7 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("In a private file beside your settings, <provider>.key. This instance has its own data folder, so keys come only from <folder>/<provider>.key; set WORDINK_ALLOW_SYSTEM_KEYS=1 to also use the environment and the OS keyring. Never in the settings file or a log.", "Dans un fichier privé à côté de vos réglages, <provider>.key. Cette instance a son propre dossier de données : les clés ne viennent que de <folder>/<provider>.key ; définissez WORDINK_ALLOW_SYSTEM_KEYS=1 pour utiliser aussi l'environnement et le trousseau du système. Jamais dans le fichier de réglages ni dans un journal."),
     ("Turn off the mic when not dictating", "Couper le micro hors dictée"),
     ("The mic opens only while you dictate; the first moment can be clipped", "Le micro ne s'ouvre que pendant la dictée ; le tout début peut être coupé"),
     ("The mic stays ready so dictation starts instantly; your system shows it in use", "Le micro reste prêt pour que la dictée démarre aussitôt ; votre système l'indique comme utilisé"),
@@ -774,6 +775,10 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Turns on when WordInk restarts", "S'active au redémarrage de WordInk"),
     ("Skip", "Passer"),
     ("Speech model", "Modèle vocal"),
+    ("Engine", "Moteur"),
+    ("{} (auto)", "{} (auto)"),
+    ("{} (local)", "{} (local)"),
+    ("No dictations in the selected period.", "Aucune dictée sur la période sélectionnée."),
     ("Language", "Langue"),
     ("{model} doesn't support {previous}, so the language changed to {language}", "{model} ne prend pas en charge {previous}, la langue est donc passée à {language}"),
     ("Doesn't support {language}; switches the language to {fallback}", "Ne prend pas en charge {language} ; passe la langue à {fallback}"),

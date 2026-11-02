@@ -1,6 +1,6 @@
 # WordInk design direction (proposal)
 
-Status: proposal for maintainer sign-off. It covers the web SDK, the docs site and the brand assets; the desktop app (`apps/desktop`, based on Hex) will have its own window and indicator styles and adopts these tokens only where they fit. Nothing in the packages or docs site uses these tokens yet; applying them is a later code change. Today the docs site and `<wordink-mic>` use indigo `#4f46e5` (`apps/docs/src/style.css`, `packages/web/src/styles.ts`).
+Status: proposal for maintainer sign-off. It covers the web SDK, the docs site and the brand assets; the desktop app (`apps/desktop`, based on Hex) adopts the accent and brand assets through a theme layer; see the apps/desktop section. Nothing in the packages or docs site uses these tokens yet; applying them is a later code change. Today the docs site and `<wordink-mic>` use indigo `#4f46e5` (`apps/docs/src/style.css`, `packages/web/src/styles.ts`).
 
 ## Direction: "Pen and Signal"
 
@@ -96,3 +96,46 @@ System stacks only, so the core size budget (150 KB gzip; the current build is a
 ## Logo (proposal, maintainer signs off)
 
 See `assets/brand/README.md`. Files: `logo.svg`, `logo-dark.svg`, `wordmark.svg`, `wordmark-dark.svg`, `lockup.svg`, `lockup-dark.svg`, `glyphs.svg`, `social-card.svg`; PNG previews in `assets/brand/preview/`.
+
+## apps/desktop
+
+The desktop app is based on Hex v3.2.0 (MIT; see `apps/desktop/UPSTREAM.md` and `THIRD_PARTY_NOTICES.md`). It keeps Hex's Rune toolkit and the Rune OpenCode theme (`rune-theme-opencode`, a git dependency that is not forked). WordInk's look is a thin layer over that theme in `apps/desktop/src/rune_ui/brand.rs`. Widgets never read the raw theme: they get their kit from `brand::kit(dark)`, so one file maps brand tokens onto the app.
+
+### Theme atmosphere
+
+Same direction as above: near-black ink on cool paper, one teal accent for "live" things. The app does not adopt the web tokens wholesale. Surfaces, text and borders stay on the OpenCode neutrals (Inter and IBM Plex Mono, which the toolkit ships); only the brand-bearing roles below are overridden.
+
+### Token mapping
+
+| Brand token | Desktop role | Where it lands |
+|---|---|---|
+| `--wi-accent` (`#0A6B73` light, `#4FD1C5` dark) | `c.text_accent`, `c.icon_accent`, `c.bg_accent` | Accent text and dots (`Paint::accent`), status dots, the HUD-adjacent capture capsule, toggles |
+| `--wi-accent` | `c.border_focus` | Keyboard focus rings on rows, buttons and fields |
+| `--wi-accent` | `c.info.*` (wash at 12%, border at 40%) | Info cards and the accent tone of list badges |
+| `--wi-accent` at 16% dark, 10% light | `brand::selected_fill` | Selected sidebar item (with an accent icon) and selected list rows |
+| `--wi-accent` | `rune_hud/dot_scope/scope.rs` `palette` (recording) | The recording HUD pill: teal dots, lighter core; the processing blue and error coral are unchanged |
+| `--wi-ink`, `--wi-accent` | `brand::mark_shape` | The mark: ink bars, accent nib |
+| `--wi-error`, `--wi-warn` | not overridden | The theme's danger and warning roles stay as they are |
+
+Onboarding "ember" glows (keycap, flight, permission icons) are re-pointed to the accent through `brand::ember(dark, step)`, which derives lighter and darker steps from the accent. Mock traffic-light dots keep their real colours.
+
+### Components
+
+- **Mark.** The download-progress ring still sweeps along the hexagon track, and resolves into the WordInk mark (`hex_meter.rs`). The "WordInk is ready" landing shows the mark with a soft accent glow, then the wordmark.
+- **Wordmark.** `brand::wordmark` redraws `assets/brand/wordmark.svg` as canvas strokes (same coordinates, 3.2 stroke, round caps) so it takes the theme's text colour in light and dark.
+- **Selection.** One accent wash for "selected", never a solid accent block; text stays at the theme's base colour.
+
+### Assets
+
+| Surface | File | Source |
+|---|---|---|
+| Linux app icon | `apps/desktop/packaging/linux/icons/hicolor/*/apps/io.github.duketopceo.wordink.png` | `assets/brand/logo-dark.svg` on a dark tile; each PNG keeps its `X-Hex-Managed` text chunk |
+| Windows icon and tray | `apps/desktop/resources/windows/wordink.ico`, `icon-*.png`, `tray-32.rgba` | same mark |
+| macOS menu bar | `apps/desktop/assets/icons/menubar-idle@2x.png`, `menubar-recording@2x.png` | `assets/brand/logo.svg` shapes as a black template image (the system tints it); the recording variant adds a dot |
+
+### Do and don't
+
+- Do change brand colours in `brand.rs`, not in widgets.
+- Do keep teal for live or interactive things only.
+- Don't fork `rune-theme-opencode`; override the kit after it is built.
+- Don't paint the accent as large fills behind body text; the contrast table above covers text on the page, not on an accent block.

@@ -119,7 +119,9 @@ foreground diagnostic listener without the window or HUD and cannot coexist
 with Hex's listener. With
 `HEX_APPLICATION_SUPPORT_DIR` set, launches never start, stop, or restart the
 installed user unit; they forward to the Hex using that data directory or
-become it. `HEX_SYSTEMD_UNIT` names another unit for isolated tests.
+become it. With a custom data folder, provider keys come only from
+`<dir>/<provider>.key`; set `WORDINK_ALLOW_SYSTEM_KEYS=1` to also use the
+environment and the OS keyring. `HEX_SYSTEMD_UNIT` names another unit for isolated tests.
 `hex logs -n 40` is the diagnostic-log view (`hex status --lines` is gone).
 
 The window runs on Rune's app lifetime (`rune::App`): Hex starts it without a
@@ -284,6 +286,9 @@ again. Installing a published release over it switches back to signed
 updates. With a custom
 `HEX_APPLICATION_SUPPORT_DIR`, `cargo run --release` runs an
 unmanaged development Hex instead; without one it forwards to the installed Hex.
+That custom folder is key-isolated: provider keys come only from
+`<dir>/<provider>.key` unless `WORDINK_ALLOW_SYSTEM_KEYS=1` is set, which also
+allows the environment and the OS keyring.
 
 ## Dictate
 

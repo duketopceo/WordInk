@@ -10,6 +10,7 @@
 //! design language (`rune-theme-opencode`); see `docs/design-system.md`.
 
 mod activity;
+mod brand;
 #[cfg(hex_capture)]
 pub(crate) mod capture_capsule;
 mod cloud_engine;
@@ -1867,7 +1868,7 @@ fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
                 .group_opacity(0.0, 1.0),
         )
         .child(icon(pane.icon(), 16.0).key("icon").color(if on {
-            c.icon_base
+            c.icon_accent
         } else {
             c.icon_muted
         }))
@@ -1879,7 +1880,7 @@ fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
                 .truncate(),
         );
     if on {
-        item = item.fill(c.layer_02);
+        item = item.fill(brand::selected_fill(p.k));
     }
     lists::source_item(item, on)
 }

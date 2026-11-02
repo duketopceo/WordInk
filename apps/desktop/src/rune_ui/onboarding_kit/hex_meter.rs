@@ -150,49 +150,23 @@ pub(crate) fn hex_meter(p: Paint, key: &str, size: f32, progress: f32, closed: f
         .label(format!("{}%", (progress.clamp(0.0, 1.0) * 100.0).round()))
 }
 
-/// Thin single-hexagon outline with a quiet breathing corona for `"Hex is ready"`.
+/// The WordInk mark with a quiet breathing glow for `"WordInk is ready"`.
 pub(crate) fn hex_meter_glowing(p: Paint, key: &str, size: f32, now: f64, reduced: bool) -> El {
-    let spec = ACTIVE_GLYPH;
-    let w = spec.stroke_width(size);
     let pad = 12.0;
     let total = size + 2.0 * pad;
-    let mut ring: Vec<Point> = spec
-        .poly(size, 1.0)
-        .into_iter()
-        .map(|[x, y]| [x + pad, y + pad])
-        .collect();
-    ring.pop();
-
     let breath = if reduced {
         1.0
     } else {
         0.84 + 0.16 * (0.5 + 0.5 * (now * std::f64::consts::TAU / 4.8).sin() as f32)
     };
-    let halo = if p.k.dark {
-        rune_theme_opencode::scale("cobalt", true, 9).mix(p.text(), 0.45)
-    } else {
-        rune_theme_opencode::scale("cobalt", false, 8)
-    };
-    let outer_a = (if p.k.dark { 0.08 } else { 0.05 }) * breath;
-    let inner_a = (if p.k.dark { 0.19 } else { 0.11 }) * breath;
-
-    let shape = Shape::new()
-        .stroke_with(
-            ring.clone(),
-            true,
-            w * 5.2,
-            LineCap::Round,
-            halo.alpha(outer_a),
-        )
-        .stroke_with(
-            ring.clone(),
-            true,
-            w * 2.5,
-            LineCap::Round,
-            halo.alpha(inner_a),
-        )
-        .stroke_with(ring, true, w, LineCap::Round, p.text());
-
+    let dark = p.k.dark;
+    let shape = super::super::brand::mark_shape(
+        size,
+        pad,
+        super::super::brand::ink(dark),
+        super::super::brand::accent(dark),
+        Some((super::super::brand::accent(dark), breath * if dark { 1.0 } else { 0.6 })),
+    );
     canvas(shape).key(key).size(total, total).label("WordInk")
 }
 
@@ -213,7 +187,14 @@ fn meter_shape(p: Paint, size: f32, progress: f32, closed: f32) -> Shape {
         shape = shape.stroke_with(ring.clone(), true, w, LineCap::Round, track);
     }
     if progress >= 1.0 && closed >= 1.0 {
-        shape = shape.stroke_with(ring, true, w, LineCap::Round, lit);
+        // Done: the progress ring resolves into the WordInk mark.
+        return super::super::brand::mark_shape(
+            size,
+            0.0,
+            super::super::brand::ink(p.k.dark),
+            super::super::brand::accent(p.k.dark),
+            None,
+        );
     } else if progress > 0.002 {
         let (arc, tip) = sweep_poly(&poly, progress);
         let closed_loop = progress >= 1.0;

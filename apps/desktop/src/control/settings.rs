@@ -650,7 +650,7 @@ fn keys() -> impl Iterator<Item = &'static Key> {
 #[cfg(test)]
 const INTERNAL: &[&str] = &["migrations", "mouse_shortcut_notice"];
 
-/// Settings another `hex` command edits instead (`hex vocabulary`).
+/// Settings another `hex` command edits instead (`wordink vocabulary`).
 #[cfg(test)]
 const OWN_COMMAND: &[&str] = &["vocabulary"];
 
@@ -703,7 +703,7 @@ fn recognition_hints(settings: &AppSettings) -> SettingValue {
         kind: Kind::Text.name().into(),
         choices: Vec::new(),
         writable: true,
-        about: "Deprecated: the vocabulary's terms; setting it adds names to the vocabulary                 (use `hex vocabulary`)"
+        about: "Deprecated: the vocabulary's terms; setting it adds names to the vocabulary                 (use `wordink vocabulary`)"
             .into(),
         available: true,
     }
@@ -794,7 +794,7 @@ pub fn apply(
             settings: candidate,
             effects: Vec::new(),
             message: "Added the names to the vocabulary (transcription.recognition_hints is \
-                      deprecated; use `hex vocabulary`)"
+                      deprecated; use `wordink vocabulary`)"
                 .into(),
         });
     }
@@ -810,15 +810,34 @@ pub fn apply(
     let value = parse(key, raw, shortcuts)?;
     let mut json = serde_json::to_value(settings)
         .map_err(|error| ControlError::new("internal", error.to_string()))?;
-    let slot = json
-        .pointer_mut(&pointer(key.key))
-        .ok_or_else(|| ControlError::new("internal", format!("`{name}` is missing")))?;
-    *slot = value;
+    set_value(&mut json, key, value)?;
     let mut candidate: AppSettings =
         serde_json::from_value(json).map_err(|error| invalid(name, &format!("{error}")))?;
     let mut effects = Vec::new();
-    let message = format!("Set {name}");
+    let mut message = format!("Set {name}");
     match key.key {
+        "gateway_url" => {
+            if let Some(url) = candidate.gateway_url.as_deref() {
+                crate::transcription::cloud::gateway::endpoint(url).map_err(|_| {
+                    invalid(
+                        name,
+                        &format!(
+                            "{url:?} is not usable: the gateway URL must be a valid https URL \
+                             (http only for localhost or 127.0.0.1)"
+                        ),
+                    )
+                })?;
+            }
+        }
+        "engine_model" => {
+            if let Some(model) = candidate.engine_model.as_deref().map(str::trim) {
+                let warning = engine_model_check(candidate.engine, model)
+                    .map_err(|why| invalid(name, &why))?;
+                if let Some(warning) = warning {
+                    message = format!("Set {name} (warning: {warning})");
+                }
+            }
+        }
         "sound_effect_volume" => {
             let volume = candidate.sound_effect_volume;
             candidate.sound_effects = volume > 0.0;
@@ -904,7 +923,8 @@ pub fn apply(
         #[cfg(hex_capture)]
         "capture.enabled"
             if candidate.capture.enabled
-                && candidate.hotkey_in_use(HotkeySlot::Capture, &candidate.capture.hotkey) =>
+                && candidate
+                    .hotkey_overlaps_others(HotkeySlot::Capture, &candidate.capture.hotkey) =>
         {
             return Err(ControlError::new(
                 "shortcut-in-use",
@@ -1009,11 +1029,121 @@ pub fn apply_all(
         }
         pending = failed;
     }
+    let mut message = format!("Applied {} settings", values.len());
+    if values.contains_key("engine_model")
+        && let Some(model) = candidate.engine_model.as_deref().map(str::trim)
+        && let Ok(Some(warning)) = engine_model_check(candidate.engine, model)
+    {
+        message = format!("{message} (warning: {warning})");
+    }
     Ok(Change {
         settings: candidate,
         effects,
-        message: format!("Applied {} settings", values.len()),
+        message,
     })
+}
+
+/// Writes `value` at `key`'s place in the settings JSON. A setting that is
+/// left out of the file while unset (`meetings.retention`) has no slot yet,
+/// so its parent object gets one.
+fn set_value(json: &mut Value, key: &Key, value: Value) -> Result<(), ControlError> {
+    let path = pointer(key.key);
+    if let Some(slot) = json.pointer_mut(&path) {
+        *slot = value;
+        return Ok(());
+    }
+    let (parent, leaf) = path.rsplit_once('/').unwrap_or(("", &path));
+    match json.pointer_mut(parent) {
+        Some(Value::Object(map)) if key.optional => {
+            map.insert(leaf.to_string(), value);
+            Ok(())
+        }
+        _ => Err(ControlError::new(
+            "internal",
+            format!("`{}` is missing", key.key),
+        )),
+    }
+}
+
+/// Whether `model` can be saved as `engine_model` for `engine`: `Err` says
+/// why not; `Ok(Some(..))` is a warning to show with the saved value.
+/// Groq, OpenAI and Deepgram take only their known models; OpenRouter takes
+/// any `vendor/model` id but warns about one its catalogue doesn't list.
+/// With auto, local or the gateway (which ignores it), any provider's model
+/// is accepted, with a note that it takes effect only when engine is set to
+/// that model's provider.
+fn engine_model_check(
+    engine: crate::transcription::cloud::EngineChoice,
+    model: &str,
+) -> Result<Option<String>, String> {
+    use crate::transcription::cloud::{Provider, models_for};
+    let provider = engine
+        .provider()
+        .filter(|provider| *provider != Provider::Gateway);
+    let known = |provider: Provider| {
+        provider
+            .fixed_models()
+            .iter()
+            .map(|model| format!("`{model}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    match provider {
+        Some(Provider::OpenRouter) => {
+            let has_vendor_and_model = model
+                .split_once('/')
+                .is_some_and(|(vendor, name)| !vendor.is_empty() && !name.is_empty());
+            if !Provider::OpenRouter.accepts_model(model) || !has_vendor_and_model {
+                return Err(format!(
+                    "`{model}` is not an OpenRouter model id; ids look like vendor/model"
+                ));
+            }
+            let listed = models_for(Provider::OpenRouter)
+                .iter()
+                .any(|(id, _)| id == model);
+            Ok((!listed).then(|| {
+                format!("`{model}` is not in the cached OpenRouter catalogue; it is saved and sent as is")
+            }))
+        }
+        Some(provider) => {
+            if provider.accepts_model(model) {
+                Ok(None)
+            } else {
+                Err(format!(
+                    "`{model}` is not a {} model; use one of {}",
+                    provider.name(),
+                    known(provider)
+                ))
+            }
+        }
+        None => {
+            if let Some(owner) = Provider::ALL
+                .into_iter()
+                .find(|provider| *provider != Provider::Gateway && provider.accepts_model(model))
+            {
+                let note = if matches!(engine, crate::transcription::cloud::EngineChoice::Auto)
+                    && matches!(owner, Provider::Groq)
+                {
+                    format!(
+                        "`{model}` is used when Auto routes to Groq; Auto never routes to other providers"
+                    )
+                } else {
+                    format!(
+                        "`{model}` takes effect only when engine is set to {}; the current engine ignores it",
+                        owner.name()
+                    )
+                };
+                Ok(Some(note))
+            } else {
+                let all = [Provider::Groq, Provider::OpenAi, Provider::Deepgram]
+                    .map(known)
+                    .join(", ");
+                Err(format!(
+                    "`{model}` is not a known model: use one of {all}, or an OpenRouter id such as vendor/model"
+                ))
+            }
+        }
+    }
 }
 
 fn invalid(name: &str, why: &str) -> ControlError {
@@ -1028,6 +1158,15 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
     let trimmed = raw.trim();
     if key.optional && matches!(trimmed.to_ascii_lowercase().as_str(), "none" | "null" | "") {
         return Ok(Value::Null);
+    }
+    if matches!(key.kind, Kind::Shortcut(_))
+        && matches!(trimmed.to_ascii_lowercase().as_str(), "none" | "null")
+    {
+        return Err(invalid(
+            name,
+            "this shortcut can't be unbound with `none`; use a chord such as alt+space, or \
+             unbind it in Settings",
+        ));
     }
     if name == "microphone" && trimmed.eq_ignore_ascii_case("system-default") {
         return Ok(Value::Null);
@@ -1553,6 +1692,212 @@ mod tests {
             "shortcut-in-use",
             "it can't share the dictation shortcut"
         );
+    }
+
+    #[test]
+    fn gateway_url_is_validated_when_set() {
+        let settings = AppSettings::default();
+        for bad in [
+            "ftp://x",
+            "notaurl",
+            "http://example.com/v1",
+            "https://u:p@gw.example.com",
+        ] {
+            let error = apply(&settings, "gateway_url", bad, &rules()).unwrap_err();
+            assert_eq!(error.code, "invalid-value", "{bad}");
+            assert!(error.message.contains("https"), "{bad}: {}", error.message);
+        }
+        for good in [
+            "https://gw.example.com/v1",
+            "http://localhost:8787",
+            "http://127.0.0.1:8787",
+        ] {
+            let change = apply(&settings, "gateway_url", good, &rules()).unwrap();
+            assert_eq!(change.settings.gateway_url.as_deref(), Some(good));
+        }
+        let mut saved = settings.clone();
+        saved.gateway_url = Some("https://gw.example.com".into());
+        let change = apply(&saved, "gateway_url", "none", &rules()).unwrap();
+        assert_eq!(change.settings.gateway_url, None);
+    }
+
+    #[test]
+    fn engine_model_is_validated_against_the_engine() {
+        let with_engine = |engine: &str| {
+            apply(&AppSettings::default(), "engine", engine, &rules())
+                .unwrap()
+                .settings
+        };
+        let set =
+            |settings: &AppSettings, model: &str| apply(settings, "engine_model", model, &rules());
+        let groq = with_engine("groq");
+        assert!(set(&groq, "whisper-large-v3-turbo").is_ok());
+        assert_eq!(set(&groq, "gpt-4o").unwrap_err().code, "invalid-value");
+        let openai = with_engine("openai");
+        assert!(set(&openai, "whisper-1").is_ok());
+        assert_eq!(set(&openai, "nova-3").unwrap_err().code, "invalid-value");
+        let deepgram = with_engine("deepgram");
+        assert!(set(&deepgram, "nova-3").is_ok());
+        assert_eq!(set(&deepgram, "nova-2").unwrap_err().code, "invalid-value");
+        let error = set(&groq, "bogus").unwrap_err();
+        assert!(
+            error.message.contains("whisper-large-v3-turbo"),
+            "{}",
+            error.message
+        );
+        // Auto and local take a model any provider knows, and say it waits.
+        let change = set(&AppSettings::default(), "nova-3").unwrap();
+        assert!(
+            change
+                .message
+                .contains("takes effect only when engine is set to"),
+            "{}",
+            change.message
+        );
+        assert!(change.message.contains("Deepgram"), "{}", change.message);
+        assert_eq!(
+            set(&AppSettings::default(), "bogus").unwrap_err().code,
+            "invalid-value"
+        );
+        // An empty value clears it.
+        let mut saved = groq.clone();
+        saved.engine_model = Some("whisper-large-v3-turbo".into());
+        assert_eq!(set(&saved, "").unwrap().settings.engine_model, None);
+        assert_eq!(set(&saved, "none").unwrap().settings.engine_model, None);
+    }
+
+    #[test]
+    fn an_openrouter_model_missing_from_the_catalogue_is_saved_with_a_warning() {
+        let openrouter = apply(&AppSettings::default(), "engine", "openrouter", &rules())
+            .unwrap()
+            .settings;
+        let known = crate::transcription::cloud::openrouter::DEFAULT_MODEL;
+        let change = apply(&openrouter, "engine_model", known, &rules()).unwrap();
+        assert!(!change.message.contains("warning"), "{}", change.message);
+        let change = apply(&openrouter, "engine_model", "acme/unlisted-audio", &rules()).unwrap();
+        assert_eq!(
+            change.settings.engine_model.as_deref(),
+            Some("acme/unlisted-audio")
+        );
+        assert!(change.message.contains("warning"), "{}", change.message);
+        assert!(change.message.contains("catalogue"), "{}", change.message);
+        assert_eq!(
+            apply(&openrouter, "engine_model", "not-an-id", &rules())
+                .unwrap_err()
+                .code,
+            "invalid-value"
+        );
+    }
+
+    #[test]
+    fn meeting_retention_can_be_set_from_unset() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.meetings.retention, None);
+        let change = apply(&settings, "meetings.retention", "forever", &rules()).unwrap();
+        assert_eq!(
+            change.settings.meetings.retention,
+            Some(crate::app_settings::MeetingRetention::Forever)
+        );
+        let back = apply(&change.settings, "meetings.retention", "none", &rules()).unwrap();
+        assert_eq!(back.settings.meetings.retention, None);
+    }
+
+    #[test]
+    fn dictation_hotkey_none_says_what_to_do_instead() {
+        let error = apply(
+            &AppSettings::default(),
+            "dictation_hotkey",
+            "none",
+            &rules(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "invalid-value");
+        assert!(error.message.contains("alt+space"), "{}", error.message);
+        assert!(!error.message.contains("option+none"), "{}", error.message);
+    }
+
+    #[cfg(hex_capture)]
+    #[test]
+    fn enabling_annotate_refuses_a_saved_overlapping_chord() {
+        let mut base = AppSettings::default();
+        base.capture.enabled = false;
+        base.cancel_hotkey = Some(base.capture.hotkey.clone());
+        let refused = apply(&base, "capture.enabled", "true", &rules()).unwrap_err();
+        assert_eq!(refused.code, "shortcut-in-use");
+    }
+
+    #[test]
+    fn openrouter_model_needs_vendor_and_name() {
+        use crate::transcription::cloud::EngineChoice;
+        for bad in ["/", "vendor/", "/model"] {
+            assert!(
+                engine_model_check(EngineChoice::Openrouter, bad).is_err(),
+                "{bad}"
+            );
+        }
+        assert!(engine_model_check(EngineChoice::Openrouter, "vendor/model").is_ok());
+    }
+
+    /// R9: the cancel shortcut and the other WordInk shortcuts never share a
+    /// chord, in either order, whether or not Annotate is on.
+    #[cfg(hex_capture)]
+    #[test]
+    fn cancel_and_capture_shortcuts_never_share_a_chord() {
+        for annotate_on in [false, true] {
+            let mut base = AppSettings::default();
+            base.capture.enabled = annotate_on;
+            let with_capture = apply(&base, "capture.hotkey", "control+shift+k", &rules())
+                .unwrap()
+                .settings;
+            let refused =
+                apply(&with_capture, "cancel_hotkey", "control+shift+k", &rules()).unwrap_err();
+            assert_eq!(
+                refused.code, "shortcut-in-use",
+                "cancel = capture, on={annotate_on}"
+            );
+
+            let with_cancel = apply(&base, "cancel_hotkey", "f5", &rules())
+                .unwrap()
+                .settings;
+            let refused = apply(&with_cancel, "capture.hotkey", "f5", &rules()).unwrap_err();
+            assert_eq!(
+                refused.code, "shortcut-in-use",
+                "capture = cancel, on={annotate_on}"
+            );
+            let ok = apply(&with_cancel, "capture.hotkey", "control+shift+k", &rules());
+            assert!(ok.is_ok(), "an unrelated chord is accepted: {ok:?}");
+        }
+    }
+
+    #[test]
+    fn cancel_refuses_every_other_shortcut_and_accepts_an_unrelated_chord() {
+        let mut settings = AppSettings::default();
+        settings.paste_last_hotkey =
+            apply(&settings, "paste_last_hotkey", "control+shift+v", &rules())
+                .unwrap()
+                .settings
+                .paste_last_hotkey;
+        settings.raw_dictation_hotkey = apply(
+            &settings,
+            "raw_dictation_hotkey",
+            "control+shift+r",
+            &rules(),
+        )
+        .unwrap()
+        .settings
+        .raw_dictation_hotkey;
+        for chord in ["control+shift+v", "control+shift+r"] {
+            let refused = apply(&settings, "cancel_hotkey", chord, &rules()).unwrap_err();
+            assert_eq!(refused.code, "shortcut-in-use", "{chord}");
+        }
+        let dictation = format_hotkey(&settings.dictation_hotkey);
+        assert_eq!(
+            apply(&settings, "cancel_hotkey", &dictation, &rules())
+                .unwrap_err()
+                .code,
+            "shortcut-in-use"
+        );
+        assert!(apply(&settings, "cancel_hotkey", "control+shift+x", &rules()).is_ok());
     }
 
     /// Issue 767: Menu alone (Caps Lock remapped to it) is a Linux

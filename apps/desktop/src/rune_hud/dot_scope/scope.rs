@@ -904,13 +904,13 @@ fn saturate(color: [f32; 3], amount: f32) -> [f32; 3] {
     color.map(|c| (luma + (c - luma) * amount).clamp(0.0, 1.0))
 }
 
-/// Warm pearl while recording, cooling to agent blue while processing, and
+/// WordInk teal (`--wi-accent`) while recording, cooling to agent blue while processing, and
 /// coral on failure.
 pub fn palette(dark: bool, pose: &Pose, saturation: f32) -> Palette {
     let (you, you_core, agent, agent_core, coral, coral_core) = if dark {
         (
-            [0.86, 0.83, 0.77],
-            [0.98, 0.96, 0.92],
+            [0.31, 0.82, 0.77],
+            [0.72, 0.96, 0.93],
             [0.70, 0.78, 0.90],
             [0.92, 0.95, 1.0],
             [1.0, 0.38, 0.31],
@@ -918,8 +918,8 @@ pub fn palette(dark: bool, pose: &Pose, saturation: f32) -> Palette {
         )
     } else {
         (
-            [0.62, 0.53, 0.40],
-            [0.47, 0.38, 0.26],
+            [0.04, 0.42, 0.45],
+            [0.03, 0.30, 0.33],
             [0.40, 0.47, 0.58],
             [0.24, 0.31, 0.43],
             [0.9, 0.27, 0.21],
@@ -1294,8 +1294,8 @@ mod tests {
     #[test]
     fn palette_cools_and_saturates() {
         let pose = Scope::new(fixed()).pose();
-        let warm = palette(true, &pose, 1.0);
-        assert_eq!(warm.base, [0.86, 0.83, 0.77]);
+        let teal = palette(true, &pose, 1.0);
+        assert_eq!(teal.base, [0.31, 0.82, 0.77]);
         let grey = palette(true, &pose, 0.0);
         assert!((grey.base[0] - grey.base[2]).abs() < 1e-6);
         let cool = palette(false, &Pose { cool: 1.0, ..pose }, 1.0);

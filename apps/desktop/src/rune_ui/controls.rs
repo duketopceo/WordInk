@@ -78,7 +78,7 @@ pub(super) struct Paint {
 impl Paint {
     pub(super) fn new(dark: bool, scale: f32) -> Self {
         Self {
-            k: rune_theme_opencode::kit(dark),
+            k: super::brand::kit(dark),
             hair: 1.0 / scale,
         }
     }

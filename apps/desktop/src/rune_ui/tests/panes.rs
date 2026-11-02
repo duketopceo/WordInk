@@ -749,6 +749,112 @@ fn the_practice_game_follows_hex_s_own_dictation_on_every_os() {
     }
 }
 
+/// The default window is 823 px wide on a tiling desktop (R3): the practice
+/// game's cards and Done must sit fully inside it.
+#[test]
+fn the_practice_game_fits_an_823_px_window() {
+    const WIDTH: f32 = 823.0;
+    let mut rt = runtime("onboarding-try", true, (WIDTH, 760.0));
+    for _ in 0..240 {
+        rt.frame(1.0 / 60.0);
+    }
+    let inside = |key: &str| {
+        let [x, _, w, _] = element(&rt, key).rect;
+        assert!(
+            x >= 0.0 && x + w <= WIDTH,
+            "{key} spans {x}..{} of {WIDTH}",
+            x + w
+        );
+    };
+    inside("done");
+    let mut cards = 0;
+    for i in 0..3 {
+        if rt
+            .elements()
+            .iter()
+            .any(|e| e.key.as_deref() == Some(&format!("card{i}")))
+        {
+            inside(&format!("card{i}"));
+            cards += 1;
+        }
+    }
+    assert!(cards > 0, "the game shows cards");
+}
+
+/// R7: a stored volume shows at its true value, and choosing it again (or
+/// the pane re-snapping) keeps it.
+#[test]
+fn the_sounds_pane_shows_a_stored_volume_at_its_true_value() {
+    use super::super::settings::{sound_volume_index, sound_volume_options};
+    let mut settings = AppSettings {
+        sound_effect_volume: 0.8,
+        ..AppSettings::default()
+    };
+    let options = sound_volume_options(&settings);
+    let index = sound_volume_index(&settings);
+    assert_eq!(options[index], ("80%", 0.8));
+    assert_eq!(options.len(), 6, "the five steps and the stored value");
+    settings.sound_effect_volume = 0.75;
+    let options = sound_volume_options(&settings);
+    assert_eq!(options.len(), 5, "a preset volume adds nothing");
+    assert_eq!(options[sound_volume_index(&settings)].0, "75%");
+
+    let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+    state.settings.sound_effect_volume = 0.8;
+    let mut rt = runtime_for(state, true, PANE_SIZE);
+    rt.update(|ui, _| ui.pane = Pane::Sounds);
+    rt.frame(1.0 / 60.0);
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "80%"), "{shown:?}");
+    assert!(!shown.iter().any(|text| text == "75%"), "{shown:?}");
+}
+
+/// R8: the empty Usage state mentions History only when History is off.
+#[test]
+fn the_usage_empty_state_mentions_history_only_when_it_is_off() {
+    let shown_with = |retention| {
+        let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+        state.settings.history_retention = retention;
+        let mut rt = runtime_for(state, true, PANE_SIZE);
+        rt.update(|ui, _| ui.pane = Pane::Usage);
+        settle(&mut rt);
+        texts(&rt).join(" | ")
+    };
+    let on = shown_with(crate::history::HistoryRetention::Week);
+    assert!(on.contains("No dictations in the selected period"), "{on}");
+    assert!(!on.contains("Turn History on"), "{on}");
+    let off = shown_with(crate::history::HistoryRetention::Off);
+    assert!(off.contains("Turn History on"), "{off}");
+}
+
+/// R11: General names the engine dictation uses, and links to its setting.
+#[test]
+fn general_shows_the_active_engine_and_links_to_the_cloud_engine_row() {
+    use crate::transcription::cloud::{EngineChoice, Provider, force_route};
+    let engine_row = |engine: EngineChoice, route: Option<Provider>| {
+        force_route(route);
+        let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+        state.settings.engine = engine;
+        let mut rt = runtime_for(state, true, PANE_SIZE);
+        rt.update(|ui, _| ui.pane = Pane::General);
+        settle(&mut rt);
+        let label = element(&rt, "engine-control").label;
+        (rt, label)
+    };
+    let (_, label) = engine_row(EngineChoice::Auto, Some(Provider::Groq));
+    assert_eq!(label.as_deref(), Some("Groq (auto)"));
+    let (_, label) = engine_row(EngineChoice::Auto, None);
+    assert_eq!(label.as_deref(), Some("Parakeet v3 (local)"));
+    let (_, label) = engine_row(EngineChoice::Local, None);
+    assert_eq!(label.as_deref(), Some("Parakeet v3 (local)"));
+    let (mut rt, label) = engine_row(EngineChoice::Openai, Some(Provider::OpenAi));
+    assert_eq!(label.as_deref(), Some("OpenAI"));
+    assert!(rt.find("cloud-engine").is_none(), "Advanced starts closed");
+    tap(&mut rt, "engine-control");
+    assert!(rt.find("cloud-engine").is_some(), "the link opens Advanced");
+}
+
 #[test]
 fn the_explainer_draws_a_keycap_per_key_and_lines_up_the_lanes() {
     use crate::app_settings::{HotkeyBinding, HotkeyModifiers};

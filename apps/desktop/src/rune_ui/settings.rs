@@ -455,19 +455,53 @@ pub(super) fn restore_default(ui: &mut Ui, target: ShortcutTarget, default: Hotk
     }
 }
 
+/// Every whole percent, for a stored volume between the preset steps.
+const PERCENT_LABELS: [&str; 101] = [
+    "0%", "1%", "2%", "3%", "4%", "5%", "6%", "7%", "8%", "9%", "10%", "11%", "12%", "13%", "14%",
+    "15%", "16%", "17%", "18%", "19%", "20%", "21%", "22%", "23%", "24%", "25%", "26%", "27%",
+    "28%", "29%", "30%", "31%", "32%", "33%", "34%", "35%", "36%", "37%", "38%", "39%", "40%",
+    "41%", "42%", "43%", "44%", "45%", "46%", "47%", "48%", "49%", "50%", "51%", "52%", "53%",
+    "54%", "55%", "56%", "57%", "58%", "59%", "60%", "61%", "62%", "63%", "64%", "65%", "66%",
+    "67%", "68%", "69%", "70%", "71%", "72%", "73%", "74%", "75%", "76%", "77%", "78%", "79%",
+    "80%", "81%", "82%", "83%", "84%", "85%", "86%", "87%", "88%", "89%", "90%", "91%", "92%",
+    "93%", "94%", "95%", "96%", "97%", "98%", "99%", "100%",
+];
+
+/// The volume choices: the preset steps, plus the stored volume when it is
+/// not one of them (`0.8` shows as 80%, not as the nearest step).
+pub(super) fn sound_volume_options(settings: &AppSettings) -> Vec<(&'static str, f32)> {
+    let mut options = SOUND_VOLUME_STEPS.to_vec();
+    let volume = settings.sound_effect_volume.clamp(0.0, 1.0);
+    if settings.sound_effects
+        && volume > 0.0
+        && !SOUND_VOLUME_STEPS
+            .iter()
+            .any(|(_, step)| (step - volume).abs() < 0.005)
+    {
+        let label = PERCENT_LABELS[(volume * 100.0).round().clamp(0.0, 100.0) as usize];
+        let at = options
+            .iter()
+            .position(|(_, step)| *step > volume)
+            .unwrap_or(options.len());
+        options.insert(at, (label, volume));
+    }
+    options
+}
+
 pub(super) fn sound_volume_index(settings: &AppSettings) -> usize {
     if !settings.sound_effects {
         return 0;
     }
-    SOUND_VOLUME_STEPS[1..]
+    sound_volume_options(settings)
         .iter()
         .enumerate()
+        .skip(1)
         .min_by(|(_, (_, left)), (_, (_, right))| {
             (settings.sound_effect_volume - left)
                 .abs()
                 .total_cmp(&(settings.sound_effect_volume - right).abs())
         })
-        .map_or(0, |(index, _)| index + 1)
+        .map_or(0, |(index, _)| index)
 }
 
 pub(super) fn toggle_menu(ui: &mut Ui, menu: Menu) {
@@ -860,7 +894,7 @@ pub(super) fn desktop_commands(ui: &Ui, p: Paint) -> El {
             "paste-last",
             tr("Paste last dictation"),
             tr("Re-paste the most recent dictation"),
-            &["hex paste-last"],
+            &["wordink paste-last"],
         ),
         command_row(
             p,

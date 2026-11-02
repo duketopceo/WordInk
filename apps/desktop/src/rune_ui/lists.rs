@@ -155,7 +155,7 @@ pub(super) fn list_row(
                 .truncate(),
         );
     if selected {
-        item = item.fill(c.layer_02);
+        item = item.fill(super::brand::selected_fill(p.k));
     }
     source_item(select_at_once(item, selected, select), selected)
 }

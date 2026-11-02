@@ -29,6 +29,17 @@ fn interned(name: &str) -> &'static str {
     leaked
 }
 
+/// What General shows for the engine: the provider dictation runs on, or
+/// the local model, and how it was chosen.
+pub(super) fn active_engine_label(ui: &Ui, local_model: &str) -> String {
+    let choice = ui.settings.engine;
+    match (cloud::route_for_choice(choice), choice) {
+        (Some(provider), EngineChoice::Auto) => tr_fill("{} (auto)", provider.name()),
+        (Some(provider), _) => provider.name().to_owned(),
+        (None, _) => tr_fill("{} (local)", local_model),
+    }
+}
+
 /// The engine row, and the model row under it when the engine has models
 /// to choose between.
 pub(super) fn rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {

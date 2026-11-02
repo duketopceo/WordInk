@@ -71,6 +71,29 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let model = transcription_models::definition(ui.settings.transcription.model);
     let mut rows: Vec<CardRow> = Vec::new();
+    // The engine dictation runs on; pressing it opens Advanced, where it
+    // is chosen.
+    rows.push(
+        icon_row(
+            p,
+            "engine",
+            &WAVE,
+            tr("Engine"),
+            None,
+            value_button(
+                p,
+                "engine-control",
+                &super::cloud_engine::active_engine_label(ui, model.name),
+                &rune_theme_opencode::icons::CHEVRON_RIGHT,
+                |ui: &mut Ui| {
+                    if !advanced_open(ui, Pane::General) {
+                        ui.advanced.push(Pane::General);
+                    }
+                },
+            ),
+        )
+        .into(),
+    );
     if ui.records_shortcuts() {
         rows.extend(shortcut_rows(
             ui,
@@ -1075,13 +1098,15 @@ pub(super) fn sound_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow>
         "sound-volume",
         &VOLUME,
         tr("Sound volume"),
-        s::SOUND_VOLUME_STEPS
+        s::sound_volume_options(settings)
             .iter()
             .map(|(label, _)| tr(label))
             .collect(),
         s::sound_volume_index(settings),
         |ui, index| {
-            let volume = s::SOUND_VOLUME_STEPS[index].1;
+            let Some(&(_, volume)) = s::sound_volume_options(&ui.settings).get(index) else {
+                return;
+            };
             let saved = ui.update(|settings| {
                 settings.sound_effects = volume > 0.0;
                 if volume > 0.0 {

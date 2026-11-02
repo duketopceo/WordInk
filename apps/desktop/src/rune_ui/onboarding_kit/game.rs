@@ -39,7 +39,8 @@ use super::sparks::impacts;
 use super::stories::{Onboard, physical_shortcut_held};
 use crate::desktop::onboarding::Practice;
 
-const STAGE_W: f32 = 880.0;
+/// Fits the 823 px window a tiling desktop gives, with Done inside it.
+const STAGE_W: f32 = 820.0;
 const STAGE_H: f32 = 620.0;
 const HUD_AT: [f32; 2] = [STAGE_W * 0.5, STAGE_H - 34.0];
 const FRAME: Duration = Duration::from_millis(16);
@@ -178,7 +179,7 @@ struct Spec {
 /// Two columns of cards, centred on the stage with a small gutter.
 const LEFT: f32 = (STAGE_W - 2.0 * CARD_W - GUTTER) * 0.5;
 const RIGHT: f32 = LEFT + CARD_W + GUTTER;
-const GUTTER: f32 = 12.0;
+const GUTTER: f32 = 8.0;
 
 const SCRIPT: [Spec; 3] = [
     Spec {

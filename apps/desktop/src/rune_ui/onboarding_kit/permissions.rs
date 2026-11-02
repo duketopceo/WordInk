@@ -614,7 +614,7 @@ fn settings_window(p: Paint, e: f64, reduced: bool) -> El {
             p,
             "raycast",
             "Raycast",
-            squircle_icon(rune_theme_opencode::ember(dark, 9)),
+            squircle_icon(super::super::brand::ember(dark, 9)),
             true,
         ))
         .child(

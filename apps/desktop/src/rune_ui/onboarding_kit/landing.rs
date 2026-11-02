@@ -1,4 +1,4 @@
-//! Shared typography, motion transitions, and the `"Hex is ready"` finale.
+//! Shared typography, motion transitions, and the `"WordInk is ready"` finale.
 
 use rune::{El, Spring, SpringPair, TextStyle, Transition, col, el, row, text};
 use rune_kit::{Button, ButtonVariant};
@@ -144,7 +144,7 @@ pub(crate) fn keys(p: Paint, key: &str, caps: &[String], down: bool) -> El {
     )
 }
 
-/// Where Hex lives once onboarding closes, under `"Hex is ready"`.
+/// Where Hex lives once onboarding closes, under `"WordInk is ready"`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Home {
     MenuBar,
@@ -162,9 +162,9 @@ impl Home {
     }
 }
 
-/// Final `"Hex is ready"` landing: the thin single-hexagon mark arrives from
+/// Final `"WordInk is ready"` landing: the thin WordInk mark arrives from
 /// the top pill with a soft outline glow, followed by staggered copy and a
-/// quiet macOS menu-bar preview showing where Hex lives.
+/// quiet macOS menu-bar preview showing where WordInk lives.
 pub(crate) fn ready(
     p: Paint,
     caps: &[String],
@@ -184,6 +184,11 @@ pub(crate) fn ready(
         .gap(24.0)
         .items_center()
         .child(mark)
+        .child(motion.staggered(
+            super::super::brand::wordmark("wordmark", 20.0, p.text()),
+            0.5,
+            8.0,
+        ))
         .child(
             motion.staggered(
                 col()
@@ -220,7 +225,7 @@ pub(crate) fn hold_anywhere(p: Paint, caps: &[String]) -> El {
         )
 }
 
-/// Quiet capsule previewing the single-hexagon icon where Hex lives: the
+/// Quiet capsule previewing the WordInk icon where WordInk lives: the
 /// macOS menu bar, the Windows tray, or the Linux app launcher.
 fn menubar_hint(p: Paint, home: Home) -> El {
     let k = p.k;

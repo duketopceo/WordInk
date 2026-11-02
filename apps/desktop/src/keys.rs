@@ -5,7 +5,9 @@
 //! 1. the provider's environment variable (`GROQ_API_KEY`);
 //! 2. the OS keyring: Secret Service on Linux, Keychain on macOS, Credential
 //!    Manager on Windows;
-//! 3. a user-only (0600) file named for the provider (`groq.key`) beside
+//!    An instance with its own data folder (`HEX_APPLICATION_SUPPORT_DIR`)
+//!    skips 1 and 2 unless `WORDINK_ALLOW_SYSTEM_KEYS=1`.
+//! 3. a user-only (0600 on Unix; on Windows it takes the folder's access) file named for the provider (`groq.key`) beside
 //!    `settings.json`, for Linux sessions with no Secret Service.
 //!
 //! A key is never written to the settings file or to a log, and no function
@@ -57,10 +59,46 @@ pub fn resolve_order(
         .or_else(|| usable(file()).map(|key| (key, KeySource::File)))
 }
 
+/// Whether the environment and the OS keyring may supply keys. They may on a
+/// default install. An instance with its own data folder
+/// (`HEX_APPLICATION_SUPPORT_DIR`) is isolated: only that folder's key files
+/// count, unless `WORDINK_ALLOW_SYSTEM_KEYS=1` opts back in. This stops a
+/// test instance from sending audio on the owner's real provider key.
+pub fn system_keys_allowed() -> bool {
+    system_keys_allowed_for(
+        std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_some(),
+        std::env::var("WORDINK_ALLOW_SYSTEM_KEYS").ok().as_deref(),
+    )
+}
+
+fn system_keys_allowed_for(custom_dir: bool, opt_in: Option<&str>) -> bool {
+    !custom_dir || opt_in == Some("1")
+}
+
+/// Appended to "no key" messages and shown in Privacy when the instance is
+/// isolated, so the opt-in is discoverable.
+pub const ISOLATED_KEYS_HINT: &str = "This instance has its own data folder, so keys come only from <folder>/<provider>.key; set WORDINK_ALLOW_SYSTEM_KEYS=1 to also use the environment and the OS keyring.";
+
+/// [`resolve_order`], skipping the environment and the keyring when the
+/// instance is isolated.
+fn resolve_isolated(
+    system_allowed: bool,
+    env: Option<String>,
+    keyring: impl FnOnce() -> Option<String>,
+    file: impl FnOnce() -> Option<String>,
+) -> Option<(String, KeySource)> {
+    if system_allowed {
+        resolve_order(env, keyring, file)
+    } else {
+        resolve_order(None, || None, file)
+    }
+}
+
 /// The key for `account` (`groq`), looked up in order. `env_var` names its
 /// environment variable.
 pub fn resolve(account: &str, env_var: &str) -> Option<(String, KeySource)> {
-    resolve_order(
+    resolve_isolated(
+        system_keys_allowed(),
         std::env::var(env_var).ok(),
         || keyring_get(account),
         || {
@@ -77,7 +115,7 @@ pub fn resolve(account: &str, env_var: &str) -> Option<(String, KeySource)> {
 /// "unreadable right now".
 pub fn resolve_checked(account: &str, env_var: &str) -> (Option<(String, KeySource)>, bool) {
     let found = resolve(account, env_var);
-    let unreadable = found.is_none() && !keyring_usable();
+    let unreadable = found.is_none() && system_keys_allowed() && !keyring_usable();
     (found, unreadable)
 }
 
@@ -93,7 +131,8 @@ pub fn store(account: &str, key: &str) -> Result<KeySource> {
     if key.is_empty() {
         return Err(eyre!("the key is empty"));
     }
-    if keyring_set(account, key) {
+    // An isolated instance reads only its own key files, so it saves there.
+    if system_keys_allowed() && keyring_set(account, key) {
         return Ok(KeySource::Keyring);
     }
     write_key_file(&file_path(account)?, key)?;
@@ -353,6 +392,31 @@ mod tests {
             !asked.get(),
             "the keyring is never asked when the environment answers"
         );
+    }
+
+    #[test]
+    fn a_custom_support_dir_ignores_the_environment_and_the_keyring() {
+        let found = resolve_isolated(false, some("env-key"), || some("ring-key"), || None);
+        assert_eq!(found, None);
+        let found = resolve_isolated(
+            false,
+            some("env-key"),
+            || some("ring-key"),
+            || some("file-key"),
+        );
+        assert_eq!(found, Some(("file-key".into(), KeySource::File)));
+    }
+
+    #[test]
+    fn the_opt_in_restores_the_full_order_and_the_default_install_is_unchanged() {
+        assert!(!system_keys_allowed_for(true, None));
+        assert!(!system_keys_allowed_for(true, Some("0")));
+        assert!(system_keys_allowed_for(true, Some("1")));
+        assert!(system_keys_allowed_for(false, None));
+        let found = resolve_isolated(true, some("env-key"), || some("ring-key"), || some("f"));
+        assert_eq!(found, Some(("env-key".into(), KeySource::Env)));
+        let found = resolve_isolated(true, None, || some("ring-key"), || some("f"));
+        assert_eq!(found, Some(("ring-key".into(), KeySource::Keyring)));
     }
 
     #[cfg(unix)]
