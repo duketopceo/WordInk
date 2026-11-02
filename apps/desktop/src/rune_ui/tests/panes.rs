@@ -2132,7 +2132,7 @@ fn a_clip_recorded_for_a_local_model_asks_before_it_goes_to_the_cloud() {
 fn a_recovered_dictation_shows_its_text_with_copy_and_paste_and_inserts_nothing() {
     let mut rt = runtime("history-recovered", true, PANE_SIZE);
     let text = rt.state.history.recovered.as_ref().unwrap().text.clone();
-    assert!(texts(&rt).iter().any(|shown| *shown == text));
+    assert!(texts(&rt).contains(&text));
     assert!(
         rt.find("history-recovered-copy").is_some() && rt.find("history-recovered-paste").is_some()
     );

@@ -75,11 +75,11 @@ pub fn merge(config: &toml::Table, settings: &mut AppSettings) -> Report {
     match config.get("text").and_then(toml::Value::as_table) {
         Some(text) => {
             merge_replacements(text, settings, &mut report);
-            if let Some(on) = flag(text, "filter_fillers", "text", &mut report) {
-                if on && !settings.labs.filler_words {
-                    settings.labs.filler_words = true;
-                    report.fillers_enabled = true;
-                }
+            if let Some(true) = flag(text, "filter_fillers", "text", &mut report)
+                && !settings.labs.filler_words
+            {
+                settings.labs.filler_words = true;
+                report.fillers_enabled = true;
             }
             if let Some(on) = flag(text, "spoken_punctuation", "text", &mut report) {
                 // Voxtype's one switch covers both of WordInk's: spoken
@@ -435,8 +435,10 @@ mod tests {
         );
         assert!((settings.recording_duck_volume - 0.35).abs() < 1e-6);
 
-        let mut chosen = AppSettings::default();
-        chosen.recording_audio_behavior = RecordingAudioBehavior::Mute;
+        let mut chosen = AppSettings {
+            recording_audio_behavior: RecordingAudioBehavior::Mute,
+            ..AppSettings::default()
+        };
         let report = merge(&config, &mut chosen);
         assert!(report.media_kept && report.media.is_none());
         assert_eq!(

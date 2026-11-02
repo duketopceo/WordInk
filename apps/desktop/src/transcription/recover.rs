@@ -129,6 +129,7 @@ pub struct Retried {
     pub text: String,
     pub usage: UsageRecord,
     /// The History entry the text was recorded as, when History is on.
+    #[allow(dead_code)] // read by tests; kept for a future "show in History" link
     pub entry_id: Option<u64>,
 }
 

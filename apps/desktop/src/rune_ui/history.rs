@@ -28,6 +28,7 @@ pub(super) struct Retrying {
     pub(super) result: Receiver<Result<Retried, RetryError>>,
     /// A fixture sends nothing, so nothing answers; this keeps the channel
     /// open so the pane reads as waiting rather than stopped.
+    #[allow(dead_code)] // held only to keep the channel open
     pub(super) fixture_sender: Option<std::sync::mpsc::Sender<Result<Retried, RetryError>>>,
 }
 
@@ -121,7 +122,7 @@ impl HistoryPane {
     pub(super) fn engine_for(&self, clip: &FailedClip) -> Provider {
         self.retry_engine
             .or_else(|| Provider::from_id(&clip.origin))
-            .or_else(|| cloud::chosen_provider())
+            .or_else(cloud::chosen_provider)
             .unwrap_or(Provider::Groq)
     }
 
