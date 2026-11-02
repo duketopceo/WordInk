@@ -253,7 +253,7 @@ pub fn set_from(
     let key = line.trim();
     if key.is_empty() {
         return Err(eyre!(
-            "no key on stdin; pipe it in, e.g. `keyring helper get ... | wordink keys set {provider}`"
+            "no key on stdin; pipe it in, e.g. `secret-tool lookup service {provider} account default | wordink keys set {provider}`"
         ));
     }
     let source = save(provider, key)?;
