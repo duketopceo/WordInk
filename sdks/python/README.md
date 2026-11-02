@@ -35,8 +35,8 @@ token earns a clean `403` — the vocabulary routes need admin scope).
 ## CLI
 
 ```bash
-wordink transcribe meeting.m4a            # transcript to stdout
-wordink transcribe a.wav --language en --prompt "Kurultai, Omarchy"
+wordink-sdk transcribe meeting.m4a            # transcript to stdout
+wordink-sdk transcribe a.wav --language en --prompt "Kurultai, Omarchy"
 wordink dictate                           # mic → Enter/Ctrl-C → transcript
 wordink dictate --seconds 10 | wl-copy    # fixed-length capture to clipboard
 wordink models                            # what the gateway serves
