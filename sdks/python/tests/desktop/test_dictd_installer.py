@@ -244,7 +244,7 @@ def _lua_env(env: Env) -> tuple[Path, Path]:
     hypr = env.home / ".config" / "hypr"
     (hypr / "hyprland.lua").write_text('require("hypr.bindings")\n')
     bindings = hypr / "bindings.lua"
-    bindings.write_text('o.bind("SUPER + D", "Wisp", { launch = "wisp" })')  # no trailing newline, as people leave it
+    bindings.write_text('o.bind("SUPER + D", "PTT tool", { launch = "ptt-tool" })')  # no trailing newline, as people leave it
     return hypr / "wordink-dictd.lua", bindings
 
 
@@ -255,7 +255,7 @@ def test_a_hyprland_lua_config_gets_lua_binds_and_hyprland_conf_is_left_alone(en
     assert r.returncode == 0, r.stderr + r.stdout
     assert 'o.bind("SUPER + ALT + D"' in lua.read_text()
     text = bindings.read_text()
-    assert text.startswith('o.bind("SUPER + D", "Wisp", { launch = "wisp" })\n')
+    assert text.startswith('o.bind("SUPER + D", "PTT tool", { launch = "ptt-tool" })\n')
     assert text.count(LUA_BEGIN) == 1 and "dofile(p)" in text and "/hypr/wordink-dictd.lua" in text
     assert env.path(".config/hypr/hyprland.conf").read_text() == conf_before
     assert not env.path(".config/hypr/wordink-dictd.conf").exists()
@@ -270,7 +270,7 @@ def test_lua_install_is_idempotent_and_uninstall_restores_the_files(env):
     r = env.run("--uninstall")
     assert r.returncode == 0, r.stderr + r.stdout
     assert not lua.exists()
-    assert bindings.read_text().strip() == 'o.bind("SUPER + D", "Wisp", { launch = "wisp" })'
+    assert bindings.read_text().strip() == 'o.bind("SUPER + D", "PTT tool", { launch = "ptt-tool" })'
 
 
 def test_lua_mode_falls_back_to_hyprland_lua_when_there_is_no_bindings_file(env):

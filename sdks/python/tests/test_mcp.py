@@ -19,10 +19,10 @@ def test_vocab_list_returns_json(monkeypatch):
     monkeypatch.setattr(
         mcp_server,
         "vocab_list",
-        lambda **kw: {"object": "list", "data": [{"term": "kurultai", "source": "runtime"}]},
+        lambda **kw: {"object": "list", "data": [{"term": "acmeapp", "source": "runtime"}]},
     )
     out = run(mcp_server.vocab_list_tool())
-    assert json.loads(out)["data"][0]["term"] == "kurultai"
+    assert json.loads(out)["data"][0]["term"] == "acmeapp"
 
 
 def test_vocab_add_passes_terms_and_dry_run(monkeypatch):
@@ -33,7 +33,7 @@ def test_vocab_add_passes_terms_and_dry_run(monkeypatch):
         return {"object": "list", "data": [{"term": t, "outcome": "added"} for t in terms]}
 
     monkeypatch.setattr(mcp_server, "vocab_add", fake_add)
-    out = run(mcp_server.vocab_add_tool(["kurultai"], dry_run=True))
+    out = run(mcp_server.vocab_add_tool(["acmeapp"], dry_run=True))
     assert json.loads(out)["data"][0]["outcome"] == "added"
     assert seen == {"dry_run": True}
 
@@ -47,21 +47,21 @@ def test_vocab_remove_passes_via_post(monkeypatch):
         return {"object": "list", "data": [{"term": term, "outcome": "removed"}]}
 
     monkeypatch.setattr(mcp_server, "vocab_remove", fake_remove)
-    out = run(mcp_server.vocab_remove_tool("kurultai", via_post=True))
+    out = run(mcp_server.vocab_remove_tool("acmeapp", via_post=True))
     assert json.loads(out)["data"][0]["outcome"] == "removed"
-    assert seen == {"term": "kurultai", "via_post": True}
+    assert seen == {"term": "acmeapp", "via_post": True}
 
 
 def test_tools_surface_wordink_errors_as_text(monkeypatch):
     def boom(**kw):
-        raise WordInkError("Kurultai is config-pinned", code="term_pinned", status=409)
+        raise WordInkError("Acmeapp is config-pinned", code="term_pinned", status=409)
 
     monkeypatch.setattr(mcp_server, "vocab_list", boom)
     monkeypatch.setattr(mcp_server, "vocab_add", lambda terms, **kw: boom())
     monkeypatch.setattr(mcp_server, "vocab_remove", lambda term, **kw: boom())
 
     # The gateway's error code must reach the agent, not just a human message.
-    assert run(mcp_server.vocab_list_tool()) == "wordink: 409 term_pinned: Kurultai is config-pinned"
+    assert run(mcp_server.vocab_list_tool()) == "wordink: 409 term_pinned: Acmeapp is config-pinned"
     assert "term_pinned" in run(mcp_server.vocab_add_tool(["x"]))
     assert "term_pinned" in run(mcp_server.vocab_remove_tool("x"))
 

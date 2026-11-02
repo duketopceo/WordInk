@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // wordink-gateway: run and administer the WordInk desktop gateway (KTD8, R9, R13).
 // The config file names the environment variables holding provider keys — never key
-// material itself; the systemd wrapper (examples/gateway-systemd) fills them from omaseal.
+// material itself; the systemd wrapper (examples/gateway-systemd) fills them from the desktop keyring.
 import { createServer } from "node:http";
 import { createNodeHandler, FileTokenStore, FileVocabularyStore, defaultTokenPath, defaultVocabularyPath } from "../node.js";
 import { DEFAULT_MODELS } from "../gateway/providers.js";

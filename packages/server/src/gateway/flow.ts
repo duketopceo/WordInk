@@ -11,7 +11,7 @@ export interface FlowOptions {
   resolveCorrections?: boolean | undefined;
   /** Convert spoken list markers (`first ... second ...`, `bullet one ...`) into formatted lists. Default `true`. */
   formatLists?: boolean | undefined;
-  /** Case-insensitive phrase triggers expanded during cleanup (e.g. `{"my calendly": "https://cal.com/luke"}`). */
+  /** Case-insensitive phrase triggers expanded during cleanup (e.g. `{"my calendly": "https://example.com/alex"}`). */
   snippets?: Readonly<Record<string, string>> | undefined;
   /** Preferred vocabulary spellings included when building LLM cleanup prompts. */
   vocabulary?: readonly string[] | undefined;
@@ -280,8 +280,8 @@ function buildListFromMatches(
 }
 
 /**
- * Case-insensitive phrase trigger replacement (e.g. `{"my calendly": "https://cal.com/luke"}`
- * expands `"send my calendly"` -> `"send https://cal.com/luke"`).
+ * Case-insensitive phrase trigger replacement (e.g. `{"my calendly": "https://example.com/alex"}`
+ * expands `"send my calendly"` -> `"send https://example.com/alex"`).
  */
 export function expandSnippets(text: string, snippets: Readonly<Record<string, string>>): string {
   if (!text) return text;
@@ -407,7 +407,7 @@ function applyEmailTone(text: string): string {
     working = working.slice(gMatch[0].length).trim();
   }
 
-  // Match trailing sign-off: "best luke", "thanks, luke", "best regards", "cheers"
+  // Match trailing sign-off: "best alex", "thanks, alex", "best regards", "cheers"
   const signOffRe =
     /(?:^|[.!?,]\s+|\s+)(best\s+regards|kind\s+regards|warm\s+regards|many\s+thanks|thank\s+you|thanks|regards|sincerely|cheers|best)(?:\s*[,:-]?\s+([a-z][a-z'-]*(?:\s+[a-z][a-z'-]*)?))?[.!]?$/i;
   const sMatch = signOffRe.exec(working);

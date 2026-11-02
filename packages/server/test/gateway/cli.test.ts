@@ -356,12 +356,12 @@ describe("vocabulary visibility (R11)", () => {
   it("check reports config count and the runtime store state", async () => {
     writeConfig({
       providers: [{ provider: "groq", keyEnv: "WORDINK_TEST_KEY_A" }],
-      vocabulary: ["Omarchy", "Kurultai"],
+      vocabulary: ["Omarchy", "Acmeapp"],
     });
     mkdirSync(vocabDir(), { recursive: true });
     writeFileSync(
       join(vocabDir(), "vocabulary.json"),
-      JSON.stringify({ version: 1, terms: [{ term: "wisp", addedBy: "a", addedAt: "t" }] }),
+      JSON.stringify({ version: 1, terms: [{ term: "ptt-tool", addedBy: "a", addedAt: "t" }] }),
     );
     const r = await run(["check"], { WORDINK_TEST_KEY_A: KEY_A });
     expect(r.stdout).toContain("vocabulary: 2 config terms");

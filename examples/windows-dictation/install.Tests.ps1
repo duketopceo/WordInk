@@ -26,7 +26,7 @@ BeforeAll {
 
 Describe 'install.ps1' {
     BeforeEach {
-        $env:USERNAME = 'luke'
+        $env:USERNAME = 'alex'
         $script:launcher = [pscustomobject]@{ Execute = 'C:\tools\bin\wordink-dictd-tray.exe'; Arguments = '' }
     }
 
@@ -210,7 +210,7 @@ Describe 'install.ps1' {
             . $script:Installer -Uninstall
             $p = New-Rig
             Set-Content $p.Rollback 'x'
-            $vocab = Join-Path $TestDrive 'vocabulary.txt'; Set-Content $vocab 'kurultai'
+            $vocab = Join-Path $TestDrive 'vocabulary.txt'; Set-Content $vocab 'acmeapp'
             New-Item -ItemType Directory -Force $p.LegacyBackup | Out-Null
             $backup = Join-Path $p.LegacyBackup 'Groq Flow.lnk'; Set-Content $backup 'lnk'
             Mock Test-UvInstalled { $true }

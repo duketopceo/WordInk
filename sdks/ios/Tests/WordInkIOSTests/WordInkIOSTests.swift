@@ -164,7 +164,7 @@ final class WordInkIOSTests: XCTestCase {
             lists: false,
             whisperMode: true,
             selectedText: "Let us meet tomorrow.",
-            snippets: ["my calendly": "https://cal.com/luke"],
+            snippets: ["my calendly": "https://example.com/alex"],
             vocabulary: ["WordInk", "Omarchy"]
         )
         let audioBytes = Data([0x52, 0x49, 0x46, 0x46, 0x01, 0x02])
@@ -235,12 +235,12 @@ final class WordInkIOSTests: XCTestCase {
             options: FlowRequestOptions(
                 tone: .work,
                 stripFillers: true,
-                snippets: ["my calendly": "https://cal.com/luke"]
+                snippets: ["my calendly": "https://example.com/alex"]
             )
         )
 
         XCTAssertEqual(output.source, .onDeviceWhisperKit)
-        XCTAssertEqual(output.text, "Ship the release with https://cal.com/luke.")
+        XCTAssertEqual(output.text, "Ship the release with https://example.com/alex.")
 
         // Also verify immediate offline routing without calling primary
         let offlineRouter = TranscriberRouter(

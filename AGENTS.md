@@ -1,6 +1,8 @@
 # AGENTS.md: WordInk
 
-WordInk is an open-source, provider-agnostic dictation platform. It's SDK first: a Rust sans-I/O core compiled to WebAssembly, a TypeScript browser host, a `<wordink-mic>` web component, a React hook, a local engine and a credential relay. A desktop app comes later. The plan of record is `docs/plans/2026-10-04-1757-feat-wordink-web-sdk-plan.md`, and the phases are in `ROADMAP.md`. Repo name `WordInk`, npm scope `@wordink`.
+WordInk is open-source dictation. The direction is **one desktop app**, `apps/desktop`, based on Hex (MIT) and arriving in a pull request. It uses Groq by default and Parakeet v3 locally with no key, and targets Linux on any Wayland desktop, Windows, and macOS on Apple silicon. The current plan is `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`; `docs/archive/` holds superseded plans. Phases and status are in `ROADMAP.md`.
+
+Until the app reaches parity on each OS, the Python `wordink-dictd` (`sdks/python`) is the working desktop client. Three products are separate and stay separate: the web SDK (`packages/core`, `web`, `react`, `local`), the gateway (`packages/server`) and the iOS app (`apps/ios`, `sdks/ios`). Repo name `WordInk`, npm scope `@wordink`.
 
 ## Commands
 
@@ -9,20 +11,23 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build -p wordink-wasm --target wasm32-unknown-unknown --release
-pnpm install && pnpm typecheck && pnpm test
-cd legacy && uv sync && uv run python -m compileall wordink   # legacy app
+pnpm install && pnpm typecheck && pnpm test     # build packages first if imports fail: pnpm --filter "./packages/*" build
+cd sdks/python && uv run pytest                 # wordink-dictd and the Python SDK
+scripts/scrub-check.sh <expressions-file>       # private strings must not appear in the tree
 ```
 
 ## Architecture invariants
 
-- `wordink-core` does no I/O: no sockets, clocks, threads or filesystem. It emits effects and takes events. Hosts (browser TS now, native Rust later) perform I/O. Don't add I/O dependencies to the core.
-- The core wasm has a 150 KB gzip budget (KTD1). Check size before adding a crate.
+- `wordink-core` does no I/O: no sockets, clocks, threads or filesystem. It emits effects and takes events. Hosts (the browser TS host) perform I/O. Don't add I/O dependencies to the core.
+- The core wasm has a 150 KB gzip budget. Check size before adding a crate.
 - Long-lived provider keys never go to the browser. `@wordink/server` fails closed until an `authorize` hook is supplied. Dev-key mode is localhost-only.
 - No telemetry leaves the end user's device.
-- `legacy/` is the original Python app, kept runnable until WordInk Desktop replaces it. Its data still lives in `~/.groq_flow/` (don't rename: that's user data).
+- Shared behavior fixtures live in `tests/fixtures/` and are checked by the TypeScript, Python and Swift tests. Change a fixture and its tests together.
+- No personal or machine-specific details in the repo: no real hostnames, home paths, personal emails or private tool names. Use `example.com`, `Alex`, `~`.
+- TypeWhisper is GPL-3.0: use its ideas only, never its code, strings or assets.
 
 ## Workflow
 
-- `master` is protected (PR + 1 review, squash-only). Work happens on branches, one PR per plan unit (U1-U9).
+- `master` is protected (PR + 1 review, squash-only). Work happens on branches, one PR per plan unit.
 - Add a changeset (`pnpm changeset`) for any change to a published package.
-- Don't hand-edit lockfiles (`Cargo.lock`, `pnpm-lock.yaml`, `legacy/uv.lock`).
+- Don't hand-edit lockfiles (`Cargo.lock`, `pnpm-lock.yaml`, `uv.lock`).

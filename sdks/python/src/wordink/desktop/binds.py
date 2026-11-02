@@ -1,4 +1,4 @@
-"""The Hyprland bind contract: what the compositor runs, and which keys are off limits."""
+"""The Hyprland bind contract: what the compositor runs."""
 
 from __future__ import annotations
 
@@ -6,8 +6,6 @@ import json
 
 from ..client import WordInkError
 
-#: Keys another resident tool owns. wisp holds `SUPER, D` for push-to-talk on the same machine.
-RESERVED_BINDS = frozenset({"SUPER|D"})
 _MODIFIERS = {"SUPER", "ALT", "CTRL", "SHIFT", "MOD2", "MOD3", "MOD5"}
 
 
@@ -27,13 +25,10 @@ def normalize_bind(bind: str) -> str:
 
 
 def validate_binds(hold: str, toggle: str) -> None:
-    """Both binds parse, differ from each other, and avoid the keys wisp already owns."""
+    """Both binds parse, and differ from each other."""
     h, t = normalize_bind(hold), normalize_bind(toggle)
     if h == t:
         raise WordInkError("the hold and toggle binds must be different keys")
-    for label, norm, raw in (("hold", h, hold), ("toggle", t, toggle)):
-        if norm in RESERVED_BINDS:
-            raise WordInkError(f"the {label} bind {raw!r} is wisp's push-to-talk key; pick another")
 
 
 def hyprland_bind_lines(hold: str, toggle: str, exe: str = "wordink-dictd") -> list[str]:

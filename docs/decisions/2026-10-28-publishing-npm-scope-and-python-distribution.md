@@ -20,5 +20,5 @@ Date: 2026-10-28. Status: decided (owner approved npm scope and trusted publishi
 ## Python: `uvx` from git now, PyPI later
 
 - `sdks/python` (`wordink`, which provides `wordink` and `wordink-mcp`, and the planned `wordink-dictd`) is distributed as `uvx --from "git+https://github.com/duketopceo/WordInk#subdirectory=sdks/python" wordink`, and installed on Linux desktops by the dictation installer with `uv tool install` from the same source.
-- Why: no registry account, no token and no spend; the only users today are Luke's own machines and the MCP clients he configures. `uv` is already installed on omarchy-max. Installing from git pins to a ref, so a release is a tag.
+- Why: no registry account, no token and no spend; the only users today are Alex's own machines and the MCP clients he configures. `uv` is already installed on my-laptop. Installing from git pins to a ref, so a release is a tag.
 - PyPI is deferred until there is outside demand. The name `wordink` is unclaimed on PyPI (404 as of this date). When wanted, publish with a PyPI trusted publisher for `release.yml`-style OIDC, not an API token.
