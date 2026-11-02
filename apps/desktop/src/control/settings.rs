@@ -506,8 +506,26 @@ const KEYS: &[Key] = &[
     ),
     key(
         "engine",
-        Kind::Choice(&["auto", "local", "groq"]),
-        "Which engine dictation uses: auto (Groq when a key is set, else the local model), local, or groq. Keys are set with `wordink keys set groq`",
+        Kind::Choice(&[
+            "auto",
+            "local",
+            "groq",
+            "openrouter",
+            "openai",
+            "deepgram",
+            "gateway",
+        ]),
+        "Which engine dictation uses: auto (Groq when a key is set, else the local model), local, or a cloud provider. Keys are set with `wordink keys set <provider>`",
+    ),
+    optional(
+        "engine_model",
+        Kind::Text,
+        "The model the cloud engine uses: an OpenRouter audio model id, `whisper-1` for openai; none uses the provider's default",
+    ),
+    optional(
+        "gateway_url",
+        Kind::Text,
+        "The WordInk gateway's URL (https; http only for localhost). Its token is set with `wordink keys set gateway`",
     ),
     key(
         "indicator_style",

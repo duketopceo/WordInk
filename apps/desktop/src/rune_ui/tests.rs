@@ -2315,6 +2315,8 @@ fn goldens() {
         check_golden("portal", dark, GOLDEN_SIZE);
         for scene in [
             "history",
+            "history-failed",
+            "usage",
             "mac-labs-link",
             "output",
             "modes",

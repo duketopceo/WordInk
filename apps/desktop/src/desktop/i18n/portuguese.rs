@@ -273,6 +273,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Commands listen all the time, so WordInk stops releasing the microphone when idle", "Os comandos ouvem o tempo todo, então o WordInk deixa de liberar o microfone quando ocioso"),
     ("Modes", "Modos"),
     ("History", "Histórico"),
+    ("Usage", "Uso"),
     ("Add mode", "Adicionar modo"),
     ("Add correction", "Adicionar correção"),
     ("Vocabulary", "Vocabulário"),

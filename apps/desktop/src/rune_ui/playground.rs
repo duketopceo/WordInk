@@ -178,6 +178,10 @@ const PATHS: &[(&str, &str)] = &[
     ("privacy", "Window/Privacy/Privacy"),
     ("history", "Window/History/History"),
     ("history-empty", "Window/History/Empty"),
+    ("history-failed", "Window/History/Failed dictations"),
+    ("history-recovered", "Window/History/Recovered dictation"),
+    ("usage", "Window/Usage/Usage"),
+    ("usage-empty", "Window/Usage/Empty"),
     #[cfg(hex_capture)]
     ("mac-scrawl", "Window/Annotate/On"),
     #[cfg(hex_capture)]

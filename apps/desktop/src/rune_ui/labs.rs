@@ -21,7 +21,7 @@ pub(super) static LABS_ICON: Icon = Icon {
 };
 
 /// The main sidebar's panes, in order: General, Output, Replacements,
-/// Sounds, History, Privacy, then the features turned on (Meetings and
+/// Sounds, History, Usage, Privacy, then the features turned on (Meetings and
 /// Voice Filter from Labs, Annotate in dev builds).
 pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
     let mut panes = vec![
@@ -30,6 +30,7 @@ pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
         Pane::Replacements,
         Pane::Sounds,
         Pane::History,
+        Pane::Usage,
         Pane::Privacy,
     ];
     #[cfg(hex_capture)]

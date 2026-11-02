@@ -901,6 +901,7 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     if ui.platform.caps.os != super::platform::Os::Macos {
         rows.push(speech_engine_row(ui, p, layer));
     }
+    rows.extend(super::cloud_engine::rows(ui, p, layer));
     rows
 }
 
