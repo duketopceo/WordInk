@@ -650,7 +650,7 @@ fn keys() -> impl Iterator<Item = &'static Key> {
 #[cfg(test)]
 const INTERNAL: &[&str] = &["migrations", "mouse_shortcut_notice"];
 
-/// Settings another `hex` command edits instead (`hex vocabulary`).
+/// Settings another `hex` command edits instead (`wordink vocabulary`).
 #[cfg(test)]
 const OWN_COMMAND: &[&str] = &["vocabulary"];
 
@@ -703,7 +703,7 @@ fn recognition_hints(settings: &AppSettings) -> SettingValue {
         kind: Kind::Text.name().into(),
         choices: Vec::new(),
         writable: true,
-        about: "Deprecated: the vocabulary's terms; setting it adds names to the vocabulary                 (use `hex vocabulary`)"
+        about: "Deprecated: the vocabulary's terms; setting it adds names to the vocabulary                 (use `wordink vocabulary`)"
             .into(),
         available: true,
     }
@@ -794,7 +794,7 @@ pub fn apply(
             settings: candidate,
             effects: Vec::new(),
             message: "Added the names to the vocabulary (transcription.recognition_hints is \
-                      deprecated; use `hex vocabulary`)"
+                      deprecated; use `wordink vocabulary`)"
                 .into(),
         });
     }

@@ -103,7 +103,7 @@ impl VocabularyEditor {
     }
 
     /// The rows as saved entries: blank terms are left out and repeated
-    /// terms merge, as `hex vocabulary add` does.
+    /// terms merge, as `wordink vocabulary add` does.
     pub(super) fn project(&self) -> Vec<VocabularyEntry> {
         self.projection().0
     }

@@ -669,7 +669,7 @@ fn agent_prompt() -> String {
          node:child_process, is documented at {TRANSFORMS_DOCS}).\n\
          \n\
          Names WordInk should know (people, products, projects) go in the shared vocabulary, \
-         not in replacements: `hex vocabulary add <term> --sounds-like a,b` (and `list`, \
+         not in replacements: `wordink vocabulary add <term> --sounds-like a,b` (and `list`, \
          `remove`). Every app uses it, and the AI rewrite spells its terms right. Use \
          replacements for fixed swaps and deletions, such as a word to an emoji or \
          dropping \"um\".\n\

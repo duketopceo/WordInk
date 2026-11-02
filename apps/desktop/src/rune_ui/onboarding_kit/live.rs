@@ -1,6 +1,6 @@
 //! Hex's first run: the onboarding story, the one onboarding on every OS.
 //! A new install (or an upgrade whose setup isn't ready) opens it at
-//! launch, and Run setup again and `hex onboarding reset` replay it. The
+//! launch, and Run setup again and `wordink onboarding reset` replay it. The
 //! window's tour ([`onboarding`](super::super::onboarding)) is the state
 //! machine underneath: it starts the model download, asks for the
 //! permissions, relaunches when macOS needs it, watches the practice
@@ -320,7 +320,7 @@ pub(in crate::rune_ui) fn fixture_resume(ui: &mut Ui, page: Page) {
     poll(ui, &mut tx);
 }
 
-/// "Run setup again" and `hex onboarding reset`: forgets that onboarding
+/// "Run setup again" and `wordink onboarding reset`: forgets that onboarding
 /// finished and opens it now. Settings, history, models, and permissions
 /// stay as they are, so the run finds them ready and passes their steps.
 pub(crate) fn restart(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {

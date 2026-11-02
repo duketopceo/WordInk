@@ -894,7 +894,7 @@ pub(super) fn desktop_commands(ui: &Ui, p: Paint) -> El {
             "paste-last",
             tr("Paste last dictation"),
             tr("Re-paste the most recent dictation"),
-            &["hex paste-last"],
+            &["wordink paste-last"],
         ),
         command_row(
             p,

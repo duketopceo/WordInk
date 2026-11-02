@@ -78,7 +78,7 @@ pub(crate) const ADAM: Notice = Notice {
     app: App::Slack,
     from: "Adam",
     place: Some("#hex"),
-    body: "hex just typed my standup into figma",
+    body: "WordInk just typed my standup into figma",
     field: "Reply in thread",
 };
 
@@ -111,7 +111,7 @@ pub(crate) enum Reply<'a> {
 pub(crate) fn lines_card_height(n: &Notice, lines: usize) -> f32 {
     // Measure how many lines `n.body` takes inside the top message column
     // (`CARD_W - 2*CARD_PAD - ICON - 10.0`).
-    let k = rune_theme_opencode::kit(true);
+    let k = super::super::brand::kit(true);
     let body_w = CARD_W - 2.0 * CARD_PAD - ICON - 10.0;
     let (_, bh) = rune::text::measure(n.body, &[], k.ty.ui, Some(body_w));
     let top_h = (12.0 + 1.0 + 20.0 + 1.0 + bh).max(ICON);
@@ -208,8 +208,8 @@ pub(crate) fn notice(p: Paint, n: &Notice, reply: Reply<'_>, example: bool) -> E
 /// Right-aligned sent bubbles for the accidental double-send typos!
 fn sent_thread(p: Paint, bubbles: &[String]) -> El {
     let k = p.k;
-    let bubble_bg = rune_theme_opencode::scale("cobalt", k.dark, if k.dark { 4 } else { 3 });
-    let bubble_rim = rune_theme_opencode::scale("cobalt", k.dark, if k.dark { 7 } else { 6 });
+    let bubble_bg = super::super::brand::ember(k.dark, if k.dark { 4 } else { 3 });
+    let bubble_rim = super::super::brand::ember(k.dark, if k.dark { 7 } else { 6 });
     let mut list = col().key("sent-thread").w_full().gap(5.0).items_end();
     for (i, msg) in bubbles.iter().enumerate() {
         list = list.child(
