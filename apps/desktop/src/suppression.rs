@@ -5692,7 +5692,8 @@ mod tests {
     fn chord_evidence_skips_escape_and_hex_shortcuts() {
         let hotkeys = RuntimeHotkeys::default();
         assert!(is_chord_evidence(18, OPTION_KEY_MASK, hotkeys));
-        assert!(is_chord_evidence(49, OPTION_KEY_MASK, hotkeys));
+        // ⌥Space is the dictation shortcut itself, so it is not evidence.
+        assert!(!is_chord_evidence(49, OPTION_KEY_MASK, hotkeys));
         assert!(!is_chord_evidence(
             ESCAPE_KEY_CODE,
             OPTION_KEY_MASK,

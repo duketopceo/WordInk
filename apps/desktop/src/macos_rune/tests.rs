@@ -148,6 +148,17 @@ fn mapped_settings_in(model: TranscriptionModelId, language: &str) -> AppSetting
     }
 }
 
+/// Settings whose current model is the old default, so a mapping to Parakeet
+/// v3 (now the default) is a real switch, not the current model.
+fn mapped_from_unified_english(model: TranscriptionModelId) -> AppSettings {
+    let mut settings = mapped_settings(model);
+    settings.transcription = TranscriptionSelection {
+        model: TranscriptionModelId::ParakeetUnifiedEnglish,
+        language: "en".into(),
+    };
+    settings
+}
+
 #[test]
 fn a_mapping_to_the_current_model_in_another_language_switches_the_language() {
     let mut settings = mapped_settings_in(TranscriptionModelId::ParakeetV3, "es");
@@ -176,7 +187,7 @@ fn hex_model_use_with_the_current_model_and_language_loads_nothing() {
 
 #[test]
 fn input_source_choices_use_installed_only_preparation_and_manual_choices_supersede_them() {
-    let settings = mapped_settings(TranscriptionModelId::ParakeetV3);
+    let settings = mapped_from_unified_english(TranscriptionModelId::ParakeetV3);
     let expected = settings.transcription_for_model(TranscriptionModelId::ParakeetV3);
     let mut fixture = Fixture::new(settings);
     fixture.source("ABC");
@@ -227,7 +238,7 @@ fn choosing_the_current_model_keeps_manual_preparation_when_switching_is_disable
 
 #[test]
 fn cycling_through_a_mapped_source_keeps_manual_preparation_until_a_switch_is_due() {
-    let mut fixture = Fixture::new(mapped_settings(TranscriptionModelId::ParakeetV3));
+    let mut fixture = Fixture::new(mapped_from_unified_english(TranscriptionModelId::ParakeetV3));
     fixture.start_manual();
     fixture.source("Spanish");
     fixture.assert_manual_pending();

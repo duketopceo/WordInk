@@ -1597,8 +1597,15 @@ mod tests {
             },
             key: None,
         }));
+        // A bare ⌥ (the default is ⌥Space now) takes both too.
         assert!(
-            binding.overlaps(&HotkeyBinding::default()),
+            binding.overlaps(&HotkeyBinding {
+                modifiers: HotkeyModifiers {
+                    option: Some(ModifierSide::Either),
+                    ..Default::default()
+                },
+                key: None,
+            }),
             "⌥ takes both too"
         );
         assert_eq!(
