@@ -334,6 +334,7 @@ pub fn run(
 /// the cloud engine and prints the text, then its usage on stderr. Spends
 /// real money when a key resolves, so it is not part of any test.
 #[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn transcribe_file_cli(path: &Path) -> i32 {
     let Some(provider) = route() else {
         eprintln!("wordink: no cloud engine is set up; run `wordink keys set groq`");

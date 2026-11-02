@@ -646,6 +646,7 @@ impl ModelSwap {
 
     /// A swap for a listener that started on a cloud engine and loaded no
     /// model: any local selection it is asked for loads.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn unloaded() -> Self {
         Self {
             loaded: TranscriptionSelection {
