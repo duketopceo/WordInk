@@ -13,6 +13,6 @@
 - [ ] No long-lived key can reach the browser (AE3)
 - [ ] `authorize` still fails closed
 
-## If this touches `legacy/` (the Python app)
-- [ ] `cd legacy && uv sync && uv run python -m compileall wordink` passes
-- [ ] Tested on Windows if it touches tray, boot or `setup*` scripts
+## If this touches `sdks/python` (`wordink-dictd`)
+- [ ] `cd sdks/python && uv run pytest` passes
+- [ ] Tested on the affected OS if it touches hotkeys, text insertion or install scripts
