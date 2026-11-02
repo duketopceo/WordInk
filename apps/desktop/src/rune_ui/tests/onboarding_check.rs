@@ -57,6 +57,11 @@ fn onboarding_goldens() {
             check_golden(scene, dark, PANE_SIZE);
         }
     }
+    // The default window on a tiling desktop: the practice game and its Done
+    // button fit inside 823 px.
+    for dark in [true, false] {
+        check_golden_as("onboarding-try", "onboarding-try-823", dark, (823.0, 760.0));
+    }
 }
 
 /// A first run on Linux or Windows, in the clean data folder
