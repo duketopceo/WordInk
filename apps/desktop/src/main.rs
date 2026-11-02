@@ -27,14 +27,15 @@ mod dictation;
 mod durable;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod feedback;
+mod hardware;
 mod history;
-mod keys;
 #[cfg(target_os = "macos")]
 mod keyboard;
 #[cfg_attr(target_os = "macos", path = "keyboard_input_sources/macos.rs")]
 #[cfg_attr(target_os = "windows", path = "keyboard_input_sources/windows.rs")]
 #[cfg_attr(target_os = "linux", path = "keyboard_input_sources/x11.rs")]
 mod keyboard_input_sources;
+mod keys;
 mod labs;
 #[cfg(target_os = "linux")]
 mod linux;
