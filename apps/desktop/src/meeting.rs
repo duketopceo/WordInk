@@ -375,6 +375,16 @@ pub fn root() -> Result<PathBuf> {
     Ok(crate::app_paths::support_dir()?.join("meetings"))
 }
 
+/// Fails with the plain "install a local model" message until the model
+/// meetings transcribe with is on disk.
+fn require_local_model(installed: bool) -> Result<()> {
+    if installed {
+        Ok(())
+    } else {
+        Err(eyre!(crate::transcription::engine::NO_LOCAL_MODEL))
+    }
+}
+
 pub fn record(
     start: MeetingStart,
     shutdown: &AtomicBool,
@@ -382,12 +392,10 @@ pub fn record(
 ) -> Result<MeetingManifest> {
     let (_, transcription_selection) = crate::app_settings::transcription_selection();
     let transcription_model = crate::transcription::models::validate(&transcription_selection)?;
-    if !crate::transcription::models::is_installed(
+    require_local_model(crate::transcription::models::is_installed(
         transcription_model,
         &transcription_selection.language,
-    ) {
-        return Err(eyre!("{} is not installed", transcription_model.name));
-    }
+    ))?;
     os::ensure_system_audio()?;
     let created_at_ms = now_ms();
     let id = format!("{created_at_ms}-{}", std::process::id());
@@ -905,9 +913,10 @@ pub fn finish_pending(id: &str) -> Result<Option<MeetingManifest>> {
     }
     let (_, selection) = crate::app_settings::transcription_selection();
     let model = crate::transcription::models::validate(&selection)?;
-    if !crate::transcription::models::is_installed(model, &selection.language) {
-        return Err(eyre!("{} is not installed", model.name));
-    }
+    require_local_model(crate::transcription::models::is_installed(
+        model,
+        &selection.language,
+    ))?;
     let mut manifest = read_manifest(&directory)?;
     tracing::info!(
         meeting = id,

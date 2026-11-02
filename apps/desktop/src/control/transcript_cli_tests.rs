@@ -686,3 +686,46 @@ fn parses_release_commands_and_rejects_invalid_limits_and_times() {
         second + 123
     );
 }
+
+#[test]
+fn meetings_export_writes_the_fixture_meeting_as_markdown() {
+    let library =
+        Library::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/meetings"));
+    let cli = Cli::try_parse_from([
+        "hex",
+        "meetings",
+        "export",
+        "1790000500000-1002",
+        "--format",
+        "md",
+    ])
+    .unwrap();
+    let Some(ControlCli::Meetings {
+        command: MeetingsCommand::Export { id, format, output },
+    }) = cli.command
+    else {
+        panic!("expected meetings export");
+    };
+    assert_eq!(output, None);
+    let mut written = Vec::new();
+    export_meeting(&library, &id, format, &mut written, NOW).unwrap();
+    let markdown = String::from_utf8(written).unwrap();
+    // The header carries the local time zone, so the golden is the title and
+    // the speaker turns.
+    assert!(markdown.starts_with("# Roadmap review\n\n- Meeting: 1790000500000-1002\n"));
+    let transcript = markdown.split_once("## Transcript\n\n").unwrap().1;
+    assert_eq!(
+        transcript,
+        "**Them** · 00:00\nLet's review the roadmap for the desktop app.\n\n\
+**You** · 00:05\nPerformance profiling comes first, then the onboarding flow.\n\n\
+**Them** · 00:13\nAgreed. The schedule is tight but doable.\n\n\
+**You** · 01:00\nOne more thing: the release notes.\n"
+    );
+}
+
+#[test]
+fn meetings_export_refuses_formats_it_does_not_write() {
+    assert!(
+        Cli::try_parse_from(["hex", "meetings", "export", "latest", "--format", "pdf"]).is_err()
+    );
+}

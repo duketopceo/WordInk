@@ -199,9 +199,13 @@ impl Feature {
 
     fn on_this_os(self) -> bool {
         match self {
-            Self::Meetings | Self::LiveChapters | Self::SubtitleExport => {
-                cfg!(target_os = "macos")
-            }
+            // Meetings run on Linux and Windows through `meeting::runtime`.
+            Self::Meetings => cfg!(any(
+                target_os = "macos",
+                target_os = "linux",
+                target_os = "windows"
+            )),
+            Self::LiveChapters | Self::SubtitleExport => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
             Self::StandaloneSpecialKeys => cfg!(any(target_os = "linux", target_os = "windows")),
@@ -1035,5 +1039,13 @@ mod tests {
         assert!(!settings.labs.playground);
         let json = serde_json::to_value(&settings).unwrap();
         assert!(json["labs"].get("enabled").is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn meetings_are_available_on_linux() {
+        assert!(Feature::Meetings.on_this_os());
+        assert!(Feature::available_where(|_| true).any(|feature| feature == Feature::Meetings));
+        assert!(resolve("meetings", |_| true).is_ok());
     }
 }

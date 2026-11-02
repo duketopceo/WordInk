@@ -879,3 +879,34 @@ fn writer_fills_a_capture_gap_with_silence_and_records_it() {
     assert_eq!(u64::from(wav.len()), stats.system.samples);
     fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn two_source_segments_are_labelled_by_source() {
+    let entry = |source, start_ms, text: &str| TranscriptEntry {
+        source,
+        start_ms,
+        end_ms: start_ms + 1_000,
+        text: text.into(),
+    };
+    let markdown = transcript_markdown(&[
+        entry(MeetingSource::Microphone, 0, "From the mic."),
+        entry(MeetingSource::System, 2_000, "From the call."),
+    ]);
+    assert!(
+        markdown.contains("**You** · 00:00\nFrom the mic."),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("**Them** · 00:02\nFrom the call."),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn a_missing_local_model_says_to_install_one_in_settings() {
+    assert!(require_local_model(true).is_ok());
+    assert_eq!(
+        require_local_model(false).unwrap_err().to_string(),
+        "no local model installed \u{2014} install one in Settings"
+    );
+}
