@@ -819,8 +819,9 @@ mod tests {
 
     #[test]
     fn the_packaged_executable_launches_the_app() {
-        assert!(is_bundled_app_executable(Some("hex".as_ref())));
-        assert!(!is_bundled_app_executable(Some("hex-service".as_ref())));
+        assert!(is_bundled_app_executable(Some("wordink".as_ref())));
+        assert!(!is_bundled_app_executable(Some("hex".as_ref())));
+        assert!(!is_bundled_app_executable(Some("wordink-service".as_ref())));
     }
 
     #[test]
@@ -831,8 +832,8 @@ mod tests {
                 is_bundled_app_executable(std::path::Path::new(&arguments[0]).file_stem());
             opens_app(Cli::parse_from(arguments).command.as_ref(), bundled)
         };
-        assert!(opens(&["hex"]));
-        assert!(opens(&["/Applications/WordInk.app/Contents/MacOS/hex"]));
+        assert!(opens(&["wordink"]));
+        assert!(opens(&["/Applications/WordInk.app/Contents/MacOS/wordink"]));
         assert!(opens(&["hex", "app"]));
         assert!(opens(&["hex", "app", "--device", "MacBook Pro Microphone"]));
         assert!(!opens(&["hex", "app", "--", "--snap", "/tmp/a.png"]));
