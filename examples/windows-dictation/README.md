@@ -1,4 +1,4 @@
-# WordInk dictation on Windows (cyberpowa)
+# WordInk dictation on Windows
 
 Hold a hotkey, speak, release: cleaned text appears in the focused window. Same Groq Whisper + LLM
 cleanup pipeline as the Linux daemon. Plan: `docs/archive/2026-10-28-0200-feat-windows-dictation-plan.md`.

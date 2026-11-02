@@ -33,7 +33,7 @@ beforeEach(async () => {
   tokenStore = new MemoryTokenStore();
   vocab = new MemoryVocabularyStore();
   deviceToken = (await tokenStore.create("voxtype-laptop")).token;
-  const admin = await tokenStore.create("wisp-agent", "admin");
+  const admin = await tokenStore.create("helper-agent", "admin");
   adminToken = admin.token;
   adminId = admin.id;
 });
@@ -150,8 +150,8 @@ describe("dispatch and methods (KTD13)", () => {
 describe("GET /v1/vocabulary (R4)", () => {
   it("returns the union in the OpenAI list shape with source, pinned and provenance", async () => {
     vocab.records.push(
-      { term: "wisp", addedBy: "wisp-agent", addedByTokenId: adminId, addedAt: "2026-10-10T00:00:00Z" },
-      { term: "kurultai", addedBy: "wisp-agent", addedAt: "2026-10-10T00:00:01Z" },
+      { term: "ptt-tool", addedBy: "helper-agent", addedByTokenId: adminId, addedAt: "2026-10-10T00:00:00Z" },
+      { term: "acmeapp", addedBy: "helper-agent", addedAt: "2026-10-10T00:00:01Z" },
     );
     const res = await relay({ vocabulary: ["Omarchy", "Hyprland"] })(vocabReq("GET", undefined));
     expect(res.status).toBe(200);
@@ -165,14 +165,14 @@ describe("GET /v1/vocabulary (R4)", () => {
     expect(body.data.map((d) => [d.term, d.source])).toEqual([
       ["Omarchy", "config"],
       ["Hyprland", "config"],
-      ["wisp", "runtime"],
-      ["kurultai", "runtime"],
+      ["ptt-tool", "runtime"],
+      ["acmeapp", "runtime"],
     ]);
-    const [omarchy, , wisp] = body.data;
+    const [omarchy, , agentTerm] = body.data;
     expect(omarchy).toMatchObject({ pinned: true, effective: { prompt: true, keyterm: true } });
     expect(omarchy).not.toHaveProperty("addedBy");
-    expect(wisp).toMatchObject({ pinned: false, addedBy: "wisp-agent", addedByTokenId: adminId });
-    expect(body.prompt_chars).toBe("Omarchy, Hyprland, wisp, kurultai".length);
+    expect(agentTerm).toMatchObject({ pinned: false, addedBy: "helper-agent", addedByTokenId: adminId });
+    expect(body.prompt_chars).toBe("Omarchy, Hyprland, ptt-tool, acmeapp".length);
     expect(body.keyterm_count).toBe(4);
   });
 
@@ -198,12 +198,12 @@ describe("GET /v1/vocabulary (R4)", () => {
   });
 
   it("a runtime override wins the union's casing while presence stays config-pinned", async () => {
-    vocab.records.push({ term: "KURULTAI", addedBy: "a", addedAt: "t" });
-    const res = await relay({ vocabulary: ["Kurultai"] })(vocabReq("GET", undefined));
+    vocab.records.push({ term: "ACMEAPP", addedBy: "a", addedAt: "t" });
+    const res = await relay({ vocabulary: ["Acmeapp"] })(vocabReq("GET", undefined));
     const { data } = (await res.json()) as { data: Record<string, unknown>[] };
     expect(data).toEqual([
       {
-        term: "KURULTAI",
+        term: "ACMEAPP",
         source: "config",
         pinned: true,
         runtimeOverride: true,
@@ -223,58 +223,58 @@ describe("GET /v1/vocabulary (R4)", () => {
 describe("POST /v1/vocabulary (R5)", () => {
   it("adds a term and the next transcription carries it — no restart (AE1)", async () => {
     on(GROQ_KEY_A, ok("hi"));
-    const res = await post(["kurultai"]);
+    const res = await post(["acmeapp"]);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: Record<string, unknown>[] };
-    expect(body.data).toEqual([{ term: "kurultai", outcome: "added", effective: { prompt: true, keyterm: true } }]);
+    expect(body.data).toEqual([{ term: "acmeapp", outcome: "added", effective: { prompt: true, keyterm: true } }]);
 
     const handler = relay({ vocabulary: ["Omarchy"] });
     expect((await handler(transcribeReq())).status).toBe(200);
-    expect(sentForm(fetchMock).get("prompt")).toBe("Omarchy, kurultai");
+    expect(sentForm(fetchMock).get("prompt")).toBe("Omarchy, acmeapp");
   });
 
   it("folded outcomes: exact dupe → already_present; case-variant of runtime → updated (respells)", async () => {
-    await post(["kurultai"]);
-    const dup = (await (await post(["kurultai"])).json()) as { data: { outcome: string }[] };
+    await post(["acmeapp"]);
+    const dup = (await (await post(["acmeapp"])).json()) as { data: { outcome: string }[] };
     expect(dup.data[0]!.outcome).toBe("already_present");
-    const variant = (await (await post(["Kurultai"])).json()) as { data: { outcome: string }[] };
+    const variant = (await (await post(["Acmeapp"])).json()) as { data: { outcome: string }[] };
     expect(variant.data[0]!.outcome).toBe("updated");
-    expect(vocab.records.map((r) => r.term)).toEqual(["Kurultai"]); // respelled, one record
+    expect(vocab.records.map((r) => r.term)).toEqual(["Acmeapp"]); // respelled, one record
   });
 
   it("config matching: same spelling → pinned (nothing stored); variant → config_shadowed (override)", async () => {
-    const pinned = (await (await relay({ vocabulary: ["Kurultai"] })(vocabReq("POST", { terms: ["Kurultai"] }))).json()) as {
+    const pinned = (await (await relay({ vocabulary: ["Acmeapp"] })(vocabReq("POST", { terms: ["Acmeapp"] }))).json()) as {
       data: { outcome: string }[];
     };
     expect(pinned.data[0]!.outcome).toBe("pinned");
     expect(vocab.records).toHaveLength(0);
 
-    const shadowed = (await (await relay({ vocabulary: ["Kurultai"] })(vocabReq("POST", { terms: ["KURULTAI"] }))).json()) as {
+    const shadowed = (await (await relay({ vocabulary: ["Acmeapp"] })(vocabReq("POST", { terms: ["ACMEAPP"] }))).json()) as {
       data: { outcome: string }[];
     };
     expect(shadowed.data[0]!.outcome).toBe("config_shadowed");
-    expect(vocab.records.map((r) => r.term)).toEqual(["KURULTAI"]);
+    expect(vocab.records.map((r) => r.term)).toEqual(["ACMEAPP"]);
   });
 
   it("remove entries delete inside the same call — the proxy-safe fallback", async () => {
-    await post(["kurultai"]);
-    const res = await relay()(vocabReq("POST", { remove: ["KURULTAI"] }));
+    await post(["acmeapp"]);
+    const res = await relay()(vocabReq("POST", { remove: ["ACMEAPP"] }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: Record<string, unknown>[] };
-    expect(body.data).toEqual([{ term: "kurultai", outcome: "removed" }]);
+    expect(body.data).toEqual([{ term: "acmeapp", outcome: "removed" }]);
     expect(vocab.records).toHaveLength(0);
   });
 
   it("dryRun reports outcomes and post-change capacity without persisting", async () => {
-    const res = await post(["kurultai"], { dryRun: true });
+    const res = await post(["acmeapp"], { dryRun: true });
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toMatchObject({
       dry_run: true,
       post_change_terms: 1,
-      prompt_chars: "kurultai".length,
+      prompt_chars: "acmeapp".length,
       keyterm_count: 1,
-      data: [{ term: "kurultai", outcome: "added", effective: { prompt: true, keyterm: true } }],
+      data: [{ term: "acmeapp", outcome: "added", effective: { prompt: true, keyterm: true } }],
     });
     expect(vocab.records).toHaveLength(0);
   });
@@ -288,13 +288,13 @@ describe("POST /v1/vocabulary (R5)", () => {
   });
 
   it.each<[string, unknown]>([
-    ["a JSON array root", ["kurultai"]],
+    ["a JSON array root", ["acmeapp"]],
     ["an empty terms array", { terms: [] }],
     ["a non-string item", { terms: ["ok", 7] }],
     ["a >200-char term", { terms: ["x".repeat(201)] }],
     ["a control char", { terms: ["bad\tterm"] }],
     ["a whitespace-only term", { terms: ["   "] }],
-    ["a non-array terms", { terms: "kurultai" }],
+    ["a non-array terms", { terms: "acmeapp" }],
     ["a non-boolean dryRun", { terms: ["x"], dryRun: "yes" }],
     ["an over-cap terms array", { terms: Array.from({ length: MAX_TERMS + 1 }, (_, i) => `t${i}`) }],
   ])("400 on %s", async (_name, body) => {
@@ -311,31 +311,31 @@ describe("POST /v1/vocabulary (R5)", () => {
 
 describe("DELETE /v1/vocabulary (R6)", () => {
   it("folds the match, echoes the stored spelling, tombstones nothing in-memory", async () => {
-    await post(["Kurultai"]);
-    const res = await relay()(vocabReq("DELETE", { term: "kurultai" }));
+    await post(["Acmeapp"]);
+    const res = await relay()(vocabReq("DELETE", { term: "acmeapp" }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: Record<string, unknown>[] };
-    expect(body.data).toEqual([{ term: "Kurultai", outcome: "removed" }]);
+    expect(body.data).toEqual([{ term: "Acmeapp", outcome: "removed" }]);
     expect(vocab.records).toHaveLength(0);
   });
 
   it("a config term with a runtime override loses the override → config spelling returns", async () => {
-    await relay({ vocabulary: ["Kurultai"] })(vocabReq("POST", { terms: ["KURULTAI"] }));
-    const res = await relay({ vocabulary: ["Kurultai"] })(vocabReq("DELETE", { term: "kurultai" }));
+    await relay({ vocabulary: ["Acmeapp"] })(vocabReq("POST", { terms: ["ACMEAPP"] }));
+    const res = await relay({ vocabulary: ["Acmeapp"] })(vocabReq("DELETE", { term: "acmeapp" }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: Record<string, unknown>[] };
-    expect(body.data).toEqual([{ term: "KURULTAI", outcome: "removed", reverted_to: "Kurultai" }]);
+    expect(body.data).toEqual([{ term: "ACMEAPP", outcome: "removed", reverted_to: "Acmeapp" }]);
     // And the config spelling is what the union reports again.
-    const get = (await (await relay({ vocabulary: ["Kurultai"] })(vocabReq("GET", undefined))).json()) as {
+    const get = (await (await relay({ vocabulary: ["Acmeapp"] })(vocabReq("GET", undefined))).json()) as {
       data: Record<string, unknown>[];
     };
     expect(get.data).toEqual([
-      expect.objectContaining({ term: "Kurultai", source: "config", pinned: true }),
+      expect.objectContaining({ term: "Acmeapp", source: "config", pinned: true }),
     ]);
   });
 
   it("a config term with no runtime record 409s term_pinned; an absent term 404s", async () => {
-    const res = await relay({ vocabulary: ["Kurultai"] })(vocabReq("DELETE", { term: "Kurultai" }));
+    const res = await relay({ vocabulary: ["Acmeapp"] })(vocabReq("DELETE", { term: "Acmeapp" }));
     await expectOpenAIError(res, 409, "term_pinned");
     await expectOpenAIError(await relay()(vocabReq("DELETE", { term: "nope" })), 404, "term_not_found");
   });
@@ -350,10 +350,10 @@ describe("DELETE /v1/vocabulary (R6)", () => {
 describe("live transcription wiring (R8, R10)", () => {
   it("a runtime override respells the config term in the provider prompt", async () => {
     on(GROQ_KEY_A, ok("hi"));
-    await relay({ vocabulary: ["Kurultai"] })(vocabReq("POST", { terms: ["KURULTAI"] }));
-    const handler = relay({ vocabulary: ["Kurultai"] });
+    await relay({ vocabulary: ["Acmeapp"] })(vocabReq("POST", { terms: ["ACMEAPP"] }));
+    const handler = relay({ vocabulary: ["Acmeapp"] });
     expect((await handler(transcribeReq())).status).toBe(200);
-    expect(sentForm(fetchMock).get("prompt")).toBe("KURULTAI");
+    expect(sentForm(fetchMock).get("prompt")).toBe("ACMEAPP");
   });
 
   it("an unreadable store degrades transcription to config-only with a warn-once log", async () => {
@@ -396,14 +396,14 @@ describe("POST remove matrix and batch accounting (review fixes)", () => {
   });
 
   it("dryRun reports remove outcomes — stored spelling echoed, nothing persisted", async () => {
-    await post(["Kurultai"]);
-    const res = await relay()(vocabReq("POST", { remove: ["kurultai", "ghost"], dryRun: true }));
+    await post(["Acmeapp"]);
+    const res = await relay()(vocabReq("POST", { remove: ["acmeapp", "ghost"], dryRun: true }));
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toMatchObject({
       dry_run: true,
       post_change_terms: 0,
       data: [
-        { term: "Kurultai", outcome: "removed" },
+        { term: "Acmeapp", outcome: "removed" },
         { term: "ghost", outcome: "not_found" },
       ],
     });
@@ -450,7 +450,7 @@ describe("POST remove matrix and batch accounting (review fixes)", () => {
   });
 
   it("folded-duplicate adds count once: post_change_terms sees the record, not the rows", async () => {
-    const res = await post(["kurultai", "KURULTAI"]);
+    const res = await post(["acmeapp", "ACMEAPP"]);
     const body = (await res.json()) as { data: { outcome: string }[]; post_change_terms: number };
     expect(body.data.map((d) => d.outcome)).toEqual(["added", "updated"]);
     expect(body.post_change_terms).toBe(1); // not 2 — the double-count bug
@@ -458,11 +458,11 @@ describe("POST remove matrix and batch accounting (review fixes)", () => {
   });
 
   it("config-shadowed folded duplicates count once toward the cap too", async () => {
-    const res = await relay({ vocabulary: ["Kurultai"] })(vocabReq("POST", { terms: ["KURULTAI", "kurultai"] }));
+    const res = await relay({ vocabulary: ["Acmeapp"] })(vocabReq("POST", { terms: ["ACMEAPP", "acmeapp"] }));
     const body = (await res.json()) as { data: { outcome: string }[]; post_change_terms: number };
     expect(body.data.map((d) => d.outcome)).toEqual(["config_shadowed", "config_shadowed"]);
     expect(body.post_change_terms).toBe(1);
-    expect(vocab.records.map((r) => r.term)).toEqual(["kurultai"]); // last spelling won
+    expect(vocab.records.map((r) => r.term)).toEqual(["acmeapp"]); // last spelling won
   });
 
   it("dryRun reports capacity_exceeded instead of 409ing on an over-cap hypothetical", async () => {
@@ -477,16 +477,16 @@ describe("POST remove matrix and batch accounting (review fixes)", () => {
   });
 
   it("respelling an override back to the config spelling reverts — no zombie record", async () => {
-    await relay({ vocabulary: ["Kurultai"] })(vocabReq("POST", { terms: ["KURULTAI"] }));
-    const res = await relay({ vocabulary: ["Kurultai"] })(vocabReq("POST", { terms: ["Kurultai"] }));
+    await relay({ vocabulary: ["Acmeapp"] })(vocabReq("POST", { terms: ["ACMEAPP"] }));
+    const res = await relay({ vocabulary: ["Acmeapp"] })(vocabReq("POST", { terms: ["Acmeapp"] }));
     const body = (await res.json()) as { data: Record<string, unknown>[] };
     expect(body.data).toEqual([
-      { term: "Kurultai", outcome: "reverted", reverted_to: "Kurultai", effective: { prompt: true, keyterm: true } },
+      { term: "Acmeapp", outcome: "reverted", reverted_to: "Acmeapp", effective: { prompt: true, keyterm: true } },
     ]);
     expect(vocab.records).toHaveLength(0); // the override is gone, not invisible
     // And there is no zombie for DELETE to trip on — the config term is simply pinned.
     await expectOpenAIError(
-      await relay({ vocabulary: ["Kurultai"] })(vocabReq("DELETE", { term: "kurultai" })),
+      await relay({ vocabulary: ["Acmeapp"] })(vocabReq("DELETE", { term: "acmeapp" })),
       409,
       "term_pinned",
     );
@@ -523,7 +523,7 @@ describe("request-shape and internal errors", () => {
 
 describe("GET reporting fields", () => {
   it("reports runtime_terms and max_terms alongside the budgets", async () => {
-    vocab.records.push({ term: "wisp", addedBy: "a", addedAt: "t" });
+    vocab.records.push({ term: "ptt-tool", addedBy: "a", addedAt: "t" });
     const res = await relay({ vocabulary: ["Omarchy"] })(vocabReq("GET", undefined));
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toMatchObject({ runtime_terms: 1, max_terms: MAX_TERMS });

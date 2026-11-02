@@ -9,7 +9,7 @@
 ## Goal Capsule
 
 - **Objective:** a TypeWhisper user configures the bundled "OpenAI Compatible" engine against `wordink-gateway` using nothing but the docs page — model discovery works, the exact settings are written down, and the two unsupported modes are named.
-- **Product authority:** Luke (duketopceo).
+- **Product authority:** Alex (duketopceo).
 - **Blocked on:** nothing. Live TypeWhisper verification is an operator residual — no macOS/Windows/iOS device exists in this workspace.
 
 ## Key Decisions

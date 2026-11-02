@@ -39,7 +39,7 @@ The config file is `~/.config/wordink/gateway.json`:
 }
 ```
 
-The config names environment variables, never key values. On Linux, `examples/gateway-systemd` in the repo has a user service and a wrapper that fills those variables from omaseal at start, so keys never touch disk.
+The config names environment variables, never key values. On Linux, `examples/gateway-systemd` in the repo has a user service and a wrapper that fills those variables from the desktop keyring (`secret-tool`) at start, so keys never touch disk.
 
 The gateway only listens on loopback. To serve other machines, put it behind TLS and set `"allowInsecureRemote": true`. Without TLS, tokens and audio would cross the network in cleartext.
 
@@ -61,7 +61,7 @@ Provider keys resolve at serve time: a `keyEnv` whose variable is unset (or reso
 
 ## Voxtype (Linux)
 
-On Omarchy, `examples/gateway-systemd/install-omarchy.sh` builds the gateway, installs it as a systemd user service with keys from omaseal, and writes the `[whisper]` section below for you. Run it from a checkout of this repo.
+On Omarchy, `examples/gateway-systemd/install-omarchy.sh` builds the gateway, installs it as a systemd user service with keys from the keyring, and writes the `[whisper]` section below for you. Run it from a checkout of this repo.
 
 In `~/.config/voxtype/config.toml`, under `[whisper]`:
 
@@ -115,8 +115,8 @@ That is the agent correction loop: dictate → the transcript misspells a name �
 
 ```
 GET    /v1/vocabulary   # the effective list: config + runtime, with source/pinned/effective
-POST   /v1/vocabulary   # {"terms": ["Kurultai"]} — add or respell terms
-DELETE /v1/vocabulary   # {"term": "Kurultai"} — remove a runtime term
+POST   /v1/vocabulary   # {"terms": ["Acmeapp"]} — add or respell terms
+DELETE /v1/vocabulary   # {"term": "Acmeapp"} — remove a runtime term
 ```
 
 All three require an **admin token** (`Authorization: Bearer wdk_…`). Every response carries capacity metadata — `prompt_chars` (the packed prompt head against the 800-char budget) and `keyterm_count` (of the 50-keyterm Deepgram slice) — and each term reports `effective: {prompt, keyterm}` so a stored term that fits neither budget is never silently inert. GET additionally reports `runtime_terms` (active runtime records) and `max_terms` (the 200-term cap); POST reports `post_change_terms` — the runtime count after the whole batch, removes included.
@@ -191,5 +191,5 @@ Provider failures appear as `gateway: groq#0 failed (HTTP 429)` — the provider
 If dictation stops working:
 
 - `wordink-gateway check` shows which providers have resolvable keys.
-- `journalctl --user -u wordink-gateway` shows why each entry failed. Repeated `HTTP 401` from one entry means its key is wrong or revoked — fix the omaseal entry and restart the service.
+- `journalctl --user -u wordink-gateway` shows why each entry failed. Repeated `HTTP 401` from one entry means its key is wrong or revoked — fix the keyring entry and restart the service.
 - `502` answers mean every entry failed; `504` means the chain ran out of time.

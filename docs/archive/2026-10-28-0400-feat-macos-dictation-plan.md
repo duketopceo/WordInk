@@ -7,7 +7,7 @@ artifact_contract: ce-unified-plan/v1
 product_contract_source: ce-plan (program plan U13, windows plan "macOS (own plan)", U9 decision Oct 24, 2026)
 execution: code
 target_repo: duketopceo/WordInk
-tracking: tallyline WordInk project, WI-U13 (TLY-279)
+tracking: the tracker
 ---
 
 > **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
@@ -75,8 +75,8 @@ macOS is the platform where every competitor already lives (Wispr Flow, Superwhi
 
 ### Open questions for the owner
 
-- Is `Ctrl+Option+D` acceptable as the default hold key, or does Luke prefer a modifier-only key such as right `Option` (needs Input Monitoring)?
-- Does Luke have, or want, an Apple Developer account for a signed, notarized `.app`? Without one, the app runs from a uv-installed Python and the user grants permissions to that interpreter. This plan assumes no account.
+- Is `Ctrl+Option+D` acceptable as the default hold key, or does Alex prefer a modifier-only key such as right `Option` (needs Input Monitoring)?
+- Does Alex have, or want, an Apple Developer account for a signed, notarized `.app`? Without one, the app runs from a uv-installed Python and the user grants permissions to that interpreter. This plan assumes no account.
 
 ### Output Structure
 
@@ -244,4 +244,4 @@ flowchart LR
 
 - M1 to M8 merged with green CI on Linux and macOS runners; M9 results recorded.
 - `ROADMAP.md` marks the macOS app shipped.
-- WI-U13 (TLY-279) shows each merged PR.
+- the tracker shows each merged PR.

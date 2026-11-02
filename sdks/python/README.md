@@ -36,16 +36,16 @@ token earns a clean `403` — the vocabulary routes need admin scope).
 
 ```bash
 wordink transcribe meeting.m4a            # transcript to stdout
-wordink transcribe a.wav --language en --prompt "Kurultai, Omarchy"
+wordink transcribe a.wav --language en --prompt "Acmeapp, Omarchy"
 wordink dictate                           # mic → Enter/Ctrl-C → transcript
 wordink dictate --seconds 10 | wl-copy    # fixed-length capture to clipboard
 wordink models                            # what the gateway serves
 
 wordink vocab list                        # effective vocabulary (config + runtime), JSON
-wordink vocab add Kurultai Omarchy        # add terms; outcomes per term
+wordink vocab add Acmeapp Omarchy        # add terms; outcomes per term
 wordink vocab add X --dry-run             # report outcomes without persisting
-wordink vocab remove Kurultai             # remove a runtime term
-wordink vocab remove Kurultai --via-post  # same, through POST (proxies that strip DELETE bodies)
+wordink vocab remove Acmeapp             # remove a runtime term
+wordink vocab remove Acmeapp --via-post  # same, through POST (proxies that strip DELETE bodies)
 ```
 
 `WordInkError` keeps the gateway's machine-readable error code on `.code`

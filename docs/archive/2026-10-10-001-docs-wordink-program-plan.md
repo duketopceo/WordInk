@@ -15,7 +15,7 @@ execution: code
 ## Goal Capsule
 
 - **Objective:** a single program-level view of what WordInk ships next, in Now / Next / Later order, with status, evidence, difficulty, feasibility and a simpler alternative for every unit. It sits above the per-phase plans in `docs/plans/` and does not replace them.
-- **Product authority:** Luke (`duketopceo`). One decision below remains marked **owner decision** and this plan does not make it: whether to merge the Argus reviewer PR (U4). The other — standalone desktop apps (U9) — was decided by the owner on Oct 24, 2026: standalone first-party apps on all four OSes.
+- **Product authority:** Alex (`duketopceo`). One decision below remains marked **owner decision** and this plan does not make it: whether to merge the Argus reviewer PR (U4). The other — standalone desktop apps (U9) — was decided by the owner on Oct 24, 2026: standalone first-party apps on all four OSes.
 - **Evidence date:** 2026-10-10, from `master` at `7057304`, GitHub PR/issue state, `gh run list`, `npm view` and the repo's own checks (all green locally, see Verification Contract).
 - **Out of scope:** application code. This pass changes docs and brand assets only. Code lands from the units below.
 

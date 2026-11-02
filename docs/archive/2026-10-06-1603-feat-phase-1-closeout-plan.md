@@ -15,7 +15,7 @@ execution: code
 ## Goal Capsule
 
 - **Objective:** Phase 1 is actually shipped — the `@wordink` packages exist on npm with trusted publishing and provenance, the docs site is live on GitHub Pages, and the closeable PR #26 residuals are fixed. After this work, anyone can `npm install @wordink/web` and open `https://duketopceo.github.io/WordInk/`.
-- **Product authority:** Luke (duketopceo). This plan owns the Phase 1 closeout: landing the PR chain, npm publish go-live, GitHub Pages, and the feasible review residuals. A TypeWhisper plugin, LLM cleanup, usage logging, and a Python SDK are not active scope.
+- **Product authority:** Alex (duketopceo). This plan owns the Phase 1 closeout: landing the PR chain, npm publish go-live, GitHub Pages, and the feasible review residuals. A TypeWhisper plugin, LLM cleanup, usage logging, and a Python SDK are not active scope.
 - **Open blockers:** whether the `wordink` npm org name is claimable (OQ1); merging the PR chain is the operator's call throughout.
 
 ---
@@ -78,7 +78,7 @@ This plan covers the Phase 1 closeout area only; the surrounding breakdown is th
 
 ### Actors
 
-- A1. **Operator (Luke):** runs the npm-side setup, flips the Pages source, merges each PR, performs the manual blur handcheck.
+- A1. **Operator (Alex):** runs the npm-side setup, flips the Pages source, merges each PR, performs the manual blur handcheck.
 - A2. **Release automation:** `release.yml`'s version and publish jobs on `master` pushes.
 - A3. **CI and branch protection:** gates every merge on green checks.
 - A4. **npm registry:** hosts the packages and enforces the trusted-publishing configuration.
@@ -91,7 +91,7 @@ This plan covers the Phase 1 closeout area only; the surrounding breakdown is th
   - **Steps:** Merge the oldest open PR → its dependents retarget to `master` → wait for the next PR's checks → merge → repeat through #27.
   - **Outcome:** `master` holds Phase 1 plus the gateway; the release workflow becomes live.
 - F2. npm publish go-live
-  - **Trigger:** The chain has landed and the operator is logged into npm (`Npmjs / duketopceo@gmail.com` in omaseal).
+  - **Trigger:** The chain has landed and the operator is logged into npm (`Npmjs / alex@example.com` in keyring helper).
   - **Actors:** A1, A2, A4
   - **Steps:** Create the `wordink` org (or execute the R3 fallback) → ensure each package exists → configure trusted publishing per R5 → require 2FA per R6 → merge a "Version Packages" PR → verify all five packages on npm with provenance.
   - **Outcome:** `@wordink/*` installs from the public registry with no stored npm token.
@@ -122,7 +122,7 @@ This plan covers the Phase 1 closeout area only; the surrounding breakdown is th
 
 ### Dependencies / Assumptions
 
-- npm login for `duketopceo` exists in omaseal as `Npmjs / duketopceo@gmail.com`; account-side setup needs it.
+- npm login for `duketopceo` exists in keyring helper as `Npmjs / alex@example.com`; account-side setup needs it.
 - Merges stay with the operator; `master` protection (PR + checks) already enforces R2 mechanically.
 - `release.yml` and `docs.yml` are in the repo on the current branch and reach `master` with the chain; their header comments are the authoritative one-time setup recipes.
 - The `@wordink` scope's availability is unknown until checked while logged in; the public probe was inconclusive.
@@ -284,5 +284,5 @@ Two kinds of work run under one gate. The code slice is small and bounded: one c
 - R9–R11: tests green pin the stall error, the timeout behavior, and both residual gaps.
 - R10: the measurement is recorded in the PR whether or not a fix was needed.
 - R12–R13: `ROADMAP.md` reflects reality; the deferred live-API list is recorded.
-- Operator-owned steps (merges, npm web UI, Pages toggle) are surfaced to Luke as they come due; deferred items (OpenAI/Deepgram live checks, blur handcheck) are recorded, not closed.
+- Operator-owned steps (merges, npm web UI, Pages toggle) are surfaced to Alex as they come due; deferred items (OpenAI/Deepgram live checks, blur handcheck) are recorded, not closed.
 - A changeset exists for any published-package change; the closeout PR is open, stacked correctly, and its CI is green.

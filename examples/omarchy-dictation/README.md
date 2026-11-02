@@ -25,7 +25,7 @@ The script adds a `source =` line to `~/.config/hypr/hyprland.conf` between mark
 | hold `SUPER ALT, D` | record while held, transcribe on release |
 | tap `SUPER ALT, S` | start, tap again to stop |
 
-wisp keeps `SUPER, D`; `wordink-dictd` refuses that key. Change the keys in `~/.config/wordink/dictate.toml` (`[hotkey] hold = "..."`), then re-run the installer. `wordink-dictd binds` prints the lines.
+The defaults avoid Omarchy's own `SUPER, D` launcher bind. Change the keys in `~/.config/wordink/dictate.toml` (`[hotkey] hold = "..."`), then re-run the installer. `wordink-dictd binds` prints the lines.
 
 ## Switching from Voxtype, and back
 

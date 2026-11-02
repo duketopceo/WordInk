@@ -11,11 +11,11 @@ origin: docs/archive/2026-10-10---desktop-surfaces-requirements.md
 
 ## Summary
 
-Give the gateway's shared vocabulary a runtime mutation surface — `GET/POST/DELETE /v1/vocabulary` behind admin-scoped device tokens, persisted to a state-dir file — then expose it through `wordink vocab` and `wordink-mcp` so an agent can run the correction loop: dictate → transcript mishears "kurultai" → `vocab_add` → re-dictate → fixed, with no restart and no `gateway.json` edits.
+Give the gateway's shared vocabulary a runtime mutation surface — `GET/POST/DELETE /v1/vocabulary` behind admin-scoped device tokens, persisted to a state-dir file — then expose it through `wordink vocab` and `wordink-mcp` so an agent can run the correction loop: dictate → transcript mishears "acmeapp" → `vocab_add` → re-dictate → fixed, with no restart and no `gateway.json` edits.
 
 ## Problem Frame
 
-The gateway merges an operator vocabulary into every transcription (KTD6), but it is a static `vocabulary` array in `gateway.json` — deduped once at router construction (`gateway/router.ts`) and changeable only by hand-editing config and restarting the service. That makes vocabulary correction the exact wrong shape for its best consumer: agents, who discover the miss (misheard repo names like `kurultai`, `wisp`) inside a transcript and should fix it in seconds. Origin: `docs/archive/2026-10-10---desktop-surfaces-requirements.md` (rung 2 agent surface; F1, A2, AE1, AE3).
+The gateway merges an operator vocabulary into every transcription (KTD6), but it is a static `vocabulary` array in `gateway.json` — deduped once at router construction (`gateway/router.ts`) and changeable only by hand-editing config and restarting the service. That makes vocabulary correction the exact wrong shape for its best consumer: agents, who discover the miss (misheard repo names like `acmeapp`, `ptt-tool`) inside a transcript and should fix it in seconds. Origin: `docs/archive/2026-10-10---desktop-surfaces-requirements.md` (rung 2 agent surface; F1, A2, AE1, AE3).
 
 This plan covers the vocabulary loop only. The Omarchy bar plugin (rung 1 — different repo, QML) and the human control surface (rung 2 remainder, Phase 6) are separate plans.
 
@@ -173,7 +173,7 @@ Union semantics (matching is always case-folded; union emits config terms first,
 - Add → persists to file; a second store instance on the same path sees it next `list()` (cache invalidation via stat key).
 - Corrupt file: `list()` reports unreadable (distinct from empty); `add` throws rather than overwriting.
 - Concurrent `add`/`remove` calls serialize — N parallel mutations all land, none throw "changed while writing".
-- `remove("kurultai")` removes stored `"Kurultai"` and echoes it; removing an absent term → null.
+- `remove("acmeapp")` removes stored `"Acmeapp"` and echoes it; removing an absent term → null.
 - Term validation: whitespace-only, control-char, >200-char, non-string inputs rejected.
 - Cap: 201st runtime term rejected.
 
@@ -200,12 +200,12 @@ Union semantics (matching is always case-folded; union emits config terms first,
 **Patterns to follow:** `authorizeDevice` gate shape; `modelsList` list-shape precedent; `openaiError` codes (`insufficient_permissions`, `term_not_found`, `term_pinned`, `vocabulary_full` are new codes inside existing `type` values).
 
 **Test scenarios:**
-- Covers AE1: POST `{"terms":["kurultai"]}` as admin → next transcribe call's provider request carries the term in the merged prompt (spy adapter); no restart.
+- Covers AE1: POST `{"terms":["acmeapp"]}` as admin → next transcribe call's provider request carries the term in the merged prompt (spy adapter); no restart.
 - Unauthed/device-token on all three → 401/403 respectively; 403 does not consume rate budget (device token still transcribes after N denied vocab calls).
 - GET shape: `source`/`pinned`/`effective` correct for config-only, runtime-only, both; a term past the keyterm slice but inside the prompt budget reports `{prompt:true, keyterm:false}`.
-- Case-variant runtime: stored `"kurultai"`, POST `{"terms":["Kurultai"]}` → `outcome:"updated"`, stored spelling now `"Kurultai"`.
-- Case-variant vs config: config holds `"Kurultai"`, POST `{"terms":["kurultai"]}` → `outcome:"pinned"`, nothing stored; POST `{"terms":["KURULTAI"]}` → `config_shadowed` stores the override and the union emits the runtime spelling; DELETE removes the override and the config spelling returns.
-- DELETE `{"term":"Kurultai"}` → removed + echoed; DELETE config-only term → 409 `term_pinned`; DELETE absent → 404 `term_not_found`. POST `{"remove":["X"]}` deletes without DELETE (proxy-safe path).
+- Case-variant runtime: stored `"acmeapp"`, POST `{"terms":["Acmeapp"]}` → `outcome:"updated"`, stored spelling now `"Acmeapp"`.
+- Case-variant vs config: config holds `"Acmeapp"`, POST `{"terms":["acmeapp"]}` → `outcome:"pinned"`, nothing stored; POST `{"terms":["ACMEAPP"]}` → `config_shadowed` stores the override and the union emits the runtime spelling; DELETE removes the override and the config spelling returns.
+- DELETE `{"term":"Acmeapp"}` → removed + echoed; DELETE config-only term → 409 `term_pinned`; DELETE absent → 404 `term_not_found`. POST `{"remove":["X"]}` deletes without DELETE (proxy-safe path).
 - Malformed bodies: array body, `{"terms":[]}`, non-string item, >200-char term, control chars, >200-item terms array → 400. Body over `VOCAB_MAX_BODY_BYTES` → 413. `dryRun:true` → reported + post-change capacity, file untouched.
 - Cap: POST pushing past 200 runtime records → 409 `vocabulary_full`, nothing persisted (atomic).
 - Store-unreadable: GET → 500; transcribe still succeeds using config terms only.
@@ -232,12 +232,12 @@ Union semantics (matching is always case-folded; union emits config terms first,
 **Approach:** Per R12's two chains — vocab calls resolve `--token` > `WORDINK_ADMIN_TOKEN` > `WORDINK_DEVICE_TOKEN`; dictation resolves `--token` > `WORDINK_DEVICE_TOKEN` > `WORDINK_ADMIN_TOKEN`, and the `wordink-mcp` startup gate accepts either variable being set so an admin-token-only host still starts. Errors: pass through the gateway's error JSON (agents read `code`).
 
 **Test scenarios:**
-- `vocab add kurultai` happy path prints the API response fields; `--dry-run` flag maps to `dryRun`.
+- `vocab add acmeapp` happy path prints the API response fields; `--dry-run` flag maps to `dryRun`.
 - Device-token vocab call → surfaces 403 `insufficient_permissions` with the gateway's message, nonzero exit.
 - `WORDINK_ADMIN_TOKEN` beats `WORDINK_DEVICE_TOKEN` for vocab; `transcribe` prefers device but falls back to admin when only it is set; `wordink-mcp` boots with only `WORDINK_ADMIN_TOKEN`.
 - MCP `vocab_add` returns parseable JSON containing `term` and `outcome`; `vocab_remove` echoes removed spelling.
 
-**Verification:** `uv run pytest` green; live handshake against the running gateway (admin token in omaseal as `wordink/admin`).
+**Verification:** `uv run pytest` green; live handshake against the running gateway (admin token in keyring helper as `wordink/admin`).
 
 ### U5. Docs, concepts, changesets
 

@@ -17,7 +17,7 @@ target_repo: duketopceo/WordInk
 
 - **Objective:** Rebuild the parts of Wispr Flow that matter on iPhone (AI cleanup with backtracking, per-app tone, a dictionary that learns from your corrections, snippets, whisper mode, and a voice keyboard that works in any text field) on top of WordInk's existing open-source gateway. Do it without copying Wispr's code or binaries.
 - **Means:** (a) Extend `packages/server/src/gateway/flow.ts` so it handles every Auto-edit behavior Wispr documents, with tone, snippets and dictionary set per request. (b) Add a thin Swift package `sdks/ios/WordInkIOS` plus an iOS host app and a `UIInputViewController` keyboard extension that use the documented iOS "Flow Session" pattern: the keyboard opens the host app, the host app starts a background `AVAudioSession` and a Live Activity, and later dictations stay inside the keyboard (D1-D8, W1-W7).
-- **Product authority:** Luke (duketopceo). This plan owns the Flow-parity gateway features and the iOS client. Android, desktop overlays and a WordInk-branded macOS app are not in scope.
+- **Product authority:** Alex (duketopceo). This plan owns the Flow-parity gateway features and the iOS client. Android, desktop overlays and a WordInk-branded macOS app are not in scope.
 - **Authority order:** Counterarguments + Product Contract, then Key Technical Decisions (D1-D8), then the Approach text in each unit.
 - **Stop conditions:**
   - Stop if a unit needs a Wispr Flow binary, IPA, private API, or unpublished endpoint. This plan only uses public docs and permissively or GPL-licensed open source as references.

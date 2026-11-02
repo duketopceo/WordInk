@@ -22,7 +22,7 @@ forces:
   all server-side — TypeWhisper/Talkify assume each device configures its own
   provider key.
 - **Agents are a new class of consumer.** The vocabulary correction loop —
-  dictate → transcript mishears "kurultai" → agent adds the term → re-dictate →
+  dictate → transcript mishears "acmeapp" → agent adds the term → re-dictate →
   fixed — is a workflow only WordInk can offer, because only WordInk has shared
   server-side vocabulary. Today that vocabulary is a static array in
   `~/.config/wordink/gateway.json` requiring manual edits + service restart.
@@ -71,7 +71,7 @@ Two faces of the same new API surface.
 
 - `wordink vocab list|add|remove` in `sdks/python` CLI.
 - `vocab_list` / `vocab_add` / `vocab_remove` tools in `wordink-mcp`.
-- The correction loop: agent reads a bad transcript → `vocab_add("kurultai")`
+- The correction loop: agent reads a bad transcript → `vocab_add("acmeapp")`
   → re-dictate or re-transcribe → verify. Personal fine-tuning without a
   restart and without touching `gateway.json` by hand.
 
@@ -115,7 +115,7 @@ TypeWhisper clone:
 
 - **A1** — Omarchy/Linux user wanting dictation that looks like a product, not
   a daemon (rung 1, rung 3).
-- **A2** — agents (wisp, kurultai, Devin, Claude Code) curating vocabulary and
+- **A2** — agents (ptt-tool, acmeapp, Devin, Claude Code) curating vocabulary and
   transcribing via MCP/CLI (rung 2 agent surface; the correction loop).
 - **A3** — gateway operator managing providers, device tokens, vocabulary,
   usage (rung 2 control surface).
@@ -152,7 +152,7 @@ TypeWhisper clone:
 ## Key flows
 
 - **F1** (agent vocab loop) — agent gets transcript with "karate eye" →
-  `vocab_add "Kurultai"` → re-dictate → "Kurultai" → done. No restart.
+  `vocab_add "Acmeapp"` → re-dictate → "Acmeapp" → done. No restart.
 - **F2** (Omarchy) — user sees mic state in the bar, clicks for provider /
   usage / last transcript; dictates via existing voxtype hotkey.
 - **F3** (operator) — opens control surface, issues a `wdk_` token for a new
@@ -163,7 +163,7 @@ TypeWhisper clone:
 
 ## Acceptance examples
 
-- **AE1** — `wordink vocab add kurultai` then `wordink dictate` immediately
+- **AE1** — `wordink vocab add acmeapp` then `wordink dictate` immediately
   recognizes the term, without a gateway restart; `gateway.json` (or
   `vocabulary.json`) shows the term persisted.
 - **AE2** — Waybar module shows recording state during a voxtype session and

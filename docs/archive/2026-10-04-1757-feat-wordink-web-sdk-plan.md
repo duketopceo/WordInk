@@ -16,7 +16,7 @@ execution: code
 
 - **Objective:** A web developer can add push-to-talk dictation to any text field in their app in under five minutes. It uses their own speech provider key or a local model, and doesn't lock them into one vendor or a WordInk server.
 - **Means:** A Rust sans-I/O dictation core compiled to WebAssembly, wrapped by a thin TypeScript browser host, a drop-in web component, a React hook and a reference credential relay, all published as open source (MIT) (KTD1, KTD2, KTD3).
-- **Product authority:** Luke (duketopceo). This plan owns only the core and the Web SDK. The standalone desktop app and a Python SDK are surrounding work, described in How This Work Fits Together, and are not active scope.
+- **Product authority:** Alex (duketopceo). This plan owns only the core and the Web SDK. The standalone desktop app and a Python SDK are surrounding work, described in How This Work Fits Together, and are not active scope.
 - **Authority order:** Product Contract, then Key Technical Decisions, then unit Approach text. When they disagree, the earlier wins and the later is corrected.
 - **Stop conditions:** Stop and ask if a provider's browser-safe auth path proves impossible (see Risks), if the core's WebAssembly bundle can't be kept under the size budget (KTD1), or if a requirement would need a WordInk-hosted service.
 - **Execution profile:** Deep, phased. U1 lands first. Then U2 and U5 proceed in parallel, then U3, then U4, then U6 and U8 in parallel (U7 after U6), then U9.

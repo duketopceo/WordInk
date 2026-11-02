@@ -14,15 +14,15 @@ from wordink.desktop.transcribe import default_failed_dir
 from wordink.desktop.vocab import default_vocab_path
 
 LINUX_ENV = {
-    "HOME": "/home/luke",
+    "HOME": "~",
     "XDG_CONFIG_HOME": "/cfg",
     "XDG_CACHE_HOME": "/cache",
     "XDG_RUNTIME_DIR": "/run/user/1000",
 }
 WIN_ENV = {
-    "USERPROFILE": r"C:\Users\luke",
-    "APPDATA": r"C:\Users\luke\AppData\Roaming",
-    "LOCALAPPDATA": r"C:\Users\luke\AppData\Local",
+    "USERPROFILE": r"C:\Users\alex",
+    "APPDATA": r"C:\Users\alex\AppData\Roaming",
+    "LOCALAPPDATA": r"C:\Users\alex\AppData\Local",
 }
 
 
@@ -35,24 +35,24 @@ def test_linux_layout_matches_what_the_daemon_already_uses():
 
 
 def test_linux_falls_back_to_home_and_tmp():
-    p = app_paths("linux", {"HOME": "/home/luke"}, uid=1234)
-    assert str(p.config_file) == "/home/luke/.config/wordink/dictate.toml"
-    assert str(p.failed_dir) == "/home/luke/.cache/wordink/failed"
+    p = app_paths("linux", {"HOME": "~"}, uid=1234)
+    assert str(p.config_file) == "~/.config/wordink/dictate.toml"
+    assert str(p.failed_dir) == "~/.cache/wordink/failed"
     assert str(p.runtime_dir) == "/tmp/wordink-1234"
 
 
 def test_windows_layout_uses_appdata_and_localappdata():
     p = app_paths("windows", WIN_ENV)
-    assert p.config_file == PureWindowsPath(r"C:\Users\luke\AppData\Roaming\wordink\dictate.toml")
-    assert p.vocab_file == PureWindowsPath(r"C:\Users\luke\AppData\Roaming\wordink\vocabulary.txt")
-    assert p.runtime_dir == PureWindowsPath(r"C:\Users\luke\AppData\Local\wordink\run")
-    assert p.failed_dir == PureWindowsPath(r"C:\Users\luke\AppData\Local\wordink\failed")
+    assert p.config_file == PureWindowsPath(r"C:\Users\alex\AppData\Roaming\wordink\dictate.toml")
+    assert p.vocab_file == PureWindowsPath(r"C:\Users\alex\AppData\Roaming\wordink\vocabulary.txt")
+    assert p.runtime_dir == PureWindowsPath(r"C:\Users\alex\AppData\Local\wordink\run")
+    assert p.failed_dir == PureWindowsPath(r"C:\Users\alex\AppData\Local\wordink\failed")
 
 
 def test_windows_derives_appdata_from_the_profile_when_unset():
-    p = app_paths("windows", {"USERPROFILE": r"C:\Users\luke"})
-    assert p.config_file == PureWindowsPath(r"C:\Users\luke\AppData\Roaming\wordink\dictate.toml")
-    assert p.runtime_dir == PureWindowsPath(r"C:\Users\luke\AppData\Local\wordink\run")
+    p = app_paths("windows", {"USERPROFILE": r"C:\Users\alex"})
+    assert p.config_file == PureWindowsPath(r"C:\Users\alex\AppData\Roaming\wordink\dictate.toml")
+    assert p.runtime_dir == PureWindowsPath(r"C:\Users\alex\AppData\Local\wordink\run")
 
 
 def test_windows_without_any_profile_says_so():

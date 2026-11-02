@@ -12,7 +12,7 @@ external_sources:
 
 ## Goal Capsule
 
-Bench the genuinely lightweight open voice models against the current WordInk gateway relay (api-ink.shippedit.dev → omarchy-max :8941). **Kill criteria per the owner's filter: lightweight AND strong — a mid-speed/mid-quality model is a reject, not a compromise.** Replace the relay only on a clear win.
+Bench the genuinely lightweight open voice models against the current WordInk gateway relay (gateway.example.com → my-laptop :8941). **Kill criteria per the owner's filter: lightweight AND strong — a mid-speed/mid-quality model is a reject, not a compromise.** Replace the relay only on a clear win.
 
 ## Product Contract
 
@@ -43,7 +43,7 @@ Every number below is **final as of 2026-10-28** (owner-approved), fixed before 
 
 - **ASR (voxtype path):** WER competitive with the relay on real dictation samples (mixed code-words/prose/proper-nouns), and latency ≤ current relay round-trip. RTF < 0.5 on this CPU.
 - **TTS (if WordInk voices output):** first-audio ≤ ~300ms, quality acceptable for dictation confirmation/readback.
-- Both must run on omarchy-max's CPU without starving the llama services — memory footprint is part of "lightweight."
+- Both must run on my-laptop's CPU without starving the llama services — memory footprint is part of "lightweight."
 
 ### Scope boundaries
 

@@ -10,9 +10,9 @@ from wordink.client import WordInkError
 from wordink.desktop.config import load_config
 
 ENV = {
-    "USERPROFILE": r"C:\Users\luke",
-    "APPDATA": r"C:\Users\luke\AppData\Roaming",
-    "LOCALAPPDATA": r"C:\Users\luke\AppData\Local",
+    "USERPROFILE": r"C:\Users\alex",
+    "APPDATA": r"C:\Users\alex\AppData\Roaming",
+    "LOCALAPPDATA": r"C:\Users\alex\AppData\Local",
 }
 
 
@@ -26,9 +26,9 @@ def load(tmp_path, body: str | None = None):
 def test_defaults_use_windows_hotkeys_and_appdata_paths(tmp_path):
     cfg = load(tmp_path)
     assert (cfg.hold_bind, cfg.toggle_bind) == ("Ctrl+Alt+D", "Ctrl+Alt+S")
-    assert PureWindowsPath(str(cfg.vocab_path)) == PureWindowsPath(r"C:\Users\luke\AppData\Roaming\wordink\vocabulary.txt")
-    assert PureWindowsPath(str(cfg.runtime_dir)) == PureWindowsPath(r"C:\Users\luke\AppData\Local\wordink\run")
-    assert PureWindowsPath(str(cfg.failed_dir)) == PureWindowsPath(r"C:\Users\luke\AppData\Local\wordink\failed")
+    assert PureWindowsPath(str(cfg.vocab_path)) == PureWindowsPath(r"C:\Users\alex\AppData\Roaming\wordink\vocabulary.txt")
+    assert PureWindowsPath(str(cfg.runtime_dir)) == PureWindowsPath(r"C:\Users\alex\AppData\Local\wordink\run")
+    assert PureWindowsPath(str(cfg.failed_dir)) == PureWindowsPath(r"C:\Users\alex\AppData\Local\wordink\failed")
 
 
 def test_the_default_config_path_comes_from_appdata():

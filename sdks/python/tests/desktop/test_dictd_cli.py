@@ -54,9 +54,9 @@ def test_last_before_any_dictation(env, capsys):
 
 def test_a_bad_config_is_reported_not_traceback(env, tmp_path, capsys):
     bad = tmp_path / "bad.toml"
-    bad.write_text("[hotkey]\nhold = 'SUPER, D'\n")
+    bad.write_text("[hotkey]\nhold = 'SUPER ALT, S'\n")
     assert main(["--config", str(bad), "binds"]) == 1
-    assert "wisp" in capsys.readouterr().err
+    assert "different" in capsys.readouterr().err
 
 
 def test_trigger_status_and_last_against_a_running_daemon(env, capsys):

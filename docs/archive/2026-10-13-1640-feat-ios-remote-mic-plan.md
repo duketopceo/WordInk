@@ -31,7 +31,7 @@ A thin first-party iOS companion for a self-hosted WordInk gateway, distributed 
 
 ### Problem Frame
 
-On the desktop, the operator dictates through WordInk (voxtype → gateway → Groq) — fast, and aware of the runtime vocabulary his agents manage. Away from the desk he dictates into Termius over SSH using Apple's built-in dictation: a different engine, no access to terms like "Kurultai" or "Omarchy", and no path to Groq's speed. Agent prompts come out mangled exactly where precision matters most.
+On the desktop, the operator dictates through WordInk (voxtype → gateway → Groq) — fast, and aware of the runtime vocabulary his agents manage. Away from the desk he dictates into Termius over SSH using Apple's built-in dictation: a different engine, no access to terms like "Acmeapp" or "Omarchy", and no path to Groq's speed. Agent prompts come out mangled exactly where precision matters most.
 
 Zoomed out, the gateway is a server-side product with browser and CLI hosts but no mobile host — its pipeline dies at the desk. The capability to fix this publicly is now paid for: an Apple Developer membership unlocks TestFlight and App Store distribution. The demand the project gated mobile on is, for now, the operator's own Termius loop plus the App Store listing that makes the client real for the small set of people who already run a gateway.
 
@@ -105,7 +105,7 @@ flowchart TB
 
 - AE1. Termius dictation end-to-end
   - **Covers R1, R2, R8**
-  - **Given** the operator's gateway configured and reachable over Tailscale, **when** they hold the Action Button, dictate "kurultai deploy restart", and release, **then** the Groq-backed transcript — with runtime-vocabulary casing — is on the clipboard and pastes cleanly into Termius.
+  - **Given** the operator's gateway configured and reachable over Tailscale, **when** they hold the Action Button, dictate "acmeapp deploy restart", and release, **then** the Groq-backed transcript — with runtime-vocabulary casing — is on the clipboard and pastes cleanly into Termius.
 - AE2. Revoked or rotated token
   - **Covers R5, R6**
   - **Given** a token revoked on the gateway, **when** the user dictates, **then** the app reports the auth failure distinctly and accepts the rotated token without reinstall.

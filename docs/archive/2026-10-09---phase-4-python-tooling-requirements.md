@@ -24,7 +24,7 @@ Ship one Python package, `wordink`, uv-installable, that wraps the gateway only:
 - `wordink dictate` — mic → stdout text (push-to-… — records until Ctrl+C/Enter,
   then transcribes the clip)
 - `wordink-mcp` — MCP stdio server exposing a `transcribe` tool so agents
-  (wisp, kurultai, Devin, Claude Code) transcribe audio files through the gateway
+  (ptt-tool, acmeapp, Devin, Claude Code) transcribe audio files through the gateway
   without writing client code
 
 No provider adapters, no key handling beyond the device token: provider fallback,

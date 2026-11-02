@@ -1,5 +1,5 @@
 ---
-title: Windows Dictation App (cyberpowa, Windows 11) - Plan
+title: Windows Dictation App (my-windows-pc, Windows 11) - Plan
 type: feat
 date: 2026-10-28
 topic: windows-dictation
@@ -7,21 +7,21 @@ artifact_contract: ce-unified-plan/v1
 product_contract_source: ce-plan (program plan U13, linux plan U9, U9 decision Oct 24, 2026)
 execution: code
 target_repo: duketopceo/WordInk
-tracking: tallyline WordInk project, WI-U13 (TLY-279)
+tracking: the tracker
 ---
 
 > **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
 
-# Windows Dictation App (cyberpowa, Windows 11) - Plan
+# Windows Dictation App (my-windows-pc, Windows 11) - Plan
 
 ## Goal Capsule
 
-- **Objective:** On cyberpowa (Windows 11, Python 3.11, uv), hold a global hotkey, speak, release, and Groq-transcribed, cleaned-up text is typed into the focused window. A tray icon shows state, a Task Scheduler logon task keeps it running, and it replaces the legacy `legacy/wordink` tray app, with a one-command way back to the legacy app until the replacement is proven.
+- **Objective:** On my-windows-pc (Windows 11, Python 3.11, uv), hold a global hotkey, speak, release, and Groq-transcribed, cleaned-up text is typed into the focused window. A tray icon shows state, a Task Scheduler logon task keeps it running, and it replaces the legacy `legacy/wordink` tray app, with a one-command way back to the legacy app until the replacement is proven.
 - **Means:** The same `wordink.desktop` package that already ships on Linux (`sdks/python`). The pipeline stays as is: vocabulary, Groq Whisper transcription, bounded Groq LLM cleanup with the `flow.py` fallback, the state machine, config validation. Only the platform edges change: mic capture, hotkey, text insertion, tray and notifications, IPC, autostart, secrets, and install. Those edges move behind small interfaces on Linux first, then get Windows implementations.
 - **Authority:** `ROADMAP.md` Phase 3 and program plan U13 (standalone app on each OS, works on default open-source config with only a provider key). `docs/archive/2026-10-28-0005-feat-standalone-linux-dictation-app-plan.md` (units U1 to U7 shipped; its U9 asked for this plan).
-- **Execution profile:** Code units W1 to W8 land as small PRs. W9 (CI) rides with them. W10 is operator-run on cyberpowa and produces evidence, not diffs. Nothing in this plan changes cyberpowa until the operator runs the installer.
+- **Execution profile:** Code units W1 to W8 land as small PRs. W9 (CI) rides with them. W10 is operator-run on my-windows-pc and produces evidence, not diffs. Nothing in this plan changes my-windows-pc until the operator runs the installer.
 - **Stop conditions:** a target app that runs elevated and rejects injected input (record, fall back to clipboard), antivirus quarantining the keyboard hook (record, stop that unit), or the hotkey clashing with something the operator wants to keep (change the key, not the design).
-- **Who ships:** the agent ships W1 to W9. The operator (or an agent on cyberpowa) runs W10.
+- **Who ships:** the agent ships W1 to W9. The operator (or an agent on my-windows-pc) runs W10.
 
 ---
 
@@ -33,7 +33,7 @@ A Windows build of the dictation daemon that matches the Linux one in behavior: 
 
 ### Problem Frame
 
-Today cyberpowa runs `legacy/wordink`: about 2,000 lines of Windows-only Python (`keyboard` library hotkey, default `Pause`; `pyaudio`; clipboard paste through `pyperclip` and `pyautogui`; `pystray`; a Startup-folder shortcut named "Groq Flow.lnk"). It works, but it is a separate codebase from the Linux daemon, has no shared vocabulary or cleanup pipeline, and `legacy/` can only be retired once a Windows replacement ships (program plan U8, U13). The Linux work already isolated the platform-independent pipeline, so most of the Windows app is reuse. What is new is Windows input and shell integration, where a few details decide whether it feels solid:
+Today my-windows-pc runs `legacy/wordink`: about 2,000 lines of Windows-only Python (`keyboard` library hotkey, default `Pause`; `pyaudio`; clipboard paste through `pyperclip` and `pyautogui`; `pystray`; a Startup-folder shortcut named "Groq Flow.lnk"). It works, but it is a separate codebase from the Linux daemon, has no shared vocabulary or cleanup pipeline, and `legacy/` can only be retired once a Windows replacement ships (program plan U8, U13). The Linux work already isolated the platform-independent pipeline, so most of the Windows app is reuse. What is new is Windows input and shell integration, where a few details decide whether it feels solid:
 
 - `RegisterHotKey` only reports presses, never releases, so hold-to-talk needs a low-level keyboard hook.
 - Windows blocks injected input into windows running at a higher integrity level than the daemon (UIPI).
@@ -60,7 +60,7 @@ Today cyberpowa runs `legacy/wordink`: about 2,000 lines of Windows-only Python 
 
 - Not in scope: macOS (own plan), a settings GUI beyond the tray menu, streaming partial results, local engines, installers like MSI or MSIX, code signing, Windows on ARM specifics (noted as a risk, not a target).
 - The legacy app is not edited or deleted by this plan. Retiring `legacy/` is a follow-up decision after W10.
-- No changes to cyberpowa until the operator runs the installer.
+- No changes to my-windows-pc until the operator runs the installer.
 
 ---
 
@@ -80,7 +80,7 @@ Today cyberpowa runs `legacy/wordink`: about 2,000 lines of Windows-only Python 
 
 ### Open question for the owner
 
-- Is `Ctrl+Alt+D` acceptable as the default hold key on cyberpowa, or should the legacy `Pause` key be kept for muscle memory? The design supports either; `Pause` alone would be allowed when the legacy app is not running.
+- Is `Ctrl+Alt+D` acceptable as the default hold key on my-windows-pc, or should the legacy `Pause` key be kept for muscle memory? The design supports either; `Pause` alone would be allowed when the legacy app is not running.
 
 ### Output Structure
 
@@ -230,7 +230,7 @@ flowchart LR
 - **Files:** `examples/windows-dictation/install.ps1`, `examples/windows-dictation/wordink-use-legacy.ps1.tmpl`, `examples/windows-dictation/README.md`, tests.
 - **Approach:** `uv tool install --force "wordink[windows]"` from the repo path or the git URL; `Register-ScheduledTask` with an AtLogOn trigger for the current user, `-RunLevel Limited`, `ExecutionTimeLimit` unlimited, restart three times at one minute, `MultipleInstances IgnoreNew`, action `wordink-dictd-tray.exe`. `-DryRun` prints each step. `-Uninstall` removes only the task, the rollback script and the tool, never the stored key or vocabulary. `-Switch` records the legacy state (Startup shortcut "Groq Flow.lnk" present, running `python`/`wordink` process), removes the shortcut, stops the legacy process, writes `wordink-use-legacy.ps1` that stops the new task, restores the shortcut, and starts legacy. Without `-Switch`, legacy is untouched. All paths and command invocations go through functions that tests can replace.
 - **Test scenarios:** after install the launcher exists, or the `pythonw` fallback action is registered; `-Switch` matches the legacy shortcut by its exact name (`Groq Flow.lnk`) and by the legacy process, and leaves any other shortcut alone; script parses (`powershell -NoProfile -Command [scriptblock]::Create`) and passes PSScriptAnalyzer on a Windows CI runner; Pester tests with mocked `Register-ScheduledTask`, `Get-ScheduledTask`, `Stop-Process`, file operations: dry run changes nothing, second run changes nothing, `-Switch` writes the rollback and removes the shortcut, the rollback restores it, `-Uninstall` keeps the key and vocabulary, a missing `uv` fails with the install hint.
-- **Verification:** Pester on `windows-latest`; nothing executed on cyberpowa.
+- **Verification:** Pester on `windows-latest`; nothing executed on my-windows-pc.
 
 ### W9. CI and test seams
 
@@ -241,7 +241,7 @@ flowchart LR
 - **Test scenarios:** the job fails if a `win/` module touches `ctypes.windll` outside `win32.py`; import of `wordink.desktop.win.*` on Linux works with the fake layer injected.
 - **Verification:** both jobs green on the PR that adds them.
 
-### W10. Operator checks and acceptance on cyberpowa (read-only, then a human test)
+### W10. Operator checks and acceptance on my-windows-pc (read-only, then a human test)
 
 - **Goal:** Confirm assumptions before install and prove the result after.
 - **Dependencies:** W1 to W9 merged. Not an agent task unless the operator asks.
@@ -271,5 +271,5 @@ flowchart LR
 ## Definition of Done
 
 - W1 to W9 merged with green CI on Linux and Windows runners; W10 results recorded.
-- `ROADMAP.md` marks the Windows app shipped; the program plan's `legacy/` retirement (U8) is re-opened for a decision once cyberpowa has run on the new app for a trial period.
-- WI-U13 (TLY-279) shows each merged PR.
+- `ROADMAP.md` marks the Windows app shipped; the program plan's `legacy/` retirement (U8) is re-opened for a decision once my-windows-pc has run on the new app for a trial period.
+- the tracker shows each merged PR.

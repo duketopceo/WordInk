@@ -72,19 +72,19 @@
       "id": "case-insensitive-word-boundary-snippets",
       "input": "send my calendly or My Email today",
       "snippets": {
-        "my calendly": "https://cal.com/luke",
-        "my email": "luke@wordink.io"
+        "my calendly": "https://example.com/alex",
+        "my email": "alex@example.com"
       },
-      "expected": "send https://cal.com/luke or luke@wordink.io today"
+      "expected": "send https://example.com/alex or alex@example.com today"
     },
     {
       "id": "longest-trigger-precedence",
       "input": "here is my cal link",
       "snippets": {
         "cal": "https://cal.com",
-        "cal link": "https://cal.com/luke/30min"
+        "cal link": "https://example.com/alex/30min"
       },
-      "expected": "here is my https://cal.com/luke/30min"
+      "expected": "here is my https://example.com/alex/30min"
     }
   ],
   "applyTonePreset": [
@@ -114,9 +114,9 @@
     },
     {
       "id": "email-greeting-body-signoff",
-      "input": "hi sarah thanks for sending the roadmap over best luke",
+      "input": "hi sarah thanks for sending the roadmap over best alex",
       "tone": "email",
-      "expected": "Hi Sarah,\n\nThanks for sending the roadmap over.\n\nBest,\nLuke"
+      "expected": "Hi Sarah,\n\nThanks for sending the roadmap over.\n\nBest,\nAlex"
     },
     {
       "id": "code-camel-case",
@@ -162,10 +162,10 @@
       "options": {
         "tone": "work",
         "snippets": {
-          "my calendly": "https://cal.com/luke"
+          "my calendly": "https://example.com/alex"
         }
       },
-      "expected": "Send it to Alice with https://cal.com/luke."
+      "expected": "Send it to Alice with https://example.com/alex."
     },
     {
       "id": "full-pipeline-casual-backtrack",

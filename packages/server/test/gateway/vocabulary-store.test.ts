@@ -58,7 +58,7 @@ afterEach(() => {
 
 describe("cleanTerm", () => {
   it.each([
-    ["Kurultai", "Kurultai"],
+    ["Acmeapp", "Acmeapp"],
     ["  Omarchy  ", "Omarchy"],
   ])("normalizes %j to %j", (raw, want) => {
     expect(cleanTerm(raw)).toBe(want);
@@ -89,10 +89,10 @@ describe("defaultVocabularyPath", () => {
 
 describe("FileVocabularyStore", () => {
   it("add persists terms with provenance; a second instance sees them", async () => {
-    await new FileVocabularyStore(path).add(["Kurultai", "Omarchy"], AGENT);
+    await new FileVocabularyStore(path).add(["Acmeapp", "Omarchy"], AGENT);
     const again = new FileVocabularyStore(path);
     expect(await again.list()).toEqual([
-      { term: "Kurultai", addedBy: "argus", addedByTokenId: "tok-1", addedAt: expect.any(String) },
+      { term: "Acmeapp", addedBy: "argus", addedByTokenId: "tok-1", addedAt: expect.any(String) },
       { term: "Omarchy", addedBy: "argus", addedByTokenId: "tok-1", addedAt: expect.any(String) },
     ]);
     expect(statSync(path).mode & 0o777).toBe(0o600);
@@ -118,33 +118,33 @@ describe("FileVocabularyStore", () => {
 
   it("case-folds on add: a variant respells the stored term, a dupe keeps insertion order", async () => {
     const store = new FileVocabularyStore(path);
-    await store.add(["kurultai", "Omarchy"], AGENT);
-    await store.add(["Kurultai"], { label: "wisp" });
+    await store.add(["acmeapp", "Omarchy"], AGENT);
+    await store.add(["Acmeapp"], { label: "ptt-tool" });
     const terms = await store.list();
-    expect(terms.map((t) => t.term)).toEqual(["Kurultai", "Omarchy"]);
-    expect(terms[0]!.addedBy).toBe("wisp"); // the respeller owns the spelling now
+    expect(terms.map((t) => t.term)).toEqual(["Acmeapp", "Omarchy"]);
+    expect(terms[0]!.addedBy).toBe("ptt-tool"); // the respeller owns the spelling now
   });
 
   it("remove folds to the stored spelling and echoes it; the tombstone keeps delete attribution", async () => {
     const store = new FileVocabularyStore(path);
-    await store.add(["Kurultai", "Omarchy"], AGENT);
-    expect(await store.remove("kurultai", { label: "wisp", tokenId: "tok-2" })).toBe("Kurultai");
-    expect(await store.remove("kurultai")).toBeNull();
+    await store.add(["Acmeapp", "Omarchy"], AGENT);
+    expect(await store.remove("acmeapp", { label: "ptt-tool", tokenId: "tok-2" })).toBe("Acmeapp");
+    expect(await store.remove("acmeapp")).toBeNull();
     expect((await store.list()).map((t) => t.term)).toEqual(["Omarchy"]);
     const raw = JSON.parse(readFileSync(path, "utf8")) as { terms: Record<string, unknown>[] };
-    const tombstone = raw.terms.find((t) => t.term === "Kurultai")!;
-    expect(tombstone).toMatchObject({ removedBy: "wisp", removedByTokenId: "tok-2" });
+    const tombstone = raw.terms.find((t) => t.term === "Acmeapp")!;
+    expect(tombstone).toMatchObject({ removedBy: "ptt-tool", removedByTokenId: "tok-2" });
     expect(tombstone.removedAt).toEqual(expect.any(String));
   });
 
   it("a removed term can be re-added (the tombstone is spent)", async () => {
     const store = new FileVocabularyStore(path);
-    await store.add(["Kurultai"], AGENT);
-    await store.remove("kurultai");
-    await store.add(["Kurultai"], { label: "wisp" });
+    await store.add(["Acmeapp"], AGENT);
+    await store.remove("acmeapp");
+    await store.add(["Acmeapp"], { label: "ptt-tool" });
     const terms = await store.list();
     expect(terms).toEqual([
-      { term: "Kurultai", addedBy: "wisp", addedAt: expect.any(String) },
+      { term: "Acmeapp", addedBy: "ptt-tool", addedAt: expect.any(String) },
     ]);
   });
 

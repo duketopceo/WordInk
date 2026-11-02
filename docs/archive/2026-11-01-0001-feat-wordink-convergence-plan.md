@@ -78,5 +78,5 @@ converged app is the product, integrations are not required.
 ## Verification
 
 Each phase lands with the repo's contract (`uv run pytest` in `sdks/python`, CI on
-Linux+Windows+macOS) plus a device acceptance pass on omarchy-max and cyberpowa:
+Linux+Windows+macOS) plus a device acceptance pass on my-laptop and my-windows-pc:
 dictate into a foot terminal, a GUI app, and a password field per OS.
