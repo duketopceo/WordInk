@@ -7,7 +7,6 @@ Report security problems privately, as described in [SECURITY.md](SECURITY.md).
 
 | Package | Setup | Test |
 | --- | --- | --- |
-| `apps/desktop` (Rust) | `cargo build` in `apps/desktop` | `cargo test` |
 | `crates/*` (Rust workspace) | `cargo build --workspace` | `cargo test --workspace`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` |
 | `sdks/python` | `cd sdks/python && uv sync` (add `--extra mic` for the microphone) | `uv run pytest` |
 | `packages/*`, `apps/docs` (pnpm) | `pnpm install` at the repo root | `pnpm test`, `pnpm typecheck`, `pnpm build` |
@@ -30,7 +29,11 @@ There is no CLA. Sign every commit with `git commit -s`, which adds:
     Signed-off-by: Your Name <you@example.com>
 
 The name and email must match the commit author. To fix an unsigned commit, run
-`git commit --amend -s`; for several, `git rebase --signoff <base>`.
+`git commit --amend -s`; for several, `git rebase --signoff <base>`. Both
+write your configured Git identity into the trailer while keeping the original
+author, so if your configured name or email differs from the author's, set
+`GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL` to the author's values for that
+command.
 
 ## Clean-room rule
 

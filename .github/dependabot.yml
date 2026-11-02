@@ -21,13 +21,7 @@ updates:
     groups:
       rust-deps:
         patterns: ["*"]
-  # Desktop app; this directory arrives with the apps/desktop change.
-  - package-ecosystem: cargo
-    directory: /apps/desktop
-    schedule: { interval: weekly }
-    groups:
-      desktop-rust-deps:
-        patterns: ["*"]
+  # Add a cargo entry for /apps/desktop in the change that creates it.
   # Swift packages
   - package-ecosystem: swift
     directory: /sdks/ios

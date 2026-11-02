@@ -52,4 +52,4 @@ body:
     attributes:
       label: Logs or screenshots
       description: Remove anything private first.
-      render: shell
+      render: text

@@ -30,5 +30,8 @@ using the product is an idea. Its source, text and artwork are not.
 ## If something slipped in
 
 Remove the code, rewrite it from the requirement by someone who has not seen
-the original, and rewrite the history if it reached a release. Report it to the
+the original, and rewrite the history if it reached a release. Rewriting
+history does not remove files from a published GitHub release: if copied
+material reached one, delete that release and publish a replacement built from
+clean code (use a new tag if immutable releases are enabled). Report it to the
 maintainer through GitHub private reporting.
