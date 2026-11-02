@@ -644,6 +644,20 @@ impl ModelSwap {
         }
     }
 
+    /// A swap for a listener that started on a cloud engine and loaded no
+    /// model: any local selection it is asked for loads.
+    pub(crate) fn unloaded() -> Self {
+        Self {
+            loaded: TranscriptionSelection {
+                language: String::new(),
+                ..TranscriptionSelection::default()
+            },
+            device: device(),
+            loading: None,
+            ready: None,
+        }
+    }
+
     /// The selection and device setting the listener will transcribe with
     /// once swaps settle.
     fn target(&self) -> (&TranscriptionSelection, TranscriptionDevice) {

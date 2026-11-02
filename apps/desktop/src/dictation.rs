@@ -1458,6 +1458,28 @@ mod tests {
     }
 
     #[test]
+    fn a_non_streaming_engine_publishes_no_words_so_live_text_has_only_phases() {
+        use crate::dictation::indicator::Label;
+        let (engine, commands) = TranscriptionEngine::for_test_without_streaming();
+        let engine = engine.with_live_text();
+        let start = capture_time();
+        let mut capture = DictationCapture::new(16_000);
+        capture.start(start);
+        assert!(capture.become_intentional(start + MINIMUM_HOLD_DURATION));
+        capture.begin_stream(&engine);
+        capture.ingest(&[0.5; 16_000], start + Duration::from_secs(1));
+        assert!(!capture.is_streaming(), "the engine can't stream");
+        assert_eq!(capture.take_partial(), None);
+        assert!(commands.try_iter().next().is_none(), "no stream was begun");
+        // With no words, the plate says the phase.
+        let partial = capture.take_partial();
+        assert_eq!(
+            crate::rune_ui::live_text::line(true, Some(Label::Recording), partial.as_ref()),
+            Some(("Recording".to_owned(), String::new()))
+        );
+    }
+
+    #[test]
     fn live_text_follows_the_recording_and_never_outlives_it() {
         use crate::transcription::engine::Command;
         let said = |stable: &str| Partial {

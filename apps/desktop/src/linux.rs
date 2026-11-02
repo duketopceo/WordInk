@@ -79,6 +79,17 @@ enum Command {
     },
     /// List microphone devices visible through ALSA.
     Devices,
+    /// Manage the API keys cloud engines use (`set` reads stdin).
+    Keys {
+        #[command(subcommand)]
+        command: crate::keys::KeysCommand,
+    },
+    /// Transcribe a WAV file with the current engine and print the text.
+    #[command(hide = true)]
+    TranscribeFile {
+        /// A WAV file; it is resampled to 16 kHz mono.
+        path: PathBuf,
+    },
 }
 
 pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
@@ -97,6 +108,14 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
             crate::control::ControlCommand::Quit { force: false },
             Default::default(),
         )),
+        command => command,
+    };
+    // Keys and file transcription need no log, lock, or running Hex.
+    let command = match command {
+        Command::Keys { command } => std::process::exit(crate::keys::run_cli(&command)),
+        Command::TranscribeFile { path } => {
+            std::process::exit(crate::transcription::cloud::transcribe_file_cli(&path))
+        }
         command => command,
     };
     // Before the log, which starts a thread: the service may need the
@@ -157,7 +176,9 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
             }
             Ok(())
         }
-        Command::Control(_) | Command::Stop => unreachable!("handled before logging"),
+        Command::Control(_) | Command::Stop | Command::Keys { .. } | Command::TranscribeFile { .. } => {
+            unreachable!("handled before logging")
+        }
     }
 }
 

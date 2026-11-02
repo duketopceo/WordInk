@@ -208,6 +208,12 @@ const KEYS: &[Key] = &[
          the Output steps; none (the default) turns it off",
     ),
     optional(
+        "cancel_hotkey",
+        Kind::Shortcut(HotkeySlot::Cancel),
+        "Cancel a recording: discards it and inserts nothing; none (the default) leaves \
+         only pressing Esc twice (Linux; Windows and macOS don't act on it yet)",
+    ),
+    optional(
         "second_dictation_hotkey",
         Kind::Shortcut(HotkeySlot::SecondDictation),
         "Labs: another shortcut that dictates like dictation_hotkey, such as a key on an \
@@ -497,6 +503,16 @@ const KEYS: &[Key] = &[
         "transcription_device",
         Kind::Choice(&["auto", "gpu", "cpu"]),
         "Where the speech model runs: auto (a GPU unless it failed before), gpu, or cpu (Linux and Windows)",
+    ),
+    key(
+        "engine",
+        Kind::Choice(&["auto", "local", "groq"]),
+        "Which engine dictation uses: auto (Groq when a key is set, else the local model), local, or groq. Keys are set with `wordink keys set groq`",
+    ),
+    key(
+        "indicator_style",
+        Kind::Choice(&["pill", "audio_bar", "live_text"]),
+        "Which recording indicator shows while dictating: pill (default), audio_bar or live_text",
     ),
     key(
         "indicator_position",
@@ -805,6 +821,7 @@ pub fn apply(
         "dictation_hotkey"
         | "paste_last_hotkey"
         | "raw_dictation_hotkey"
+        | "cancel_hotkey"
         | "second_dictation_hotkey"
         | "capture.hotkey" => {
             let Kind::Shortcut(slot) = key.kind else {
@@ -814,6 +831,7 @@ pub fn apply(
                 HotkeySlot::Dictation => Some(&candidate.dictation_hotkey),
                 HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
                 HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
+                HotkeySlot::Cancel => candidate.cancel_hotkey.as_ref(),
                 HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
                 #[cfg(hex_capture)]
                 HotkeySlot::Capture => Some(&candidate.capture.hotkey),
@@ -1489,6 +1507,33 @@ mod tests {
             vec![Effect::HistoryRetention(
                 crate::history::HistoryRetention::Month
             )]
+        );
+    }
+
+    #[test]
+    fn the_indicator_style_and_cancel_shortcut_are_set_from_the_cli() {
+        let settings = AppSettings::default();
+        for style in ["pill", "audio_bar", "live_text"] {
+            let change = apply(&settings, "indicator_style", style, &rules()).unwrap();
+            let value = get(&change.settings, "indicator_style").unwrap();
+            assert_eq!(value[0].value, Value::String(style.into()));
+            assert_eq!(value[0].choices, ["pill", "audio_bar", "live_text"]);
+        }
+        assert_eq!(
+            apply(&settings, "indicator_style", "neon", &rules())
+                .unwrap_err()
+                .code,
+            "invalid-value"
+        );
+        let cancel = get(&settings, "cancel_hotkey").unwrap();
+        assert_eq!(cancel[0].value, Value::Null, "unbound by default");
+        let dictation = format_hotkey(&settings.dictation_hotkey);
+        assert_eq!(
+            apply(&settings, "cancel_hotkey", &dictation, &rules())
+                .unwrap_err()
+                .code,
+            "shortcut-in-use",
+            "it can't share the dictation shortcut"
         );
     }
 

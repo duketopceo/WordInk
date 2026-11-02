@@ -50,6 +50,7 @@ pub(crate) enum ShortcutTarget {
     PasteLast,
     Capture,
     RawDictation,
+    Cancel,
 }
 
 struct PreparedTranscription {
@@ -610,7 +611,12 @@ impl LinuxDesktopHost {
             return;
         }
         let model = crate::transcription::models::definition(self.settings.transcription.model);
-        if !crate::transcription::models::is_installed(model, &self.settings.transcription.language)
+        // A cloud engine needs no local model.
+        if crate::transcription::cloud::route().is_none()
+            && !crate::transcription::models::is_installed(
+                model,
+                &self.settings.transcription.language,
+            )
         {
             self.status = "Model required".into();
             return;
@@ -963,6 +969,7 @@ impl LinuxDesktopHost {
                         ShortcutTarget::RawDictation => {
                             settings.raw_dictation_hotkey = Some(binding)
                         }
+                        ShortcutTarget::Cancel => settings.cancel_hotkey = Some(binding),
                     }
                 })
             }));

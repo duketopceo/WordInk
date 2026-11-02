@@ -63,9 +63,17 @@ impl Drop for Demand {
     }
 }
 
-/// Whether anything holds a [`Demand`].
+/// Whether anything holds a [`Demand`], or the Live text indicator is the
+/// picked style (it shows the words, so streams must publish them).
 pub(crate) fn demanded() -> bool {
-    DEMANDS.load(Ordering::Acquire) > 0
+    wanted(
+        crate::app_settings::indicator_style(),
+        DEMANDS.load(Ordering::Acquire),
+    )
+}
+
+fn wanted(style: crate::app_settings::IndicatorStyle, demands: usize) -> bool {
+    demands > 0 || style == crate::app_settings::IndicatorStyle::LiveText
 }
 
 /// One recording's hold on the live text.
@@ -140,6 +148,15 @@ mod tests {
                 .push(partial.map(|partial| partial.stable.clone()));
         });
         seen
+    }
+
+    #[test]
+    fn the_live_text_style_demands_the_words_and_the_others_do_not() {
+        use crate::app_settings::IndicatorStyle::{AudioBar, LiveText, Pill};
+        assert!(wanted(LiveText, 0));
+        assert!(!wanted(Pill, 0));
+        assert!(!wanted(AudioBar, 0));
+        assert!(wanted(Pill, 1), "the practice field still asks");
     }
 
     #[test]

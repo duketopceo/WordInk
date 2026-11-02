@@ -8,8 +8,7 @@
 //! it before a reveal, so it never reappears with the last dictation's
 //! words for a frame.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 use rune::{
     Anim, Cx, El, OverlayHandle, OverlayOptions, OverlayPlacement, OverlaySpec, ScreenEdge, row,
@@ -17,6 +16,7 @@ use rune::{
 };
 
 use super::controls::Paint;
+use crate::dictation::indicator::Label;
 use crate::transcription::engine::Partial;
 
 /// The overlay's size: room for about a dozen words on one line.
@@ -111,44 +111,131 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
         view,
     }
     .options(OverlayOptions {
-        prewarm: crate::labs::live_text(),
+        prewarm: crate::labs::live_text()
+            || crate::app_settings::indicator_style()
+                == crate::app_settings::IndicatorStyle::LiveText,
         #[cfg(not(target_os = "macos"))]
         display: crate::rune_hud::display(),
         ..Default::default()
     });
     let overlay = app.overlay(spec, Plate::default());
     let _ = LIVE.set(overlay.clone());
-    let shown = Arc::new(AtomicBool::new(false));
+    let _ = PLACE.set(place);
     crate::dictation::live_text::watch(move |partial| {
-        let partial = partial.filter(|partial| !is_blank(partial));
-        let Some(Partial { stable, tentative }) = partial.cloned() else {
-            if shown.swap(false, Ordering::AcqRel) {
-                // Hidden from the same queue that shows it, so a recording
-                // that ends as its plate appears never leaves it showing.
-                let handle = overlay.clone();
-                overlay.update(move |plate, tx| {
-                    plate.stable.clear();
-                    plate.tentative.clear();
-                    tx.instant();
-                    handle.hide();
-                });
-            }
+        wanted().partial = partial.filter(|partial| !is_blank(partial)).cloned();
+        apply(&overlay, place);
+    });
+}
+
+/// What the plate says: the words a streaming engine has recognised, else
+/// the dictation's phase. `None` hides the plate: Live text is not the
+/// picked style, or there is neither.
+pub(crate) fn line(
+    enabled: bool,
+    label: Option<Label>,
+    partial: Option<&Partial>,
+) -> Option<(String, String)> {
+    if !enabled {
+        return None;
+    }
+    match partial.filter(|partial| !is_blank(partial)) {
+        Some(Partial { stable, tentative }) => Some((stable.clone(), tentative.clone())),
+        None => label.map(|label| (label.text().to_owned(), String::new())),
+    }
+}
+
+/// What the plate is asked to show, from the two sources that feed it: the
+/// words a stream publishes and the dictation's phase.
+#[derive(Default)]
+struct Wanted {
+    label: Option<Label>,
+    partial: Option<Partial>,
+    shown: bool,
+    /// Bumped with each label, so an outcome's timer never clears a newer one.
+    generation: u64,
+}
+
+static WANTED: Mutex<Wanted> = Mutex::new(Wanted {
+    label: None,
+    partial: None,
+    shown: false,
+    generation: 0,
+});
+/// The plate's placement function, for the timer that clears an outcome.
+static PLACE: std::sync::OnceLock<Place> = std::sync::OnceLock::new();
+
+fn wanted() -> MutexGuard<'static, Wanted> {
+    WANTED.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+/// Shows or hides the plate for what is wanted now.
+fn apply(overlay: &OverlayHandle<Plate>, place: Place) {
+    let enabled = crate::app_settings::indicator_style()
+        == crate::app_settings::IndicatorStyle::LiveText;
+    let mut wanted = wanted();
+    let line = line(enabled, wanted.label, wanted.partial.as_ref());
+    let Some((stable, tentative)) = line else {
+        if std::mem::take(&mut wanted.shown) {
+            // Hidden from the same queue that shows it, so a recording
+            // that ends as its plate appears never leaves it showing.
+            let handle = overlay.clone();
+            overlay.update(move |plate, tx| {
+                plate.stable.clear();
+                plate.tentative.clear();
+                tx.instant();
+                handle.hide();
+            });
+        }
+        return;
+    };
+    let appearing = !std::mem::replace(&mut wanted.shown, true);
+    let handle = overlay.clone();
+    overlay.update(move |plate, tx| {
+        plate.stable = stable;
+        plate.tentative = tentative;
+        tx.instant();
+        if appearing {
+            // Placed and shown after the new words, so it appears
+            // where it belongs with them already drawn.
+            place().apply(&handle);
+            handle.show();
+        }
+    });
+}
+
+/// Says the dictation's phase on the plate (`None` clears it) while no words
+/// stream. An outcome (done, copied, error) clears itself.
+pub(crate) fn set_label(label: Option<Label>) {
+    let (Some(overlay), Some(place)) = (LIVE.get(), PLACE.get().copied()) else {
+        return;
+    };
+    let generation = {
+        let mut wanted = wanted();
+        if wanted.label == label {
             return;
-        };
-        let appearing = !shown.swap(true, Ordering::AcqRel);
-        let handle = overlay.clone();
-        overlay.update(move |plate, tx| {
-            plate.stable = stable;
-            plate.tentative = tentative;
-            tx.instant();
-            if appearing {
-                // Placed and shown after the new words, so it appears
-                // where it belongs with them already drawn.
-                place().apply(&handle);
-                handle.show();
+        }
+        wanted.label = label;
+        wanted.generation += 1;
+        wanted.generation
+    };
+    apply(overlay, place);
+    if label.is_some_and(Label::is_outcome) {
+        std::thread::spawn(move || {
+            std::thread::sleep(crate::dictation::indicator::OUTCOME_LABEL_DURATION);
+            let current = {
+                let mut wanted = wanted();
+                if wanted.generation != generation {
+                    return;
+                }
+                wanted.label = None;
+                wanted.generation += 1;
+                LIVE.get()
+            };
+            if let Some(overlay) = current {
+                apply(overlay, place);
             }
         });
-    });
+    }
 }
 
 /// The model's first update often has no words yet.
@@ -348,6 +435,53 @@ mod tests {
         assert_eq!(
             rect(false),
             (700.0 - SIZE.0 / 2.0, 100.0 - PAD - PLATE_H, SIZE.0)
+        );
+    }
+
+    fn words(stable: &str, tentative: &str) -> Partial {
+        Partial {
+            stable: stable.into(),
+            tentative: tentative.into(),
+        }
+    }
+
+    #[test]
+    fn without_streamed_words_the_plate_says_the_phase() {
+        // A non-streaming engine never publishes words: every phase label
+        // shows in turn.
+        for label in [
+            Label::Ready,
+            Label::LoadingModel,
+            Label::Recording,
+            Label::Transcribing,
+            Label::Done,
+            Label::Copied,
+            Label::Error,
+        ] {
+            assert_eq!(
+                line(true, Some(label), None),
+                Some((label.text().to_owned(), String::new()))
+            );
+            // Blank words from a model's first update don't hide it.
+            assert_eq!(
+                line(true, Some(label), Some(&words(" ", ""))),
+                Some((label.text().to_owned(), String::new()))
+            );
+        }
+    }
+
+    #[test]
+    fn streamed_words_replace_the_label_and_other_styles_show_nothing() {
+        assert_eq!(
+            line(true, Some(Label::Recording), Some(&words("so the plan", " is"))),
+            Some(("so the plan".to_owned(), " is".to_owned()))
+        );
+        assert_eq!(line(true, None, Some(&words("so", ""))), Some(("so".into(), String::new())));
+        assert_eq!(line(true, None, None), None);
+        // Pill and audio bar: no plate even with words and a phase.
+        assert_eq!(
+            line(false, Some(Label::Recording), Some(&words("so the plan", ""))),
+            None
         );
     }
 

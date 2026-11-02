@@ -366,6 +366,11 @@ pub(crate) const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
 /// Desktops that repeat a held shortcut's press (KWin) repeat it sooner
 /// than this, so a press after a longer gap is a new press.
 const KEY_REPEAT_GAP: Duration = Duration::from_secs(1);
+/// Two Escape presses this close cancel a recording.
+const ESCAPE_CANCEL_WINDOW: Duration = Duration::from_millis(600);
+/// An Escape press this soon after the last is the key repeating, not a
+/// second press.
+const ESCAPE_REPEAT_GAP: Duration = Duration::from_millis(100);
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
 /// Binding through the portal can wait for the user to approve a dialog.
 const PORTAL_READY_TIMEOUT: Duration = Duration::from_secs(65);
@@ -435,6 +440,8 @@ pub(crate) struct HotkeyOptions {
     pub(crate) paste_last: Option<LinuxHotkey>,
     /// Dictate without processing, while it is bound.
     pub(crate) raw_dictation: Option<LinuxHotkey>,
+    /// Cancel the recording in progress, while it is bound.
+    pub(crate) cancel: Option<LinuxHotkey>,
     /// Annotate's one key, while Annotate is on: tap to start and stop,
     /// hold to draw.
     pub(crate) capture: Option<LinuxHotkey>,
@@ -653,14 +660,16 @@ enum Shortcut {
     PasteLast,
     Capture,
     RawDictation,
+    Cancel,
 }
 
 impl Shortcut {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::Dictation,
         Self::PasteLast,
         Self::Capture,
         Self::RawDictation,
+        Self::Cancel,
     ];
 
     fn index(self) -> usize {
@@ -674,6 +683,7 @@ impl Shortcut {
             Self::PasteLast => ("paste-last", "Paste last dictation"),
             Self::Capture => ("capture", "Annotate"),
             Self::RawDictation => ("raw-dictation", "Dictate without processing"),
+            Self::Cancel => ("cancel", "Cancel dictation"),
         }
     }
 }
@@ -715,6 +725,10 @@ struct ShortcutState {
     /// Dictate without processing, not the dictation shortcut, owns the
     /// capture (or the last one).
     raw: bool,
+    /// The first Escape press of a possible double press while recording.
+    last_escape: Option<Instant>,
+    /// The latest Escape press of any kind, to tell a repeating key.
+    escape_seen: Option<Instant>,
 }
 
 impl ShortcutState {
@@ -728,6 +742,8 @@ impl ShortcutState {
             last_press: None,
             down: false,
             raw: false,
+            last_escape: None,
+            escape_seen: None,
         }
     }
 
@@ -737,10 +753,45 @@ impl ShortcutState {
 
     /// The backend lost track of the keys: whatever recorded ends.
     fn cancel(&mut self) -> Option<HotkeyEvent> {
-        let active = matches!(self.capture, Capture::Held { .. } | Capture::Locked);
+        let active = self.recording();
         self.capture = Capture::Idle;
         self.last_release = None;
+        self.last_escape = None;
         active.then_some(HotkeyEvent::Cancel)
+    }
+
+    /// Whether a recording is in progress, the indicator is showing it.
+    fn recording(&self) -> bool {
+        matches!(self.capture, Capture::Held { .. } | Capture::Locked)
+    }
+
+    /// An Escape press while recording: the second within
+    /// [`ESCAPE_CANCEL_WINDOW`] of the first cancels the recording. A press
+    /// right after the last is the key repeating and counts for nothing.
+    fn escape_pressed(&mut self, now: Instant) -> Option<HotkeyEvent> {
+        let seen = self.escape_seen.replace(now);
+        if !self.recording() {
+            self.last_escape = None;
+            return None;
+        }
+        // Every press of a held key counts toward the next repeat, so a
+        // key held down never reads as a second press.
+        if seen.is_some_and(|seen| now.saturating_duration_since(seen) < ESCAPE_REPEAT_GAP) {
+            return None;
+        }
+        let since = self
+            .last_escape
+            .map(|pressed| now.saturating_duration_since(pressed));
+        match since {
+            Some(gap) if gap <= ESCAPE_CANCEL_WINDOW => {
+                self.last_escape = None;
+                self.cancel()
+            }
+            _ => {
+                self.last_escape = Some(now);
+                None
+            }
+        }
     }
 
     fn start_dictation(&mut self, raw: bool) -> Option<HotkeyEvent> {
@@ -788,7 +839,7 @@ impl ShortcutState {
             Input::Escape => {
                 #[cfg(hex_capture)]
                 crate::capture_host::exit_drawing();
-                None
+                self.escape_pressed(now)
             }
             Input::Lost => {
                 self.down = false;
@@ -870,6 +921,9 @@ impl ShortcutState {
             Input::Released(Shortcut::PasteLast) => None,
             Input::Pressed(Shortcut::Capture) => Some(HotkeyEvent::Capture),
             Input::Released(Shortcut::Capture) => Some(HotkeyEvent::CaptureUp),
+            // The Cancel shortcut discards the recording; it ends nothing else.
+            Input::Pressed(Shortcut::Cancel) => self.cancel(),
+            Input::Released(Shortcut::Cancel) => None,
             Input::Command(command) => match command {
                 ShortcutCommand::DictationStart => self.start_dictation(false),
                 ShortcutCommand::DictationStartRaw => self.start_dictation(true),
@@ -1127,6 +1181,7 @@ impl Backend {
                 .raw_dictation
                 .as_ref()
                 .map(|key| (Shortcut::RawDictation, key)),
+            options.cancel.as_ref().map(|key| (Shortcut::Cancel, key)),
         ];
         let mut shortcuts = Vec::new();
         let mut ids: [Option<String>; Shortcut::ALL.len()] = Default::default();
@@ -1306,6 +1361,7 @@ impl Backend {
             options
                 .raw_dictation
                 .map(|key| (Shortcut::RawDictation, key)),
+            options.cancel.map(|key| (Shortcut::Cancel, key)),
         ];
         for (shortcut, key) in requested.into_iter().flatten() {
             let mouse = mouse_button(&key.key);
@@ -1336,8 +1392,11 @@ impl Backend {
             if let Some(event) = connection.poll_for_event()? {
                 match event {
                     Event::KeyPress(event) if event.detail == grabs.escape => {
+                        // A held key's repeats are not new presses.
+                        if !escape_down {
+                            inputs.push(Input::Escape);
+                        }
                         escape_down = true;
-                        inputs.push(Input::Escape);
                     }
                     Event::KeyRelease(event) if event.detail == grabs.escape => {
                         escape_down = false;
@@ -1406,9 +1465,10 @@ impl Backend {
                 dispatcher.input(input);
             }
             dispatcher.commands();
-            // Escape is Hex's only while Annotate draws, and until its
-            // release so the release never reaches the app.
-            let wants_escape = annotate_drawing() || escape_down;
+            // Escape is Hex's only while Annotate draws or a recording shows
+            // the indicator (Esc twice cancels it), and until its release so
+            // the release never reaches the app.
+            let wants_escape = annotate_drawing() || dispatcher.state.recording() || escape_down;
             if wants_escape && grabs.escape_grabbed.is_empty() {
                 let available = grabs.grab_escape()?;
                 if !available && !escape_taken {
@@ -2412,6 +2472,87 @@ mod tests {
         assert_eq!(test.state.capture, Capture::Locked);
         test.tap();
         assert_eq!(test.events, [Finish]);
+    }
+
+    #[test]
+    fn the_cancel_shortcut_discards_a_recording_and_does_nothing_idle() {
+        // Held, or locked.
+        let mut test = Test::new(true);
+        test.press(Shortcut::Dictation);
+        test.events.clear();
+        test.press(Shortcut::Cancel);
+        assert_eq!(test.events, [Cancel]);
+        assert_eq!(test.state.capture, Capture::Idle);
+        // The dictation key coming up after a cancel finishes nothing.
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [Cancel]);
+
+        let mut test = Test::new(true);
+        test.lock();
+        test.press(Shortcut::Cancel);
+        test.release(Shortcut::Cancel);
+        assert_eq!(test.events, [Cancel]);
+        assert_eq!(test.state.capture, Capture::Idle);
+
+        // Idle, it has nothing to cancel.
+        let mut test = Test::new(true);
+        test.press(Shortcut::Cancel);
+        test.release(Shortcut::Cancel);
+        assert!(test.events.is_empty());
+    }
+
+    #[test]
+    fn escape_twice_inside_the_window_cancels() {
+        let mut test = Test::new(true);
+        test.lock();
+        test.input(Input::Escape);
+        assert!(test.events.is_empty(), "one Escape ends nothing");
+        test.now += Duration::from_millis(300);
+        test.input(Input::Escape);
+        assert_eq!(test.events, [Cancel]);
+        assert_eq!(test.state.capture, Capture::Idle);
+        // The pair is spent: the next Escape starts a new one.
+        test.now += Duration::from_millis(100);
+        test.input(Input::Escape);
+        assert_eq!(test.events, [Cancel]);
+    }
+
+    #[test]
+    fn escape_twice_outside_the_window_or_idle_does_not_cancel() {
+        let mut test = Test::new(true);
+        test.lock();
+        test.input(Input::Escape);
+        test.now += ESCAPE_CANCEL_WINDOW + Duration::from_millis(100);
+        test.input(Input::Escape);
+        assert!(test.events.is_empty(), "too slow");
+        // The late one starts a new pair.
+        test.now += Duration::from_millis(200);
+        test.input(Input::Escape);
+        assert_eq!(test.events, [Cancel]);
+
+        // Escapes pressed while nothing records never arm a later one.
+        let mut test = Test::new(true);
+        test.input(Input::Escape);
+        test.now += Duration::from_millis(100);
+        test.input(Input::Escape);
+        test.now += Duration::from_millis(100);
+        test.lock();
+        test.now += Duration::from_millis(100);
+        test.input(Input::Escape);
+        assert!(test.events.is_empty());
+    }
+
+    #[test]
+    fn an_escape_key_repeating_is_not_a_second_press() {
+        let mut test = Test::new(true);
+        test.lock();
+        test.input(Input::Escape);
+        // A held key's repeats arrive within a few ms of each other.
+        for _ in 0..4 {
+            test.now += Duration::from_millis(30);
+            test.input(Input::Escape);
+        }
+        assert!(test.events.is_empty());
     }
 
     #[test]

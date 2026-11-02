@@ -327,12 +327,16 @@ pub struct Transcribed {
     pub source: Source,
     /// Time from the finish request to the final text.
     pub finish_ms: u64,
+    /// What a cloud engine used and cost; `None` for a local model.
+    pub usage: Option<crate::history::UsageRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
     Stream,
     Offline,
+    /// The clip went to a cloud provider whole.
+    Cloud,
     /// The stream could not be used; the reason is logged with the result.
     Fallback(String),
 }
@@ -342,6 +346,7 @@ impl Source {
         match self {
             Self::Stream => "stream",
             Self::Offline => "offline",
+            Self::Cloud => "cloud",
             Self::Fallback(_) => "fallback",
         }
     }
@@ -401,6 +406,12 @@ pub struct TranscriptionEngine {
 
 /// The GGUF selection the engine's model held after its last command.
 type Held = Arc<Mutex<Option<crate::transcription::models::TranscriptionSelection>>>;
+
+/// A cloud transcription of one clip: its text and usage, or the text for
+/// the pill.
+pub(crate) type CloudRun = Box<
+    dyn FnOnce(&[f32]) -> Result<(String, crate::history::UsageRecord), String> + Send,
+>;
 
 /// A live stream for one capture. Feed it the capture's 16 kHz audio in order,
 /// then either [`TranscriptionEngine::finish`] or drop it to cancel.
@@ -524,15 +535,30 @@ impl PendingTranscript {
 
 impl TranscriptionEngine {
     pub fn start(model: Model) -> Result<Self> {
-        let streams = Arc::new(AtomicBool::new(model.stream_options().is_some()));
+        Self::start_with(Some(model))
+    }
+
+    /// An engine with no local model, for dictation that runs on a cloud
+    /// provider. Anything that needs the model fails until one is loaded.
+    #[cfg(target_os = "linux")]
+    pub fn start_without_model() -> Result<Self> {
+        Self::start_with(None)
+    }
+
+    fn start_with(model: Option<Model>) -> Result<Self> {
+        let streams = Arc::new(AtomicBool::new(
+            model.as_ref().is_some_and(|model| model.stream_options().is_some()),
+        ));
         let (commands, receiver) = mpsc::channel();
         let requests = Arc::new(AtomicU64::new(0));
         let running = Running::default();
         let stalled = Arc::new(AtomicBool::new(false));
-        let held = Held::new(Mutex::new(model.gguf_selection().cloned()));
+        let held = Held::new(Mutex::new(
+            model.as_ref().and_then(|model| model.gguf_selection().cloned()),
+        ));
         let dictating = Arc::new(AtomicBool::new(false));
         let worker = Worker {
-            model: Some(model),
+            model,
             parked: None,
             idle_since: Instant::now(),
             running: running.clone(),
@@ -604,7 +630,16 @@ impl TranscriptionEngine {
 
     /// Opens a live stream when the loaded model can stream on this device.
     pub fn begin(&self) -> Option<LiveStream> {
-        if !self.streams.load(Ordering::Acquire) {
+        self.begin_routed(crate::transcription::cloud::route())
+    }
+
+    /// [`Self::begin`] for a dictation routed to `cloud`: a cloud engine
+    /// takes the whole clip, so it never streams.
+    pub(crate) fn begin_routed(
+        &self,
+        cloud: Option<crate::transcription::cloud::Provider>,
+    ) -> Option<LiveStream> {
+        if !self.streams_routed(cloud) {
             return None;
         }
         let id = self.next_stream.fetch_add(1, Ordering::Relaxed) + 1;
@@ -631,7 +666,7 @@ impl TranscriptionEngine {
     /// Opens a stream that gives way to dictation, when the loaded model can
     /// stream on this device. See [`YieldingStream`].
     pub(crate) fn begin_yielding(&self) -> Option<YieldingStream> {
-        if !self.streams.load(Ordering::Acquire) {
+        if !self.streams() {
             return None;
         }
         let id = self.next_stream.fetch_add(1, Ordering::Relaxed) + 1;
@@ -656,7 +691,59 @@ impl TranscriptionEngine {
 
     /// Whether the loaded model can stream on its device.
     pub(crate) fn streams(&self) -> bool {
-        self.streams.load(Ordering::Acquire)
+        self.streams_routed(crate::transcription::cloud::route())
+    }
+
+    fn streams_routed(&self, cloud: Option<crate::transcription::cloud::Provider>) -> bool {
+        cloud.is_none_or(|provider| provider.streams()) && self.streams.load(Ordering::Acquire)
+    }
+
+    /// Finishes a capture on a cloud provider: the clip goes whole to `run`
+    /// on its own thread, never to the model, and the transcript carries its
+    /// usage. The pill gets `run`'s error text as it is.
+    pub(crate) fn finish_cloud(
+        &self,
+        provider: crate::transcription::cloud::Provider,
+        clip: Vec<f32>,
+        run: CloudRun,
+    ) -> Result<PendingTranscript> {
+        let (reply, receiver) = mpsc::channel();
+        let cancel = CancelToken::new();
+        let job = self.deadlines.job_for(clip.len());
+        let thread_cancel = cancel.clone();
+        thread::Builder::new()
+            .name("cloud-transcription".into())
+            .spawn(move || {
+                let _ = reply.send(Reply::Started);
+                let started = Instant::now();
+                let result = run(&clip).map(|(text, usage)| Transcribed {
+                    text: text.trim().to_string(),
+                    source: Source::Cloud,
+                    finish_ms: started.elapsed().as_millis() as u64,
+                    usage: Some(usage),
+                });
+                if thread_cancel.is_cancelled() {
+                    // The waiter gave up; its answer is no longer wanted.
+                    return;
+                }
+                tracing::info!(
+                    provider = provider.id(),
+                    finish_ms = started.elapsed().as_millis() as u64,
+                    ok = result.is_ok(),
+                    "cloud transcription finished"
+                );
+                let _ = reply.send(Reply::Done(result));
+            })
+            .map_err(|error| eyre!("could not start the cloud transcription: {error}"))?;
+        self.requests.fetch_add(1, Ordering::AcqRel);
+        Ok(PendingTranscript {
+            reply: receiver,
+            cancel,
+            stream_cancel: None,
+            stalled: self.stalled.clone(),
+            job,
+            stream_finish: self.deadlines.stream_finish,
+        })
     }
 
     /// Finishes a capture with its complete 16 kHz clip. Without a stream,
@@ -682,6 +769,20 @@ impl TranscriptionEngine {
         clip: Vec<f32>,
         offline: Offline,
     ) -> Result<PendingTranscript> {
+        if let Some(provider) = crate::transcription::cloud::route() {
+            // A stream opened before the engine changed ends unused.
+            drop(stream);
+            let language = crate::transcription::cloud::language_hint(
+                &crate::app_settings::transcription_selection().1.language,
+            );
+            return self.finish_cloud(
+                provider,
+                clip,
+                Box::new(move |samples| {
+                    crate::transcription::cloud::run(provider, samples, language.as_deref())
+                }),
+            );
+        }
         let (stream, stream_cancel) = match stream {
             Some(mut stream) => {
                 stream.finished = true;
@@ -1179,6 +1280,7 @@ impl Worker {
                         text,
                         source: Source::Stream,
                         finish_ms: started.elapsed().as_millis() as u64,
+                        usage: None,
                     })),
                     Err(_) if job.cancel.is_cancelled() => {
                         job.finish(Err("transcription was abandoned".into()));
@@ -1256,6 +1358,7 @@ impl Worker {
             text: text.trim().to_string(),
             source,
             finish_ms: started.elapsed().as_millis() as u64,
+            usage: None,
         });
         // An offline run may switch the model (macOS activates a selection).
         self.publish_streams();
@@ -1266,6 +1369,62 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cloud_routed_capture_opens_no_stream_even_when_the_model_streams() {
+        use crate::transcription::cloud::Provider;
+        let (engine, _commands) = TranscriptionEngine::for_test();
+        assert!(engine.begin_routed(None).is_some());
+        assert!(engine.begin_routed(Some(Provider::Groq)).is_none());
+        assert!(engine.streams_routed(None));
+        assert!(!engine.streams_routed(Some(Provider::Groq)));
+    }
+
+    #[test]
+    fn a_cloud_finish_returns_the_text_and_usage_without_touching_the_model() {
+        use crate::transcription::cloud::Provider;
+        let (engine, commands) = TranscriptionEngine::for_test();
+        let usage = crate::history::UsageRecord {
+            provider: "groq".into(),
+            model: "whisper-large-v3-turbo".into(),
+            audio_seconds: 0.5,
+            words: 2,
+            cost_usd: 0.1,
+        };
+        let expected = usage.clone();
+        let done = engine
+            .finish_cloud(
+                Provider::Groq,
+                vec![0.0; 8_000],
+                Box::new(move |clip| {
+                    assert_eq!(clip.len(), 8_000);
+                    Ok(("hello world".into(), usage))
+                }),
+            )
+            .unwrap()
+            .wait()
+            .unwrap();
+        assert_eq!(done.text, "hello world");
+        assert_eq!(done.source, Source::Cloud);
+        assert_eq!(done.usage, Some(expected));
+        assert!(commands.try_recv().is_err(), "the model's queue saw nothing");
+    }
+
+    #[test]
+    fn a_failed_cloud_finish_carries_the_pill_text() {
+        use crate::transcription::cloud::Provider;
+        let (engine, _commands) = TranscriptionEngine::for_test();
+        let error = engine
+            .finish_cloud(
+                Provider::Groq,
+                vec![0.0; 100],
+                Box::new(|_| Err("Groq key rejected".into())),
+            )
+            .unwrap()
+            .wait()
+            .unwrap_err();
+        assert_eq!(error, "Groq key rejected");
+    }
 
     #[test]
     fn source_labels_distinguish_fallbacks() {
@@ -1377,6 +1536,7 @@ mod tests {
             text: "streamed 8".into(),
             source: Source::Stream,
             finish_ms: 0,
+            usage: None,
         }));
         assert_eq!(dictation.wait().unwrap().source, Source::Stream);
         // The chunk waits to run after the stream.
@@ -1781,6 +1941,7 @@ mod tests {
                 text: "late but fine".into(),
                 source: Source::Offline,
                 finish_ms: 0,
+                usage: None,
             }));
         });
         assert_eq!(pending.wait().unwrap().text, "late but fine");

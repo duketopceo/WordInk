@@ -38,6 +38,7 @@ static CALENDAR_SETTINGS: OnceLock<RwLock<CalendarSettings>> = OnceLock::new();
 static MICROPHONE_POLICY: AtomicU8 = AtomicU8::new(0);
 static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
 static INDICATOR_POSITION: AtomicU8 = AtomicU8::new(0);
+static INDICATOR_STYLE: AtomicU8 = AtomicU8::new(0);
 static HOTKEYS: OnceLock<RwLock<RuntimeHotkeys>> = OnceLock::new();
 #[cfg(target_os = "macos")]
 static PASTE_KEY_CODE: OnceLock<u16> = OnceLock::new();
@@ -1493,6 +1494,33 @@ pub enum IndicatorPosition {
     Hidden = 2,
 }
 
+/// Which recording indicator shows while dictating. Exactly one does.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum IndicatorStyle {
+    /// The HUD's Dot scope pill.
+    #[default]
+    Pill = 0,
+    /// A compact horizontal level meter on the same HUD overlay.
+    AudioBar = 1,
+    /// Words as they are recognised, or the phase when the engine can't
+    /// stream.
+    LiveText = 2,
+}
+
+impl IndicatorStyle {
+    pub const ALL: [Self; 3] = [Self::Pill, Self::AudioBar, Self::LiveText];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Pill => "Pill",
+            Self::AudioBar => "Audio bar",
+            Self::LiveText => "Live text",
+        }
+    }
+}
+
 /// Which release-service channel a direct install updates from
 /// (`crate::updater`).
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1824,6 +1852,9 @@ pub struct AppSettings {
     /// Dictate without processing: records like the dictation shortcut and
     /// pastes the transcript as heard. Unbound by default.
     pub raw_dictation_hotkey: Option<HotkeyBinding>,
+    /// Cancels a recording in progress: nothing is inserted. Unbound by
+    /// default (Esc twice cancels too, where WordInk sees the key).
+    pub cancel_hotkey: Option<HotkeyBinding>,
     /// Labs › Second dictation shortcut: another shortcut that dictates
     /// exactly as `dictation_hotkey` does (macOS). Unbound by default and
     /// ignored while its Labs toggle is off.
@@ -1832,6 +1863,9 @@ pub struct AppSettings {
     pub transcription: TranscriptionSelection,
     /// Where the speech model runs (Linux and Windows).
     pub transcription_device: TranscriptionDevice,
+    /// Which engine dictation uses: Groq when a key resolves, else local
+    /// (`auto`), or one of them always. Keys are never stored here.
+    pub engine: crate::transcription::cloud::EngineChoice,
     pub transcription_recents: Vec<TranscriptionSelection>,
     pub keyboard_model_switching: KeyboardModelSwitching,
     pub dictation_processing: DictationProcessingSettings,
@@ -1873,6 +1907,8 @@ pub struct AppSettings {
     /// The interface language code; `None` follows the system language.
     pub ui_language: Option<String>,
     pub indicator_position: IndicatorPosition,
+    /// Which recording indicator shows while dictating.
+    pub indicator_style: IndicatorStyle,
     pub updates: UpdateSettings,
     /// The shared vocabulary (`crate::dictation::vocabulary`). Left out of the file
     /// while empty, so settings without one stay as they were.
@@ -1954,10 +1990,12 @@ impl Default for AppSettings {
             retired_edit_hotkey: None,
             paste_last_hotkey: Some(HotkeyBinding::paste_last_default()),
             raw_dictation_hotkey: None,
+            cancel_hotkey: None,
             second_dictation_hotkey: None,
             show_dock_icon: true,
             transcription: default_transcription(),
             transcription_device: TranscriptionDevice::Auto,
+            engine: crate::transcription::cloud::EngineChoice::default(),
             transcription_recents: Vec::new(),
             keyboard_model_switching: KeyboardModelSwitching::default(),
             dictation_processing: DictationProcessingSettings::default(),
@@ -1977,6 +2015,7 @@ impl Default for AppSettings {
             mouse_shortcut_notice: false,
             ui_language: None,
             indicator_position: IndicatorPosition::default(),
+            indicator_style: IndicatorStyle::default(),
             updates: UpdateSettings::default(),
             vocabulary: Vec::new(),
             vocabulary_boost: crate::dictation::vocabulary::VocabularyBoost::default(),
@@ -2270,8 +2309,10 @@ impl AppSettings {
         crate::feedback::set_sound_set(self.sound_theme);
         crate::desktop::i18n::apply(self.ui_language.as_deref());
         INDICATOR_POSITION.store(self.indicator_position as u8, Ordering::Relaxed);
+        INDICATOR_STYLE.store(self.indicator_style as u8, Ordering::Relaxed);
         #[cfg(not(target_os = "macos"))]
         crate::transcription::local_transcriber::set_device(self.transcription_device);
+        crate::transcription::cloud::set_engine_choice(self.engine);
         RECORDING_DUCK_VOLUME.store(self.recording_duck_volume.to_bits(), Ordering::Relaxed);
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);
         PAUSE_BROWSER_MEDIA.store(self.pause_browser_media, Ordering::Relaxed);
@@ -2560,6 +2601,14 @@ impl AppSettings {
             self.raw_dictation_hotkey = None;
         }
         if self
+            .cancel_hotkey
+            .as_ref()
+            .is_some_and(HotkeyBinding::is_bare_primary_click)
+        {
+            tracing::warn!("cleared a left-click cancel shortcut");
+            self.cancel_hotkey = None;
+        }
+        if self
             .second_dictation_hotkey
             .as_ref()
             .is_some_and(HotkeyBinding::is_bare_primary_click)
@@ -2590,6 +2639,8 @@ pub enum HotkeySlot {
     Dictation,
     PasteLast,
     RawDictation,
+    /// Discards the recording in progress.
+    Cancel,
     #[cfg(hex_capture)]
     Capture,
     /// Labs › Second dictation shortcut (macOS).
@@ -2615,6 +2666,11 @@ impl AppSettings {
             && let Some(raw) = &self.raw_dictation_hotkey
         {
             others.push(raw.clone());
+        }
+        if slot != HotkeySlot::Cancel
+            && let Some(cancel) = &self.cancel_hotkey
+        {
+            others.push(cancel.clone());
         }
         if slot != HotkeySlot::SecondDictation
             && cfg!(target_os = "macos")
@@ -2708,6 +2764,15 @@ pub fn indicator_position() -> IndicatorPosition {
         1 => IndicatorPosition::Bottom,
         2 => IndicatorPosition::Hidden,
         _ => IndicatorPosition::Top,
+    }
+}
+
+/// Which recording indicator shows, as last saved.
+pub fn indicator_style() -> IndicatorStyle {
+    match INDICATOR_STYLE.load(Ordering::Relaxed) {
+        1 => IndicatorStyle::AudioBar,
+        2 => IndicatorStyle::LiveText,
+        _ => IndicatorStyle::Pill,
     }
 }
 
@@ -3150,6 +3215,53 @@ mod tests {
         assert!(settings.hotkey_in_use(HotkeySlot::SecondDictation, &dictation));
         settings.second_dictation_hotkey = Some(dictation);
         assert_eq!(settings.runtime_hotkeys().second_dictation, None);
+    }
+
+    #[test]
+    fn the_indicator_style_defaults_to_the_pill_and_round_trips() {
+        let settings: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.indicator_style, IndicatorStyle::Pill);
+        assert_eq!(AppSettings::default().indicator_style, IndicatorStyle::Pill);
+        for (style, name) in [
+            (IndicatorStyle::Pill, "pill"),
+            (IndicatorStyle::AudioBar, "audio_bar"),
+            (IndicatorStyle::LiveText, "live_text"),
+        ] {
+            let mut settings = settings.clone();
+            settings.indicator_style = style;
+            let json = serde_json::to_value(&settings).unwrap();
+            assert_eq!(json["indicator_style"], name);
+            let decoded: AppSettings = serde_json::from_value(json).unwrap();
+            assert_eq!(decoded.indicator_style, style);
+        }
+        // A saved file from before the setting keeps working.
+        let old: AppSettings =
+            serde_json::from_str(r#"{"indicator_position":"bottom"}"#).unwrap();
+        assert_eq!(old.indicator_style, IndicatorStyle::Pill);
+        assert_eq!(old.indicator_position, IndicatorPosition::Bottom);
+    }
+
+    #[test]
+    fn the_cancel_shortcut_is_unbound_by_default_and_conflicts_like_the_others() {
+        let mut settings: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.cancel_hotkey, None);
+        let dictation = settings.dictation_hotkey.clone();
+        assert!(settings.hotkey_in_use(HotkeySlot::Cancel, &dictation));
+        let decoded: AppSettings = serde_json::from_str(
+            &serde_json::to_string(&AppSettings {
+                cancel_hotkey: Some(HotkeyBinding::paste_last_default()),
+                ..settings.clone()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            decoded.cancel_hotkey,
+            Some(HotkeyBinding::paste_last_default())
+        );
+        // The Cancel binding can't be reused by another shortcut.
+        settings.cancel_hotkey = Some(HotkeyBinding::paste_last_default());
+        assert!(settings.hotkey_in_use(HotkeySlot::RawDictation, &HotkeyBinding::paste_last_default()));
     }
 
     #[test]

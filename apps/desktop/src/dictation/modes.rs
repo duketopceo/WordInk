@@ -89,6 +89,7 @@ pub fn history_draft(
         audio_ms,
         inference_ms,
         total_ms,
+        usage: None,
     }
 }
 

@@ -53,6 +53,11 @@ struct Cli {
 enum Command {
     #[command(flatten)]
     Control(crate::control::cli::ControlCli),
+    /// Manage the API keys cloud engines use (`set` reads stdin).
+    Keys {
+        #[command(subcommand)]
+        command: crate::keys::KeysCommand,
+    },
     /// Open the native Windows application.
     App {
         /// Start the resident listener without showing the Settings window.
@@ -159,6 +164,9 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
     if let Command::Control(command) = command {
         crate::control::cli::finish(crate::control::cli::run(command));
     }
+    if let Command::Keys { command } = &command {
+        std::process::exit(crate::keys::run_cli(command));
+    }
     // A headless render (`--snap`) draws fixtures without starting the
     // runtime or touching the data folder, and prints to the terminal that
     // ran it.
@@ -235,7 +243,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
             speed,
             selection,
         } => stream_bench(&wav, speed, &selection.resolve()?),
-        Command::Control(_) => unreachable!("handled before logging"),
+        Command::Control(_) | Command::Keys { .. } => unreachable!("handled before logging"),
     }
 }
 

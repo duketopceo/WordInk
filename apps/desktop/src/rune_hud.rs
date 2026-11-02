@@ -11,6 +11,7 @@
 //!
 //! The Sounds sheet draws its preview of the HUD with the same [`Painter`].
 
+pub(crate) mod audio_bar;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod dot_scope;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -249,8 +250,15 @@ impl Hud {
         if let HudEvent::Started = event {
             self.edge_placed = None;
         }
-        self.model.handle(event, Instant::now(), self.reduce);
-        self.animating.store(true, Ordering::Release);
+        // The picked style applies from the next capture, never mid-way.
+        if matches!(event, HudEvent::Started | HudEvent::Reset) {
+            self.model.set_style(crate::app_settings::indicator_style());
+        }
+        let now = Instant::now();
+        self.model.handle(event, now, self.reduce);
+        // Live text says the phase on its own plate; the others show none.
+        crate::rune_ui::live_text::set_label(self.model.label(now));
+        self.animating.store(self.model.active(), Ordering::Release);
         let starts = matches!(event, HudEvent::Started);
         if starts || (self.shown && !matches!(event, HudEvent::Meter { .. })) {
             self.show();
@@ -274,13 +282,18 @@ impl Hud {
         {
             self.position = crate::app_settings::indicator_position();
         }
-        if self.position == IndicatorPosition::Hidden {
+        // Off, or Live text, which has its own plate: no HUD plate, and the
+        // live text sits where the HUD's would.
+        if self.position == IndicatorPosition::Hidden || self.model.surfaces().hud.is_none() {
             #[cfg(target_os = "macos")]
             self.place_live_text_without_hud();
             #[cfg(not(target_os = "macos"))]
             {
-                let plate_start = TOP_OFFSET + (WINDOW.1 - PLATE_HEIGHT) / 2.0;
-                set_live_text(Spot::Edge(ScreenEdge::Top, plate_start));
+                let (edge, margin) = match self.position {
+                    IndicatorPosition::Bottom => (ScreenEdge::Bottom, BOTTOM_OFFSET),
+                    _ => (ScreenEdge::Top, TOP_OFFSET),
+                };
+                set_live_text(Spot::Edge(edge, margin + (WINDOW.1 - PLATE_HEIGHT) / 2.0));
             }
             self.hide();
             return;

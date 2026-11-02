@@ -9,11 +9,16 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
+pub use crate::app_settings::IndicatorStyle;
+use crate::rune_hud::audio_bar::{self, Bars};
 use crate::rune_hud::dot_scope::{self, Pose, Scope, Stage, Tuning};
 use crate::rune_hud::hud_placement::Island;
 
 /// The loudness before any meter arrives, dBFS.
 const SILENT: f32 = -120.0;
+/// Live text calls a capture heard (Recording rather than Ready) once the
+/// microphone is louder than this, dBFS.
+const HEARD: f32 = -55.0;
 /// The shortest processing look: a fast transcription still shows the field
 /// turning blue before done clears it.
 const PROCESSING_MIN_DURATION: Duration = Duration::from_millis(200);
@@ -50,6 +55,12 @@ pub enum DictationIndicatorEvent {
     },
     Discarded,
     Cancelled,
+    /// The speech model is loading (Live text says so).
+    ModelLoading,
+    /// The speech model finished loading.
+    ModelReady,
+    /// The words were left on the clipboard instead of typed.
+    Copied,
     JobCompleted {
         job_id: u64,
     },
@@ -172,9 +183,81 @@ impl Phase {
     }
 }
 
-/// One Dot scope frame: the plate's pose and every dot's light.
+/// Which indicator a frame draws on the HUD plate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Look {
+    /// Dot scope's braided traces (the pill).
+    Scope,
+    /// The audio bar's level meter.
+    Bars,
+}
+
+/// What a style puts on screen: the HUD plate with a look, and whether
+/// the live text plate shows. Exactly one is set.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Surfaces {
+    pub hud: Option<Look>,
+    pub text: bool,
+}
+
+impl IndicatorStyle {
+    /// The one indicator surface this style shows.
+    pub fn surfaces(self) -> Surfaces {
+        match self {
+            Self::Pill => Surfaces {
+                hud: Some(Look::Scope),
+                text: false,
+            },
+            Self::AudioBar => Surfaces {
+                hud: Some(Look::Bars),
+                text: false,
+            },
+            Self::LiveText => Surfaces {
+                hud: None,
+                text: true,
+            },
+        }
+    }
+}
+
+/// What Live text says while no words stream: the dictation's phase.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Label {
+    Ready,
+    LoadingModel,
+    Recording,
+    Transcribing,
+    Done,
+    Copied,
+    Error,
+}
+
+impl Label {
+    pub const fn text(self) -> &'static str {
+        match self {
+            Self::Ready => "Ready",
+            Self::LoadingModel => "Loading model",
+            Self::Recording => "Recording",
+            Self::Transcribing => "Transcribing",
+            Self::Done => "Done",
+            Self::Copied => "Copied",
+            Self::Error => "Error",
+        }
+    }
+
+    /// Whether the label is an outcome, which clears by itself.
+    pub const fn is_outcome(self) -> bool {
+        matches!(self, Self::Done | Self::Copied | Self::Error)
+    }
+}
+
+/// How long an outcome label shows.
+pub const OUTCOME_LABEL_DURATION: Duration = Duration::from_millis(1200);
+
+/// One frame for the HUD plate: its pose and every dot's light.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DotFrame {
+    pub look: Look,
     pub pose: Pose,
     pub tuning: Tuning,
     pub columns: usize,
@@ -241,6 +324,14 @@ pub struct IndicatorModel {
     demo_voice: Option<f32>,
     /// Since an event, until a step finds everything settled out of sight.
     active: bool,
+    style: IndicatorStyle,
+    bars: Bars,
+    /// A meter above the room's noise has arrived since the capture began.
+    heard: bool,
+    loading: bool,
+    copied: bool,
+    /// The label now showing and since when, for [`Self::label`].
+    label: Option<(Label, Instant)>,
 }
 
 impl IndicatorModel {
@@ -259,13 +350,69 @@ impl IndicatorModel {
             loudness: SILENT,
             demo_voice: None,
             active: false,
+            style: IndicatorStyle::default(),
+            bars: Bars::new(),
+            heard: false,
+            loading: false,
+            copied: false,
+            label: None,
+        }
+    }
+
+    /// Picks the indicator the next dictation shows.
+    pub fn set_style(&mut self, style: IndicatorStyle) {
+        self.style = style;
+    }
+
+    /// The text Live text shows for the dictation's phase, `None` once an
+    /// outcome has shown its time or nothing records.
+    pub fn label(&self, now: Instant) -> Option<Label> {
+        if self.style != IndicatorStyle::LiveText {
+            return None;
+        }
+        let (label, since) = self.label?;
+        if label.is_outcome() && now.saturating_duration_since(since) >= OUTCOME_LABEL_DURATION {
+            return None;
+        }
+        Some(label)
+    }
+
+    /// The surfaces the picked style shows.
+    pub fn surfaces(&self) -> Surfaces {
+        self.style.surfaces()
+    }
+
+    fn derive_label(&self) -> Option<Label> {
+        if self.phase == Phase::Failed {
+            return Some(Label::Error);
+        }
+        if self.copied {
+            return Some(Label::Copied);
+        }
+        match self.phase {
+            Phase::Recording if self.loading => Some(Label::LoadingModel),
+            Phase::Recording if !self.heard => Some(Label::Ready),
+            Phase::Recording => Some(Label::Recording),
+            Phase::Transcribing if self.completion_pending => Some(Label::Done),
+            Phase::Transcribing => Some(Label::Transcribing),
+            Phase::Completed => Some(Label::Done),
+            Phase::Hidden | Phase::Cancelled | Phase::Failed => {
+                self.loading.then_some(Label::LoadingModel)
+            }
+        }
+    }
+
+    fn refresh_label(&mut self, now: Instant) {
+        let next = self.derive_label();
+        if self.label.map(|(label, _)| label) != next {
+            self.label = next.map(|label| (label, now));
         }
     }
 
     /// Whether the HUD wants frames: from an event until a step finds it
     /// settled out of sight.
     pub fn active(&self) -> bool {
-        self.active
+        self.active && self.style.surfaces().hud.is_some()
     }
 
     /// Dot scope's tuning, as set.
@@ -293,6 +440,10 @@ impl IndicatorModel {
                 self.completion_pending = false;
                 self.loudness = SILENT;
                 self.demo_voice = None;
+                self.heard = false;
+                self.loading = false;
+                self.copied = false;
+                self.bars.clear();
             }
             DictationIndicatorEvent::ConfigureDotScope(tuning) => {
                 self.tuning = tuning;
@@ -311,9 +462,13 @@ impl IndicatorModel {
                 self.loudness = SILENT;
                 self.stage = Stage::Recording;
                 self.scope.restart(reduce);
+                self.heard = false;
+                self.copied = false;
+                self.bars.clear();
             }
             DictationIndicatorEvent::Meter { average, .. } => {
                 self.loudness = dot_scope::loudness(average);
+                self.heard |= self.capturing && self.loudness > HEARD;
             }
             DictationIndicatorEvent::Submitted { job_id } => {
                 self.capturing = false;
@@ -332,6 +487,9 @@ impl IndicatorModel {
             DictationIndicatorEvent::Cancelled => {
                 self.finish_capture(now, Phase::Cancelled);
             }
+            DictationIndicatorEvent::ModelLoading => self.loading = true,
+            DictationIndicatorEvent::ModelReady => self.loading = false,
+            DictationIndicatorEvent::Copied => self.copied = true,
             DictationIndicatorEvent::JobCompleted { job_id } => {
                 self.finish_job(job_id, now, Phase::Completed);
             }
@@ -345,6 +503,7 @@ impl IndicatorModel {
                 self.finish_capture(now, Phase::Failed);
             }
         }
+        self.refresh_label(now);
     }
 
     fn finish_capture(&mut self, now: Instant, empty_phase: Phase) {
@@ -433,17 +592,40 @@ impl IndicatorModel {
             },
         );
         self.active = visible || !self.scope.settled();
+        let (columns, rows) = (self.scope.columns(), self.scope.rows());
+        let (look, dots) = match self.style.surfaces().hud {
+            Some(Look::Bars) => {
+                let count = audio_bar::bar_count(columns);
+                let levels = if self.stage == Stage::Processing {
+                    let working = now.saturating_duration_since(self.working_since);
+                    Bars::working(count, working.as_secs_f32())
+                } else {
+                    let level = if self.stage == Stage::Recording && visible {
+                        self.scope.level()
+                    } else {
+                        0.0
+                    };
+                    self.bars.advance(dt, level);
+                    self.bars.levels(count)
+                };
+                (Look::Bars, audio_bar::dots(&levels, columns, rows))
+            }
+            _ => (
+                Look::Scope,
+                self.scope
+                    .dots()
+                    .iter()
+                    .map(|value| value.map(|v| (v.clamp(0.0, 1.0) * 65535.0).round() as u16))
+                    .collect(),
+            ),
+        };
         DotFrame {
+            look,
             pose: self.scope.pose(),
             tuning: self.scope.tuning(),
-            columns: self.scope.columns(),
-            rows: self.scope.rows(),
-            dots: self
-                .scope
-                .dots()
-                .iter()
-                .map(|value| value.map(|v| (v.clamp(0.0, 1.0) * 65535.0).round() as u16))
-                .collect(),
+            columns,
+            rows,
+            dots,
         }
     }
 }
@@ -604,6 +786,226 @@ mod tests {
         assert!(cancelled.iter().all(|frame| frame.pose.fail < 0.01));
         assert!(lit(cancelled.last().unwrap()) == 0 || !model.active());
         assert!(!model.active());
+    }
+
+    /// A dictation as the listener reports it: voice at `loudness` dBFS
+    /// for `seconds`, a frame every 1/60 s, then (optionally) submitted,
+    /// transcribed and completed. Returns the frames.
+    fn dictate(
+        model: &mut IndicatorModel,
+        start: Instant,
+        seconds: f32,
+        loudness: f32,
+    ) -> Vec<DotFrame> {
+        model.handle(DictationIndicatorEvent::Started, start, false);
+        (0..(seconds * 60.0) as usize)
+            .map(|n| {
+                let now = at(start, n as f32 / 60.0);
+                let rms = 10_f32.powf(loudness / 20.0);
+                model.handle(
+                    DictationIndicatorEvent::Meter {
+                        average: rms,
+                        peak: rms,
+                    },
+                    now,
+                    false,
+                );
+                model.step(now, 1.0 / 60.0, false)
+            })
+            .collect()
+    }
+
+    fn model_with(style: IndicatorStyle, start: Instant) -> IndicatorModel {
+        let mut model = IndicatorModel::new(Tuning::default(), start);
+        model.set_style(style);
+        model
+    }
+
+    #[test]
+    fn each_style_shows_only_its_own_surface() {
+        assert_eq!(
+            IndicatorStyle::Pill.surfaces(),
+            Surfaces {
+                hud: Some(Look::Scope),
+                text: false
+            }
+        );
+        assert_eq!(
+            IndicatorStyle::AudioBar.surfaces(),
+            Surfaces {
+                hud: Some(Look::Bars),
+                text: false
+            }
+        );
+        assert_eq!(
+            IndicatorStyle::LiveText.surfaces(),
+            Surfaces {
+                hud: None,
+                text: true
+            }
+        );
+        // And the model draws what its style says: the pill and the bar
+        // each draw their look on the HUD, Live text draws no HUD at all.
+        let start = Instant::now();
+        for (style, look) in [
+            (IndicatorStyle::Pill, Some(Look::Scope)),
+            (IndicatorStyle::AudioBar, Some(Look::Bars)),
+            (IndicatorStyle::LiveText, None),
+        ] {
+            let mut model = model_with(style, start);
+            let frames = dictate(&mut model, start, 0.5, -20.0);
+            assert_eq!(
+                model.active(),
+                look.is_some(),
+                "{style:?}: the HUD wants frames only when it shows"
+            );
+            assert_eq!(
+                frames.last().map(|frame| frame.look),
+                look.or(Some(Look::Scope)),
+                "{style:?}"
+            );
+            assert_eq!(
+                model.label(at(start, 0.5)).is_some(),
+                style == IndicatorStyle::LiveText,
+                "{style:?}: only Live text says a phase"
+            );
+        }
+    }
+
+    #[test]
+    fn the_audio_bars_follow_the_meter() {
+        let start = Instant::now();
+        let mut model = model_with(IndicatorStyle::AudioBar, start);
+        let loud = dictate(&mut model, start, 1.5, -12.0);
+        assert_eq!(loud.last().unwrap().look, Look::Bars);
+        let loud = lit(loud.last().unwrap());
+        let mut model = model_with(IndicatorStyle::AudioBar, start);
+        let quiet = dictate(&mut model, start, 1.5, -90.0);
+        let quiet = lit(quiet.last().unwrap());
+        assert!(loud > quiet * 2, "loud {loud} against quiet {quiet}");
+
+        // The bars fall back when the voice stops.
+        let mut model = model_with(IndicatorStyle::AudioBar, start);
+        dictate(&mut model, start, 1.0, -12.0);
+        let frames = (0..90)
+            .map(|n| {
+                let now = at(start, 1.0 + n as f32 / 60.0);
+                model.handle(
+                    DictationIndicatorEvent::Meter {
+                        average: 0.0,
+                        peak: 0.0,
+                    },
+                    now,
+                    false,
+                );
+                model.step(now, 1.0 / 60.0, false)
+            })
+            .collect::<Vec<_>>();
+        assert!(lit(frames.last().unwrap()) < lit(&frames[0]) / 2);
+        assert!(lit(frames.last().unwrap()) < loud / 2);
+    }
+
+    #[test]
+    fn the_audio_bar_follows_the_pills_phases() {
+        let start = Instant::now();
+        let mut model = model_with(IndicatorStyle::AudioBar, start);
+        dictate(&mut model, start, 1.0, -20.0);
+        assert_eq!(model.stage, Stage::Recording);
+        model.handle(
+            DictationIndicatorEvent::Submitted { job_id: 1 },
+            at(start, 1.0),
+            false,
+        );
+        let working = run(&mut model, start, 1.0, 0.5);
+        assert_eq!(model.stage, Stage::Processing);
+        assert!(working.iter().all(|frame| frame.look == Look::Bars));
+        model.handle(
+            DictationIndicatorEvent::JobCompleted { job_id: 1 },
+            at(start, 1.5),
+            false,
+        );
+        run(&mut model, start, 1.5, 0.5);
+        assert_eq!(model.stage, Stage::Done);
+        run(&mut model, start, 2.0, 2.0);
+        assert!(!model.active(), "settled out of sight");
+
+        model.handle(DictationIndicatorEvent::Started, at(start, 5.0), false);
+        run(&mut model, start, 5.0, 0.5);
+        model.handle(DictationIndicatorEvent::Failed, at(start, 5.5), false);
+        let failed = run(&mut model, start, 5.5, 0.5);
+        assert_eq!(model.stage, Stage::Failed);
+        assert!(failed.last().unwrap().pose.fail > 0.9);
+    }
+
+    #[test]
+    fn live_text_says_the_phase_when_no_words_stream() {
+        let start = Instant::now();
+        let mut model = model_with(IndicatorStyle::LiveText, start);
+        assert_eq!(model.label(start), None, "nothing before a dictation");
+        model.handle(DictationIndicatorEvent::ModelLoading, start, false);
+        assert_eq!(model.label(start), Some(Label::LoadingModel));
+        model.handle(DictationIndicatorEvent::ModelReady, start, false);
+        model.handle(DictationIndicatorEvent::Started, at(start, 0.1), false);
+        assert_eq!(model.label(at(start, 0.1)), Some(Label::Ready));
+        let quiet = |model: &mut IndicatorModel, t| {
+            model.handle(
+                DictationIndicatorEvent::Meter {
+                    average: 1e-5,
+                    peak: 1e-5,
+                },
+                at(start, t),
+                false,
+            );
+        };
+        quiet(&mut model, 0.2);
+        assert_eq!(model.label(at(start, 0.2)), Some(Label::Ready));
+        model.handle(
+            DictationIndicatorEvent::Meter {
+                average: 0.1,
+                peak: 0.2,
+            },
+            at(start, 0.3),
+            false,
+        );
+        assert_eq!(model.label(at(start, 0.3)), Some(Label::Recording));
+        model.handle(
+            DictationIndicatorEvent::Submitted { job_id: 1 },
+            at(start, 1.0),
+            false,
+        );
+        assert_eq!(model.label(at(start, 1.0)), Some(Label::Transcribing));
+        model.handle(
+            DictationIndicatorEvent::JobCompleted { job_id: 1 },
+            at(start, 1.5),
+            false,
+        );
+        assert_eq!(model.label(at(start, 1.5)), Some(Label::Done));
+        assert_eq!(
+            model.label(at(start, 1.5) + OUTCOME_LABEL_DURATION),
+            None,
+            "an outcome clears by itself"
+        );
+
+        // A copy instead of a typing, and a failure.
+        model.handle(DictationIndicatorEvent::Started, at(start, 3.0), false);
+        model.handle(
+            DictationIndicatorEvent::Submitted { job_id: 2 },
+            at(start, 3.5),
+            false,
+        );
+        model.handle(DictationIndicatorEvent::Copied, at(start, 4.0), false);
+        assert_eq!(model.label(at(start, 4.0)), Some(Label::Copied));
+        model.handle(
+            DictationIndicatorEvent::JobFailed { job_id: 2 },
+            at(start, 4.1),
+            false,
+        );
+        assert_eq!(model.label(at(start, 4.1)), Some(Label::Error));
+
+        // A cancel shows nothing.
+        model.handle(DictationIndicatorEvent::Started, at(start, 6.0), false);
+        model.handle(DictationIndicatorEvent::Cancelled, at(start, 6.2), false);
+        assert_eq!(model.label(at(start, 6.2)), None);
     }
 
     #[test]

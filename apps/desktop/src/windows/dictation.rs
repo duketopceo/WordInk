@@ -807,6 +807,7 @@ fn process_dictation_job(
     // The context read starts now so the UIA walk overlaps inference.
     let pending_context = crate::windows::context::begin_capture();
     let inference_started = Instant::now();
+    let mut usage = None;
     let transcription = job.transcript.wait().map(|transcribed| {
         tracing::info!(
             source = transcribed.source.label(),
@@ -814,6 +815,7 @@ fn process_dictation_job(
             audio_ms = job.audio_ms,
             "transcribed Windows dictation"
         );
+        usage = transcribed.usage;
         transcribed.text
     });
     let inference_ms = inference_started.elapsed().as_millis() as u64;
@@ -856,6 +858,14 @@ fn process_dictation_job(
                 inference_ms,
                 started.elapsed().as_millis() as u64,
             );
+            // A cloud engine's own record, else the free local one.
+            draft.usage = Some(usage.unwrap_or_else(|| {
+                crate::history::UsageRecord::local(
+                    crate::app_settings::transcription_selection().1.model.as_str(),
+                    job.audio_ms,
+                    &draft.raw_text,
+                )
+            }));
             if printed {
                 draft.kind = crate::history::HistoryKind::Printed;
             } else if job.raw {

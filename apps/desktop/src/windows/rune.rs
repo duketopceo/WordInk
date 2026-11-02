@@ -89,6 +89,8 @@ pub(crate) enum ShortcutTarget {
     Capture,
     /// Dictate without processing.
     RawDictation,
+    /// Discards the recording in progress (not acted on here yet).
+    Cancel,
 }
 
 /// What the runtime last published for the window.

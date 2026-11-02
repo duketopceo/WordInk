@@ -94,8 +94,34 @@ impl HistoryKind {
 /// Bounded record of the post-processing that shaped the final text.
 pub type HistoryProcessing = crate::desktop::events::DictationProcessing;
 
+/// What one transcription used and cost, for the Usage pane (KTD5). Local
+/// transcriptions record provider `local` and a cost of zero.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct UsageRecord {
+    /// `groq`, `local`, ...
+    pub provider: String,
+    pub model: String,
+    pub audio_seconds: f64,
+    pub words: u32,
+    /// Estimated, in US dollars, from the bundled price table.
+    pub cost_usd: f64,
+}
+
+impl UsageRecord {
+    /// A transcription that ran on this computer: free, so only its size.
+    pub fn local(model: &str, audio_ms: u64, text: &str) -> Self {
+        Self {
+            provider: "local".into(),
+            model: model.into(),
+            audio_seconds: audio_ms as f64 / 1000.0,
+            words: text.split_whitespace().count() as u32,
+            cost_usd: 0.0,
+        }
+    }
+}
+
 /// One retained successful result.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct HistoryEntry {
     pub id: u64,
     pub timestamp_ms: u64,
@@ -114,6 +140,10 @@ pub struct HistoryEntry {
     pub inference_ms: u64,
     #[serde(default)]
     pub total_ms: u64,
+    /// Provider, model, audio length, words and estimated cost. Absent on
+    /// entries saved before usage was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<UsageRecord>,
 }
 
 impl HistoryEntry {
@@ -136,6 +166,7 @@ impl HistoryEntry {
 /// A successful result awaiting a history identity.
 #[derive(Clone, Debug)]
 pub struct HistoryDraft {
+    pub usage: Option<UsageRecord>,
     pub kind: HistoryKind,
     pub raw_text: String,
     pub final_text: String,
@@ -306,6 +337,7 @@ impl HistoryStore {
             audio_ms: draft.audio_ms,
             inference_ms: draft.inference_ms,
             total_ms: draft.total_ms,
+            usage: draft.usage,
         });
         self.prune(now_ms);
         self.persist()?;
@@ -615,7 +647,31 @@ mod tests {
             audio_ms: 900,
             inference_ms: 80,
             total_ms: 1_100,
+            usage: None,
         }
+    }
+
+    #[test]
+    fn usage_is_kept_with_the_entry_and_old_entries_without_it_still_load() {
+        let path = temp_path("usage");
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Week, 1_000);
+        let usage = UsageRecord {
+            provider: "groq".into(),
+            model: "whisper-large-v3-turbo".into(),
+            audio_seconds: 2.0,
+            words: 4,
+            cost_usd: 0.0001,
+        };
+        let mut with = draft("with");
+        with.usage = Some(usage.clone());
+        let id = store.record(with, 1_000).unwrap().unwrap();
+        assert_eq!(store.entry(id).unwrap().usage, Some(usage));
+        let reopened = HistoryStore::open(path, HistoryRetention::Week, 1_000);
+        assert_eq!(reopened.entry(id).unwrap().usage.as_ref().unwrap().words, 4);
+        let old = r#"{"id":1,"timestamp_ms":5,"kind":"dictation","raw_text":"a","final_text":"a"}"#;
+        assert_eq!(serde_json::from_str::<HistoryEntry>(old).unwrap().usage, None);
+        let local = UsageRecord::local("parakeet_v3", 1_500, "one two three");
+        assert_eq!((local.provider.as_str(), local.words, local.cost_usd), ("local", 3, 0.0));
     }
 
     #[test]

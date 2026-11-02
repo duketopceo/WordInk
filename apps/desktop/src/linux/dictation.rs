@@ -105,6 +105,7 @@ fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) {
             .capture
             .enabled
             .then(|| LinuxHotkey::from(&settings.capture.hotkey)),
+        cancel: settings.cancel_hotkey.as_ref().map(LinuxHotkey::from),
     };
     (LinuxHotkey::from(&settings.dictation_hotkey), options)
 }
@@ -155,6 +156,7 @@ impl DictationOutput {
         audio_ms: u64,
         inference_ms: u64,
         started: Instant,
+        usage: Option<crate::history::UsageRecord>,
     ) -> Result<String> {
         let context = crate::linux::context::capture();
         let processed = if raw {
@@ -183,6 +185,14 @@ impl DictationOutput {
                 inference_ms,
                 started.elapsed().as_millis() as u64,
             );
+            // A cloud engine's own record, else the free local one.
+            draft.usage = Some(usage.unwrap_or_else(|| {
+                crate::history::UsageRecord::local(
+                    crate::app_settings::transcription_selection().1.model.as_str(),
+                    audio_ms,
+                    &draft.raw_text,
+                )
+            }));
             if printed {
                 draft.kind = crate::history::HistoryKind::Printed;
             } else if raw {
@@ -212,18 +222,28 @@ pub(crate) fn run(
     updates: mpsc::Receiver<ListenerUpdate>,
 ) -> Result<()> {
     let mut settings = settings.clone();
-    let transcriber = transcriber.map_or_else(
-        || {
-            LocalTranscriber::load(&crate::transcription::custom_models::runnable(
-                &settings.transcription,
-            ))
-        },
-        Ok,
-    )?;
+    // Dictation that runs on a cloud provider (a Groq key, by default) loads
+    // no local model, so it works before one is downloaded.
+    let cloud_only = transcriber.is_none() && crate::transcription::cloud::route().is_some();
+    let engine_start = if cloud_only {
+        TranscriptionEngine::start_without_model()
+    } else {
+        transcriber
+            .map_or_else(
+                || {
+                    LocalTranscriber::load(&crate::transcription::custom_models::runnable(
+                        &settings.transcription,
+                    ))
+                },
+                Ok,
+            )
+            .and_then(TranscriptionEngine::start)
+    };
+    let engine_start = engine_start?;
     crate::transcription::speech_detector::prewarm();
     // The engine outlives the output worker, which waits on its transcripts.
     // Captures transcribe on it too, holding it weakly.
-    let mut engine = Arc::new(TranscriptionEngine::start(transcriber)?);
+    let mut engine = Arc::new(engine_start);
     // The local API transcribes host audio on this engine's model.
     engine.share();
     // Drop audio/hotkeys and close the job queue before joining slow output on
@@ -291,6 +311,7 @@ pub(crate) fn run(
                     audio_ms = job.audio_ms,
                     "transcribed Linux dictation"
                 );
+                let usage = transcribed.usage;
                 let text = transcribed.text;
                 if text.is_empty() {
                     if let Some(print) = job.print.take() {
@@ -306,6 +327,7 @@ pub(crate) fn run(
                         job.audio_ms,
                         inference_ms,
                         started,
+                        usage,
                     );
                 }
                 let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
@@ -316,6 +338,7 @@ pub(crate) fn run(
                     job.audio_ms,
                     inference_ms,
                     started,
+                    usage,
                 )
             })()
             .map_err(|error| format!("{error:#}"));
@@ -376,8 +399,11 @@ pub(crate) fn run(
     };
     // Updates wait for a moment without a recording.
     let mut next_settings: Option<AppSettings> = None;
-    let mut model =
-        crate::transcription::local_transcriber::ModelSwap::new(&settings.transcription);
+    let mut model = if cloud_only {
+        crate::transcription::local_transcriber::ModelSwap::unloaded()
+    } else {
+        crate::transcription::local_transcriber::ModelSwap::new(&settings.transcription)
+    };
     let mut next_suspended: Option<bool> = None;
     // A press that arrived while the released microphone was opening;
     // recording starts at its first chunk.
@@ -415,7 +441,11 @@ pub(crate) fn run(
             });
             if let Some(next) = next_settings.take() {
                 register |= shortcuts(&next) != shortcuts(&settings);
-                model.want(&next.transcription);
+                // A cloud engine loads no model; a listener that started on
+                // one loads the local model when settings switch to it.
+                if crate::transcription::cloud::route().is_none() || !cloud_only {
+                    model.want(&next.transcription);
+                }
                 toggle = next.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
                 paste_with_shift.store(next.paste_with_shift, Ordering::Relaxed);
                 if next.indicator_position != settings.indicator_position {
@@ -1044,6 +1074,44 @@ mod tests {
     }
 
     const MINIMUM_HOLD: Duration = crate::dictation::MINIMUM_HOLD_DURATION;
+
+    #[test]
+    fn the_cancel_shortcut_registers_from_settings_and_a_change_reregisters() {
+        let mut settings = AppSettings::default();
+        assert_eq!(shortcuts(&settings).1.cancel, None, "unbound by default");
+        let before = shortcuts(&settings);
+        settings.cancel_hotkey = Some(crate::app_settings::HotkeyBinding::paste_last_default());
+        let (_, options) = shortcuts(&settings);
+        assert_eq!(
+            options.cancel,
+            Some(LinuxHotkey::from(
+                &crate::app_settings::HotkeyBinding::paste_last_default()
+            ))
+        );
+        assert_ne!(shortcuts(&settings), before, "a new binding registers again");
+    }
+
+    #[test]
+    fn a_cancel_discards_the_clip_and_submits_nothing() {
+        let (engine, commands) = TranscriptionEngine::for_test();
+        let (jobs, queued) = mpsc::sync_channel::<OutputJob>(2);
+        let mut capture = DictationCapture::new(16_000);
+        let through = record(&mut capture, &engine, false, 2);
+        assert!(capture.is_recording() && capture.is_streaming());
+        // What the listener does on `HotkeyEvent::Cancel` while recording.
+        capture.cancel();
+        assert!(!capture.is_recording());
+        assert!(!capture.is_streaming());
+        assert!(matches!(capture.finish(through), Finish::Discard));
+        let sent = commands.try_iter().collect::<Vec<_>>();
+        assert!(sent.iter().any(|command| matches!(command, Command::Cancel { .. })));
+        assert!(
+            !sent.iter().any(|command| matches!(command, Command::Finish { .. })),
+            "no transcription is asked for"
+        );
+        assert!(queued.try_recv().is_err(), "nothing reaches the output worker");
+        drop(jobs);
+    }
 
     #[test]
     fn a_release_finishes_its_stream_with_the_complete_clip() {

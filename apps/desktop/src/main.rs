@@ -28,6 +28,7 @@ mod durable;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod feedback;
 mod history;
+mod keys;
 #[cfg(target_os = "macos")]
 mod keyboard;
 #[cfg_attr(target_os = "macos", path = "keyboard_input_sources/macos.rs")]
@@ -124,6 +125,11 @@ enum Command {
         /// Run as a direct child whose stdin is owned by the host application.
         #[arg(long)]
         embedded: bool,
+    },
+    /// Manage the API keys cloud engines use (`set` reads stdin).
+    Keys {
+        #[command(subcommand)]
+        command: keys::KeysCommand,
     },
     /// Inspect and control the running desktop app or offline audio tools.
     Dev {
@@ -305,6 +311,7 @@ fn main() -> Result<()> {
     // over SSH while the app is running.
     let cli = match cli.command {
         Some(Command::Control(command)) => control::cli::finish(control::cli::run(command)),
+        Some(Command::Keys { command }) => std::process::exit(keys::run_cli(&command)),
         command => Cli { command },
     };
     #[cfg(debug_assertions)]
@@ -405,7 +412,7 @@ fn main() -> Result<()> {
             }
             local_api::run_service(&log_dir, event_path, embedded, &SHUTDOWN)
         }
-        Command::Control(_) => unreachable!("handled before startup"),
+        Command::Control(_) | Command::Keys { .. } => unreachable!("handled before startup"),
         #[cfg(hex_capture)]
         Command::CapsulePlayground { .. } => unreachable!("handled before startup"),
         Command::Dev { command } => {

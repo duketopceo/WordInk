@@ -466,7 +466,6 @@ impl Scope {
     }
 
     /// The 0–1 level the voice follows now, before the gain.
-    #[cfg(test)]
     pub fn level(&self) -> f32 {
         self.level
     }

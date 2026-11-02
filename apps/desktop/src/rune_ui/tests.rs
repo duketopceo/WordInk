@@ -1217,6 +1217,7 @@ fn history_search_without_matches_says_so() {
             audio_ms: 900,
             inference_ms: 80,
             total_ms: 200,
+            usage: None,
         })
         .unwrap();
     let mut rt = runtime("history-empty", true, PANE_SIZE);

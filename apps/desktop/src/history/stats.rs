@@ -175,6 +175,7 @@ mod tests {
             audio_ms,
             inference_ms: 0,
             total_ms: 0,
+            usage: None,
         }
     }
 
@@ -273,6 +274,7 @@ mod tests {
             audio_ms: 0,
             inference_ms: 0,
             total_ms: 0,
+            usage: None,
         };
         store.record(draft("old words"), 1_000).unwrap();
         for _ in 0..(crate::history::MAX_SEARCH_RESULTS + 5) {

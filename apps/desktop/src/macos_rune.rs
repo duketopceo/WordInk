@@ -116,6 +116,8 @@ pub(crate) enum ShortcutTarget {
     #[cfg(hex_capture)]
     Capture,
     RawDictation,
+    /// Discards the recording in progress (not acted on here yet).
+    Cancel,
     /// Labs › Second dictation shortcut.
     SecondDictation,
 }

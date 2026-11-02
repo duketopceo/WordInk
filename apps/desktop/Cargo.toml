@@ -84,6 +84,7 @@ url = "2.5.8"
 ureq = { version = "3.4.2", default-features = false, features = ["native-tls"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
 arboard = { version = "3.6.1", default-features = false }
 block2 = "0.6.2"
 core-graphics-types = "0.1.3"
@@ -100,6 +101,8 @@ ratatui = "0.30.2"
 screencapturekit = { version = "=11.0.0", features = ["macos_15_0"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# Secret Service over D-Bus, in Rust (no libdbus), for the cloud engine's keys.
+keyring = { version = "3.6.3", default-features = false, features = ["async-secret-service", "tokio", "crypto-rust"] }
 ctrlc = { version = "3.5.2", features = ["termination"] }
 ed25519-dalek = { version = "2.2.0", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
@@ -135,6 +138,7 @@ wgpu = { version = "30", default-features = false, features = ["std", "parking_l
 png = "0.18"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
 arboard = { version = "3.6.1", default-features = false, features = ["image-data"] }
 winreg = "0.55.0"
 windows-sys = { version = "0.61.2", features = [

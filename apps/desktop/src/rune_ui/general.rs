@@ -20,7 +20,9 @@ use super::lists::{PermissionControl, permission_control, slider};
 use super::platform::PlatformRequest;
 use super::settings::{self as s, Capture, Face};
 use super::{Menu, Pane, Request, ShortcutTarget, Ui};
-use crate::app_settings::{IndicatorPosition, RecordingAudioBehavior, UpdateChannel};
+use crate::app_settings::{
+    IndicatorPosition, IndicatorStyle, RecordingAudioBehavior, UpdateChannel,
+};
 use crate::desktop::host::DesktopAction;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::desktop::login_item::LoginItemStatus;
@@ -235,7 +237,7 @@ pub(super) fn shortcut_rows(
     let optional = second
         || matches!(
             target,
-            ShortcutTarget::PasteLast | ShortcutTarget::RawDictation
+            ShortcutTarget::PasteLast | ShortcutTarget::RawDictation | ShortcutTarget::Cancel
         );
     if optional && s::binding(&ui.settings, target).is_some() {
         control = control.child(icon_button(
@@ -246,6 +248,7 @@ pub(super) fn shortcut_rows(
             move |ui: &mut Ui| {
                 ui.update(|settings| match target {
                     ShortcutTarget::RawDictation => settings.raw_dictation_hotkey = None,
+                    ShortcutTarget::Cancel => settings.cancel_hotkey = None,
                     _ if second => settings.second_dictation_hotkey = None,
                     _ => settings.paste_last_hotkey = None,
                 });
@@ -912,6 +915,17 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             ShortcutTarget::PasteLast,
             None,
         ));
+        // Only Linux's listener acts on it so far.
+        #[cfg(target_os = "linux")]
+        rows.extend(shortcut_rows(
+            ui,
+            p,
+            "cancel",
+            &KEYBOARD,
+            tr("Cancel dictation"),
+            ShortcutTarget::Cancel,
+            Some(tr("Discards the recording; pressing Esc twice does too")),
+        ));
     }
     let behaviors = RecordingAudioBehavior::ALL;
     rows.push(pick_row(
@@ -971,6 +985,28 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     {
         rows.extend(pause_browser_rows(ui, p).into_iter().map(CardRow::from));
     }
+    rows.push(pick_row(
+        ui,
+        p,
+        "indicator-style",
+        &PANEL,
+        tr("Recording indicator"),
+        IndicatorStyle::ALL
+            .iter()
+            .map(|style| tr(style.label()))
+            .collect(),
+        IndicatorStyle::ALL
+            .iter()
+            .position(|style| *style == settings.indicator_style)
+            .unwrap_or(0),
+        |ui, index| {
+            let style = IndicatorStyle::ALL[index];
+            if ui.settings.indicator_style != style {
+                ui.update(|settings| settings.indicator_style = style);
+            }
+        },
+        layer,
+    ));
     rows.push(pick_row(
         ui,
         p,

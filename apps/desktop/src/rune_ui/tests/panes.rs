@@ -1917,6 +1917,26 @@ fn double_tap_to_lock_folds_away_under_the_rows_below() {
 }
 
 #[test]
+fn settings_pick_the_recording_indicator_style_next_to_the_hud_position() {
+    use crate::app_settings::IndicatorStyle;
+    for scene in ["mac-settings", "portal", "windows-settings"] {
+        let mut rt = runtime(scene, true, (1100.0, 2800.0));
+        if scene == "portal" {
+            rt.state.platform.caps = platform::Capabilities::LINUX;
+        }
+        open_advanced(&mut rt, Pane::General);
+        assert_eq!(rt.state.settings.indicator_style, IndicatorStyle::Pill);
+        assert!(rt.find("indicator").is_some(), "{scene}: the HUD position");
+        pick(&mut rt, "indicator-style", 1);
+        assert_eq!(rt.state.settings.indicator_style, IndicatorStyle::AudioBar);
+        pick(&mut rt, "indicator-style", 2);
+        assert_eq!(rt.state.settings.indicator_style, IndicatorStyle::LiveText);
+        pick(&mut rt, "indicator-style", 0);
+        assert_eq!(rt.state.settings.indicator_style, IndicatorStyle::Pill);
+    }
+}
+
+#[test]
 fn ducking_shows_a_persisted_slider_on_every_os_when_selected() {
     use crate::app_settings::RecordingAudioBehavior;
     let mut rt = runtime("mac-settings", true, (1100.0, 2800.0));
