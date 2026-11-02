@@ -63,9 +63,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
             "privacy-keys",
             &LOCK,
             tr("Where your API keys are stored"),
-            tr(
-                "In the OS keyring (or, where there is none, a private file beside your settings), or read from GROQ_API_KEY. Never in the settings file or a log.",
-            ),
+            &keys_copy(),
         ),
         value_row(
             p,
@@ -102,4 +100,38 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
 
 fn value_row(p: Paint, key: &str, glyph: &'static rune::Icon, title: &str, copy: &str) -> CardRow {
     icon_row(p, key, glyph, title, Some(copy), el().key("none")).into()
+}
+
+/// The Privacy text on where keys live; an instance with its own data folder
+/// reads only that folder's key files, and says how to opt out of that.
+///
+/// Unit tests render the default text: `cargo test` shares one process, and
+/// the snap-isolation test sets the data-folder variable for everyone.
+fn keys_copy() -> String {
+    keys_copy_for(!cfg!(test) && !crate::keys::system_keys_allowed())
+}
+
+fn keys_copy_for(isolated: bool) -> String {
+    if isolated {
+        format!(
+            "In a private file beside your settings, <provider>.key. {} Never in the settings file or a log.",
+            tr(crate::keys::ISOLATED_KEYS_HINT)
+        )
+    } else {
+        tr(
+            "In the OS keyring (or, where there is none, a private file beside your settings), or read from GROQ_API_KEY. Never in the settings file or a log.",
+        )
+        .to_string()
+    }
+}
+
+#[cfg(test)]
+mod keys_copy_tests {
+    use super::keys_copy_for;
+
+    #[test]
+    fn the_keys_text_names_the_opt_in_only_when_isolated() {
+        assert!(!keys_copy_for(false).contains("WORDINK_ALLOW_SYSTEM_KEYS"));
+        assert!(keys_copy_for(true).contains("WORDINK_ALLOW_SYSTEM_KEYS=1"));
+    }
 }

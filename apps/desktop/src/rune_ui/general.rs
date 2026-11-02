@@ -1104,7 +1104,9 @@ pub(super) fn sound_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow>
             .collect(),
         s::sound_volume_index(settings),
         |ui, index| {
-            let volume = s::sound_volume_options(&ui.settings)[index].1;
+            let Some(&(_, volume)) = s::sound_volume_options(&ui.settings).get(index) else {
+                return;
+            };
             let saved = ui.update(|settings| {
                 settings.sound_effects = volume > 0.0;
                 if volume > 0.0 {

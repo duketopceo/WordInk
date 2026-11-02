@@ -75,6 +75,10 @@ fn system_keys_allowed_for(custom_dir: bool, opt_in: Option<&str>) -> bool {
     !custom_dir || opt_in == Some("1")
 }
 
+/// Appended to "no key" messages and shown in Privacy when the instance is
+/// isolated, so the opt-in is discoverable.
+pub const ISOLATED_KEYS_HINT: &str = "This instance has its own data folder, so keys come only from <folder>/<provider>.key; set WORDINK_ALLOW_SYSTEM_KEYS=1 to also use the environment and the OS keyring.";
+
 /// [`resolve_order`], skipping the environment and the keyring when the
 /// instance is isolated.
 fn resolve_isolated(

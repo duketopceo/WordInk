@@ -1062,7 +1062,8 @@ fn set_value(json: &mut Value, key: &Key, value: Value) -> Result<(), ControlErr
 /// Groq, OpenAI and Deepgram take only their known models; OpenRouter takes
 /// any `vendor/model` id but warns about one its catalogue doesn't list.
 /// With auto, local or the gateway (which ignores it), any provider's model
-/// is fine, since the setting waits for the engine that uses it.
+/// is accepted, with a note that it takes effect only when engine is set to
+/// that model's provider.
 fn engine_model_check(
     engine: crate::transcription::cloud::EngineChoice,
     model: &str,
@@ -1105,11 +1106,14 @@ fn engine_model_check(
             }
         }
         None => {
-            if Provider::ALL
+            if let Some(owner) = Provider::ALL
                 .into_iter()
-                .any(|provider| provider.accepts_model(model))
+                .find(|provider| *provider != Provider::Gateway && provider.accepts_model(model))
             {
-                Ok(None)
+                Ok(Some(format!(
+                    "`{model}` takes effect only when engine is set to {}; the current engine ignores it",
+                    owner.name()
+                )))
             } else {
                 let all = [Provider::Groq, Provider::OpenAi, Provider::Deepgram]
                     .map(known)
@@ -1721,8 +1725,16 @@ mod tests {
             "{}",
             error.message
         );
-        // Auto and local take a model any provider knows.
-        assert!(set(&AppSettings::default(), "nova-3").is_ok());
+        // Auto and local take a model any provider knows, and say it waits.
+        let change = set(&AppSettings::default(), "nova-3").unwrap();
+        assert!(
+            change
+                .message
+                .contains("takes effect only when engine is set to"),
+            "{}",
+            change.message
+        );
+        assert!(change.message.contains("Deepgram"), "{}", change.message);
         assert_eq!(
             set(&AppSettings::default(), "bogus").unwrap_err().code,
             "invalid-value"

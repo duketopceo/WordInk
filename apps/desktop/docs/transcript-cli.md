@@ -246,7 +246,9 @@ History reads one file descriptor, so an atomic replacement yields a complete
 old or new snapshot. Malformed history produces an error without recovery writes.
 
 Data comes from `~/Library/Application Support/hex`. `HEX_APPLICATION_SUPPORT_DIR` overrides the
-root for fixtures or a mirrored copy. These CLI commands currently target macOS;
+root for fixtures or a mirrored copy. With a custom data folder, provider keys come
+only from `<dir>/<provider>.key`; set `WORDINK_ALLOW_SYSTEM_KEYS=1` to also use the
+environment and the OS keyring. These CLI commands currently target macOS;
 Linux and Windows retain their existing command surfaces.
 
 ## Retention stays bounded in one store

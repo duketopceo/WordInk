@@ -2694,7 +2694,25 @@ impl AppSettings {
     /// active shortcuts and, where meetings exist (macOS), meeting paste. The
     /// two capture shortcuts never share a key, on or off, since turning
     /// captures on can't pull them apart.
+    /// The shortcut `slot` currently has saved, if any.
+    fn hotkey_saved(&self, slot: HotkeySlot) -> Option<HotkeyBinding> {
+        match slot {
+            HotkeySlot::Dictation => Some(self.dictation_hotkey.clone()),
+            HotkeySlot::PasteLast => self.paste_last_hotkey.clone(),
+            HotkeySlot::RawDictation => self.raw_dictation_hotkey.clone(),
+            HotkeySlot::Cancel => self.cancel_hotkey.clone(),
+            #[cfg(hex_capture)]
+            HotkeySlot::Capture => Some(self.capture.hotkey.clone()),
+            HotkeySlot::SecondDictation => self.second_dictation_hotkey.clone(),
+        }
+    }
+
     pub fn hotkey_in_use(&self, slot: HotkeySlot, binding: &HotkeyBinding) -> bool {
+        // Re-saving what a slot already holds never fails, even when an
+        // upgrade left it overlapping another slot.
+        if self.hotkey_saved(slot).as_ref() == Some(binding) {
+            return false;
+        }
         let mut others = Vec::new();
         if slot != HotkeySlot::Dictation {
             others.push(self.dictation_hotkey.clone());
@@ -3201,6 +3219,21 @@ mod tests {
         let reloaded: AppSettings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert_eq!(reloaded.dictation_hotkey, modifier_only);
+    }
+
+    /// Re-saving a slot's current shortcut never conflicts, even when an
+    /// upgrade left it overlapping another slot.
+    #[test]
+    fn resaving_a_slots_saved_shortcut_never_conflicts() {
+        let mut settings = AppSettings::default();
+        let dictation = settings.dictation_hotkey.clone();
+        settings.cancel_hotkey = Some(dictation.clone());
+        assert!(
+            settings.hotkey_in_use(HotkeySlot::PasteLast, &dictation),
+            "a different slot still conflicts"
+        );
+        assert!(!settings.hotkey_in_use(HotkeySlot::Cancel, &dictation));
+        assert!(!settings.hotkey_in_use(HotkeySlot::Dictation, &dictation));
     }
 
     /// Annotate is off out of the box, and its shortcut and the rest of the

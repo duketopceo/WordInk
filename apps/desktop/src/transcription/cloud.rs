@@ -564,15 +564,28 @@ pub enum CloudError {
 
 impl CloudError {
     pub fn message(&self, provider: Provider) -> String {
+        self.message_isolated(provider, !crate::keys::system_keys_allowed())
+    }
+
+    /// [`Self::message`], with the key-isolation hint on a "no key" message
+    /// when `isolated`.
+    fn message_isolated(&self, provider: Provider, isolated: bool) -> String {
         let name = provider.name();
+        let hint = |text: String| {
+            if isolated {
+                format!("{text}. {}", crate::keys::ISOLATED_KEYS_HINT)
+            } else {
+                text
+            }
+        };
         match self {
             Self::NoKey if provider == Provider::Gateway => {
-                "no gateway token set \u{2014} run `wordink keys set gateway`".to_string()
+                hint("no gateway token set \u{2014} run `wordink keys set gateway`".to_string())
             }
-            Self::NoKey => format!(
+            Self::NoKey => hint(format!(
                 "no {name} key set \u{2014} run `wordink keys set {}`",
                 provider.id()
-            ),
+            )),
             Self::KeyRejected => format!("{name} key rejected"),
             Self::RateLimited => format!("{name} rate limit \u{2014} try again shortly"),
             Self::Unavailable => format!("{name} is unavailable"),
@@ -1365,12 +1378,27 @@ mod tests {
         let directory = temp("nokey");
         let error =
             groq_run("http://127.0.0.1:1/x", None, &speech(), keep(&directory)).unwrap_err();
-        assert_eq!(
-            error,
-            "no Groq key set \u{2014} run `wordink keys set groq`"
+        assert!(
+            error.starts_with("no Groq key set \u{2014} run `wordink keys set groq`"),
+            "{error}"
         );
         assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
         let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn the_no_key_message_carries_the_isolation_hint_only_when_isolated() {
+        let plain = CloudError::NoKey.message_isolated(Provider::Groq, false);
+        assert_eq!(
+            plain,
+            "no Groq key set \u{2014} run `wordink keys set groq`"
+        );
+        let isolated = CloudError::NoKey.message_isolated(Provider::Groq, true);
+        assert!(isolated.starts_with(&plain), "{isolated}");
+        assert!(
+            isolated.contains("WORDINK_ALLOW_SYSTEM_KEYS=1"),
+            "{isolated}"
+        );
     }
 
     #[test]
@@ -1995,7 +2023,7 @@ mod tests {
                 .contains("authorization: bearer wdk_device")
         );
         assert_eq!(
-            CloudError::NoKey.message(Provider::Gateway),
+            CloudError::NoKey.message_isolated(Provider::Gateway, false),
             "no gateway token set \u{2014} run `wordink keys set gateway`"
         );
     }
