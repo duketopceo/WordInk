@@ -8,6 +8,8 @@ product_contract_source: ce-brainstorm
 execution: code
 ---
 
+> **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
+
 # Phase 1 Closeout - Plan
 
 ## Goal Capsule
@@ -70,7 +72,7 @@ Phase 1 is built and reviewed — eleven stacked PRs ending at #26, plus the Pha
 This plan covers the Phase 1 closeout area only; the surrounding breakdown is the current understanding, not a committed roadmap.
 
 - **PR chain #18–#27** — Depends on: everything in this plan happens on or after these merges.
-- **TypeWhisper plugin** — Depends on: a published `@wordink/server` (or the same install workaround the gateway docs carry pre-publish). Tentative next area per `docs/plans/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md`.
+- **TypeWhisper plugin** — Depends on: a published `@wordink/server` (or the same install workaround the gateway docs carry pre-publish). Tentative next area per `docs/archive/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md`.
 - **LLM cleanup and usage logging** — Depends on: the gateway request path shipped in PR #27. Can proceed independently of this closeout.
 - **Python SDK** — Can proceed independently of this closeout; still exploratory per `ROADMAP.md`.
 
@@ -132,7 +134,7 @@ This plan covers the Phase 1 closeout area only; the surrounding breakdown is th
 
 ### Sources / Research
 
-- `docs/plans/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md` — parent plan; Phase 2 decision and gateway delivery this closeout builds on.
+- `docs/archive/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md` — parent plan; Phase 2 decision and gateway delivery this closeout builds on.
 - `.github/workflows/release.yml` header comment — the authoritative npm org, trusted-publishing, and 2FA setup recipe this plan sequences.
 - `.github/workflows/docs.yml` header comment — the Pages source toggle.
 - PR #26 body — the residual list this plan's R9–R11 and the deferred items come from.

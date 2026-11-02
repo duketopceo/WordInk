@@ -8,6 +8,8 @@ product_contract_source: ce-plan
 execution: code
 ---
 
+> **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
+
 # WordInk Program Roadmap - Plan
 
 ## Goal Capsule
@@ -106,7 +108,7 @@ The most likely referent of the audit's `WF-WRITE` flag is `argus-mention.yml` (
 
 #### U2. Take `@wordink/*` live on npm
 
-- **Status:** not started. Evidence: `npm view @wordink/web version` is 404; `gh variable list` shows no `NPM_PUBLISH_ENABLED`; PR #32 (version packages, core 0.1.0) is open. Procedure is already written in `.github/workflows/release.yml` header and `docs/plans/2026-10-06-1603-feat-phase-1-closeout-plan.md` U6.
+- **Status:** not started. Evidence: `npm view @wordink/web version` is 404; `gh variable list` shows no `NPM_PUBLISH_ENABLED`; PR #32 (version packages, core 0.1.0) is open. Procedure is already written in `.github/workflows/release.yml` header and `docs/archive/2026-10-06-1603-feat-phase-1-closeout-plan.md` U6.
 - **Dependencies:** U1 (publish job runs `pnpm test`).
 - **Difficulty:** medium. Mostly account work; the pipeline exists.
 - **Feasibility:** blocked on the owner: the `@wordink` npm scope may be unclaimable (the closeout plan has a fallback to unscoped names), each package must exist before trusted publishing can be attached, and 2FA is required. No agent can complete it.

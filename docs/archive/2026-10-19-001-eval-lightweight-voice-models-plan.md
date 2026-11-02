@@ -6,6 +6,8 @@ external_sources:
   - microsoft/VibeVoice (github.com/microsoft/VibeVoice) — 54.9k★, MIT — Realtime-0.5B + ASR-BitNet engine only
 ---
 
+> **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
+
 # Lightweight voice eval — ASR/TTS candidates vs the WordInk relay
 
 ## Goal Capsule

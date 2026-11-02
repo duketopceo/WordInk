@@ -1,8 +1,10 @@
+> **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
+
 # Plan: TypeWhisper integration — `/v1/models` + docs
 
 **Branch:** `feat/p2-typewhisper` (stacked on `feat/p1-closeout` → PR chain tail)
-**Origin:** `docs/brainstorms/2026-10-07---typewhisper-gateway-requirements.md` (R/A/F/AE IDs trace from it)
-**Parent plan:** `docs/plans/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md`
+**Origin:** `docs/archive/2026-10-07---typewhisper-gateway-requirements.md` (R/A/F/AE IDs trace from it)
+**Parent plan:** `docs/archive/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md`
 
 ## Goal Capsule
 

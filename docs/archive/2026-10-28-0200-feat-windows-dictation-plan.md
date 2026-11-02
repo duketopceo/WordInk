@@ -10,13 +10,15 @@ target_repo: duketopceo/WordInk
 tracking: tallyline WordInk project, WI-U13 (TLY-279)
 ---
 
+> **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
+
 # Windows Dictation App (cyberpowa, Windows 11) - Plan
 
 ## Goal Capsule
 
 - **Objective:** On cyberpowa (Windows 11, Python 3.11, uv), hold a global hotkey, speak, release, and Groq-transcribed, cleaned-up text is typed into the focused window. A tray icon shows state, a Task Scheduler logon task keeps it running, and it replaces the legacy `legacy/wordink` tray app, with a one-command way back to the legacy app until the replacement is proven.
 - **Means:** The same `wordink.desktop` package that already ships on Linux (`sdks/python`). The pipeline stays as is: vocabulary, Groq Whisper transcription, bounded Groq LLM cleanup with the `flow.py` fallback, the state machine, config validation. Only the platform edges change: mic capture, hotkey, text insertion, tray and notifications, IPC, autostart, secrets, and install. Those edges move behind small interfaces on Linux first, then get Windows implementations.
-- **Authority:** `ROADMAP.md` Phase 3 and program plan U13 (standalone app on each OS, works on default open-source config with only a provider key). `docs/plans/2026-10-28-0005-feat-standalone-linux-dictation-app-plan.md` (units U1 to U7 shipped; its U9 asked for this plan).
+- **Authority:** `ROADMAP.md` Phase 3 and program plan U13 (standalone app on each OS, works on default open-source config with only a provider key). `docs/archive/2026-10-28-0005-feat-standalone-linux-dictation-app-plan.md` (units U1 to U7 shipped; its U9 asked for this plan).
 - **Execution profile:** Code units W1 to W8 land as small PRs. W9 (CI) rides with them. W10 is operator-run on cyberpowa and produces evidence, not diffs. Nothing in this plan changes cyberpowa until the operator runs the installer.
 - **Stop conditions:** a target app that runs elevated and rejects injected input (record, fall back to clipboard), antivirus quarantining the keyboard hook (record, stop that unit), or the hotkey clashing with something the operator wants to keep (change the key, not the design).
 - **Who ships:** the agent ships W1 to W9. The operator (or an agent on cyberpowa) runs W10.

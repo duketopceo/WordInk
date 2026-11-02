@@ -10,13 +10,15 @@ target_repo: duketopceo/WordInk
 tracking: tallyline WordInk project, WI-U13 (TLY-279)
 ---
 
+> **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
+
 # macOS Dictation App - Plan
 
 ## Goal Capsule
 
 - **Objective:** On a Mac (macOS 14 or newer, Apple Silicon or Intel, Python 3.11, uv), hold a global hotkey, speak, release, and Groq-transcribed, cleaned-up text is typed into the focused app. A menu-bar icon shows state, a launchd LaunchAgent keeps it running, and the Groq key lives in the login Keychain.
 - **Means:** The same `wordink.desktop` package that ships on Linux and Windows (`sdks/python`). The pipeline stays as is. Only the platform edges change: mic capture, hotkey, text insertion, menu-bar indicator, IPC, autostart, secrets and install. The five seams from the Windows plan (`AudioSource`, `HotkeySource`, `TextInserter`, `Indicator`, `Transport`) already exist, so macOS only adds adapters.
-- **Authority:** `ROADMAP.md` Phase 3 and program plan U13. `docs/plans/2026-10-28-0200-feat-windows-dictation-plan.md` (the template; this plan reuses its seams and its test approach). `docs/plans/2026-10-19-2102-test-cross-platform-verification-plan.md` (the macOS mini lane).
+- **Authority:** `ROADMAP.md` Phase 3 and program plan U13. `docs/archive/2026-10-28-0200-feat-windows-dictation-plan.md` (the template; this plan reuses its seams and its test approach). `docs/archive/2026-10-19-2102-test-cross-platform-verification-plan.md` (the macOS mini lane).
 - **Execution profile:** Code units M1 to M8 land as small PRs, each tested on Linux against fakes. M8 (CI) rides with them. M9 is operator-run on a real Mac and produces evidence, not diffs. Nothing in this plan changes any Mac until the operator runs the installer.
 - **Stop conditions:** a permission flow that cannot be completed without an Apple Developer account (record it, stop that unit), a target app that blocks synthetic input (secure input fields, record, fall back to clipboard), or a hotkey that clashes with a system shortcut (change the key, not the design).
 - **Who ships:** the agent ships M1 to M8. The operator (or an agent on the Mac) runs M9.

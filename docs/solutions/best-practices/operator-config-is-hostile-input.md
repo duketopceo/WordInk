@@ -28,7 +28,7 @@ tags:
 
 ## Context
 
-A multi-reviewer pass on the desktop-gateway branch (plan: `docs/plans/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md`) found no single large bug but one *class*: three reviewers independently flagged places where operator-controlled input — a JSON config file, environment lookups keyed by config strings, the token-state file, upstream HTTP responses — was validated with idioms that look correct but quietly accept values outside the intended domain. Every instance was in the new `packages/server` gateway surface (`packages/server/src/bin/wordink-gateway.ts`, `packages/server/src/internal.ts`, `packages/server/src/gateway/file-tokens.ts`, `packages/server/src/gateway/router.ts`, `packages/server/src/gateway/providers.ts`).
+A multi-reviewer pass on the desktop-gateway branch (plan: `docs/archive/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md`) found no single large bug but one *class*: three reviewers independently flagged places where operator-controlled input — a JSON config file, environment lookups keyed by config strings, the token-state file, upstream HTTP responses — was validated with idioms that look correct but quietly accept values outside the intended domain. Every instance was in the new `packages/server` gateway surface (`packages/server/src/bin/wordink-gateway.ts`, `packages/server/src/internal.ts`, `packages/server/src/gateway/file-tokens.ts`, `packages/server/src/gateway/router.ts`, `packages/server/src/gateway/providers.ts`).
 
 The same class had already bitten this codebase once: the browser relay's Origin check passed its own review and only fell when an adversarial pass attacked the URL *construction* underneath it — a protocol-relative request-target read as same-origin (session history). Loose shape checks pass friendly review; hostile input is what finds them.
 
@@ -90,6 +90,6 @@ const clipped = budget < attemptMs && result.status === undefined && now() - att
 
 ## Related
 
-- Plan of record: `docs/plans/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md` (KTD2 keyEnv indirection, KTD5 cooldown/deadline policy).
+- Plan of record: `docs/archive/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md` (KTD2 keyEnv indirection, KTD5 cooldown/deadline policy).
 - Operator-facing contract: `apps/docs/pages/desktop.md` (schema table, url host rules).
 - Fail-closed precedent: `packages/server/README.md` security notes; AGENTS.md architecture invariants.

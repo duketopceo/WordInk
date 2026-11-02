@@ -7,6 +7,8 @@ product_contract_source: ce-plan-bootstrap
 execution: code
 ---
 
+> **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
+
 # Cross-Platform Verification - Plan
 
 ## Goal Capsule

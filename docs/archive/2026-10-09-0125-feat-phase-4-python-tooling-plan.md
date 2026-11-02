@@ -1,9 +1,11 @@
+> **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
+
 # Phase 4 — `wordink` Python tooling (CLI + MCP over the gateway)
 
 > **Goal.** Agents get `transcribe` as an MCP tool and shells get `wordink
 > transcribe|dictate` — both riding the gateway's OpenAI-compatible contract, so
 > fallback/vocabulary/rate-limits stay server-side and nothing is reimplemented.
-> Source: `docs/brainstorms/2026-10-09---phase-4-python-tooling-requirements.md`.
+> Source: `docs/archive/2026-10-09---phase-4-python-tooling-requirements.md`.
 
 ## Key technical decisions
 

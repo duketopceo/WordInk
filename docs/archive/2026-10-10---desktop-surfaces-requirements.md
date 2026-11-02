@@ -1,3 +1,5 @@
+> **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
+
 # Desktop surfaces ladder: requirements
 
 Date: 2026-10-10 · Status: settled · Tier: Product

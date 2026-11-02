@@ -10,13 +10,15 @@ target_repo: duketopceo/WordInk
 tracking: tallyline WordInk project, WI-U13 (TLY-279)
 ---
 
+> **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
+
 # Standalone Linux Dictation App (Voxtype replacement on Omarchy) - Plan
 
 ## Goal Capsule
 
 - **Objective:** On Omarchy (Hyprland, Wayland), hold a key, speak, release, and cleaned-up text lands in the focused window, with Groq as the backend and no Voxtype installed. Windows (cyberpowa) is a follow-on lane, planned here but not built in this slice.
 - **Means:** A small Python daemon, `wordink-dictd`, added to the existing `sdks/python` package (`wordink.desktop`). It reuses the Python client (`wordink.client`), the deterministic cleanup (`wordink.flow`), the mic capture in `wordink.cli`, and the gateway's vocabulary API. Hyprland binds drive it. A systemd user unit keeps it running. An install script wires everything.
-- **Authority:** `ROADMAP.md` Phase 3 and program plan U13 (standalone, works on default open-source config with only a provider key). `docs/brainstorms/2026-10-10---desktop-surfaces-requirements.md` R3.x and AE5 for hotkey and injection behavior.
+- **Authority:** `ROADMAP.md` Phase 3 and program plan U13 (standalone, works on default open-source config with only a provider key). `docs/archive/2026-10-10---desktop-surfaces-requirements.md` R3.x and AE5 for hotkey and injection behavior.
 - **Execution profile:** Code units U1 to U7 land as small PRs. U8 (machine verification) is read-only and operator-run. U9 (Windows) is a separate later plan.
 - **Stop conditions:** no Groq key available to the daemon, a Wayland compositor without a working injection tool, or a hotkey clash that cannot be resolved by config. Record the blocker and stop that unit.
 
@@ -219,7 +221,7 @@ flowchart LR
 
 ### U9. Windows lane for cyberpowa (planned only, separate plan before code)
 
-- **Status:** planned in `docs/plans/2026-10-28-0200-feat-windows-dictation-plan.md`; the notes below are the summary it expands.
+- **Status:** planned in `docs/archive/2026-10-28-0200-feat-windows-dictation-plan.md`; the notes below are the summary it expands.
 
 - **Goal:** Record what carries over so the Windows build does not restart from zero.
 - **Reuses unchanged:** `wordink.client`, `wordink.flow`, `cleanup.py`, `transcribe.py`, the vocabulary files, and the config schema.

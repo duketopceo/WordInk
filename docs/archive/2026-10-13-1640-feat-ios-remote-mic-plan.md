@@ -9,6 +9,8 @@ execution: code
 deepened: 2026-10-13
 ---
 
+> **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
+
 # iOS Remote Mic - Plan
 
 > **Superseded in part (Oct 24, 2026).** The U9 owner decision (`ROADMAP.md`, program plan U9) makes the iOS app a standalone product that works on default open-source configuration: usable with a provider key and no required self-hosted gateway. The "gateway-only transcription path" decision and the exclusion of direct-provider mode below no longer govern; BYO-gateway pairing stays as an optional mode. This plan still describes the gateway-pairing flow accurately. A follow-up plan is needed for the direct-provider path.
@@ -160,8 +162,8 @@ This plan covers the iOS companion client only; the surrounding picture is curre
 ### Sources / Research
 
 - `CONCEPTS.md` — gateway, device-token and admin-token scopes, runtime vocabulary semantics this app inherits.
-- `docs/brainstorms/2026-10-10---desktop-surfaces-requirements.md` — the mobile deferral this plan supersedes for the companion-client scope.
-- `docs/brainstorms/2026-10-09---phase-4-python-tooling-requirements.md` — the observation that the gateway's OpenAI-compatible contract already makes any HTTP client a working dictation client; this app packages that fact for iOS.
+- `docs/archive/2026-10-10---desktop-surfaces-requirements.md` — the mobile deferral this plan supersedes for the companion-client scope.
+- `docs/archive/2026-10-09---phase-4-python-tooling-requirements.md` — the observation that the gateway's OpenAI-compatible contract already makes any HTTP client a working dictation client; this app packages that fact for iOS.
 - `ROADMAP.md` — Phase 4 mobile row and the TypeWhisper competitive row that bounds this product's identity.
 - `packages/server/src/gateway/` — the OpenAI-compatible endpoint contract (device/admin scopes, `/v1/vocabulary`) the app consumes.
 - `packages/server/src/gateway/index.ts` — transcription accepts a multipart `file` field plus `model`, which the gateway accepts and ignores; errors use the OpenAI `{"error": {...}}` JSON shape; `/v1/models` answers under device-token auth.

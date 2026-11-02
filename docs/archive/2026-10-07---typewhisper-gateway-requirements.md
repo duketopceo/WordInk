@@ -1,8 +1,10 @@
+> **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
+
 # TypeWhisper ↔ wordink-gateway — Requirements
 
 **Date:** 2026-10-07
 **Tier:** Lightweight
-**Origin:** `docs/plans/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md` `work-relationships` — "TypeWhisper plugin" was the tentative next area; research resolved its open question.
+**Origin:** `docs/archive/2026-10-05-1131-feat-wordink-desktop-gateway-plan.md` `work-relationships` — "TypeWhisper plugin" was the tentative next area; research resolved its open question.
 
 ## Problem
 

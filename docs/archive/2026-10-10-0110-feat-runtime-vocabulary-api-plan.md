@@ -2,8 +2,10 @@
 title: "feat: Runtime vocabulary API + agent correction loop"
 type: feat
 date: 2026-10-10
-origin: docs/brainstorms/2026-10-10---desktop-surfaces-requirements.md
+origin: docs/archive/2026-10-10---desktop-surfaces-requirements.md
 ---
+
+> **Superseded by the one-app plan:** `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. Kept for history; do not treat as current.
 
 # feat: Runtime vocabulary API + agent correction loop
 
@@ -13,7 +15,7 @@ Give the gateway's shared vocabulary a runtime mutation surface — `GET/POST/DE
 
 ## Problem Frame
 
-The gateway merges an operator vocabulary into every transcription (KTD6), but it is a static `vocabulary` array in `gateway.json` — deduped once at router construction (`gateway/router.ts`) and changeable only by hand-editing config and restarting the service. That makes vocabulary correction the exact wrong shape for its best consumer: agents, who discover the miss (misheard repo names like `kurultai`, `wisp`) inside a transcript and should fix it in seconds. Origin: `docs/brainstorms/2026-10-10---desktop-surfaces-requirements.md` (rung 2 agent surface; F1, A2, AE1, AE3).
+The gateway merges an operator vocabulary into every transcription (KTD6), but it is a static `vocabulary` array in `gateway.json` — deduped once at router construction (`gateway/router.ts`) and changeable only by hand-editing config and restarting the service. That makes vocabulary correction the exact wrong shape for its best consumer: agents, who discover the miss (misheard repo names like `kurultai`, `wisp`) inside a transcript and should fix it in seconds. Origin: `docs/archive/2026-10-10---desktop-surfaces-requirements.md` (rung 2 agent surface; F1, A2, AE1, AE3).
 
 This plan covers the vocabulary loop only. The Omarchy bar plugin (rung 1 — different repo, QML) and the human control surface (rung 2 remainder, Phase 6) are separate plans.
 
@@ -284,7 +286,7 @@ Union semantics (matching is always case-folded; union emits config terms first,
 
 ## Sources
 
-- Origin: `docs/brainstorms/2026-10-10---desktop-surfaces-requirements.md` — F1 loop, A2, R2.x, AE1/AE3.
+- Origin: `docs/archive/2026-10-10---desktop-surfaces-requirements.md` — F1 loop, A2, R2.x, AE1/AE3.
 - `packages/server/src/gateway/{index,router,vocabulary,tokens,file-tokens}.ts` — dispatch order, static-vocab point, merge budgets, store precedent.
 - `packages/server/src/{index.ts,node.ts,bin/wordink-gateway.ts}` — allowlist dispatch, config load, CLI surface.
 - `docs/solutions/best-practices/operator-config-is-hostile-input.md` — runtime-write rules applied to `vocabulary.json`.
