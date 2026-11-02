@@ -40,20 +40,23 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   esac
 done < "$file"
 
+# Map the validated kind to an explicit grep flag, so nothing is interpolated into an option.
+flag_for() { [[ "$1" == P ]] && echo -P || echo -F; }
+
 total=0
 if (( history )); then
   log=$(mktemp); trap 'rm -f "$log"' EXIT
   git log -p master --format= > "$log"
   for i in "${!pats[@]}"; do
     # Only count patch lines (added or removed), not context.
-    n=$(grep -E '^[+-]' "$log" | grep -c -"${kinds[$i]}" -e "${pats[$i]}" || true)
+    n=$(grep -E '^[+-]' "$log" | grep -c "$(flag_for "${kinds[$i]}")" -e "${pats[$i]}" -- || true)
     (( total += n )) || true
     (( n )) && echo "history: $n changed line(s) match expression #$((i+1))"
   done
   echo "history total: $total matching changed line(s)"
 else
   for i in "${!pats[@]}"; do
-    out=$(git grep -n -I -"${kinds[$i]}" -e "${pats[$i]}" -- . ':(exclude)scripts/scrub-check.sh' || true)
+    out=$(git grep -n -I "$(flag_for "${kinds[$i]}")" -e "${pats[$i]}" -- . ':(exclude)scripts/scrub-check.sh' || true)
     if [[ -n "$out" ]]; then
       n=$(printf '%s\n' "$out" | wc -l)
       (( total += n )) || true
