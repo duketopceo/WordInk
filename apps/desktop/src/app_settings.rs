@@ -12,6 +12,7 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use serde::{Deserialize, Serialize};
 
+use crate::keyboard_kind::{self, KeyboardKind};
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 
 mod persistence;
@@ -270,27 +271,34 @@ impl HotkeyModifiers {
     }
 
     #[cfg(target_os = "macos")]
-    fn keycaps(self) -> impl Iterator<Item = &'static str> {
+    fn keycaps_for(self, kind: KeyboardKind) -> impl Iterator<Item = &'static str> {
         self.sided()
-            .map(|(modifier, side)| side_keycap(side, modifier.keycap()))
+            .map(move |(modifier, side)| side_keycap(side, modifier.keycap_for(kind)))
     }
 
     /// Each modifier key's keycap and the side it must be pressed on.
     /// Linux binds no side, so its keycaps never name one.
     fn sided_keycaps(self) -> impl Iterator<Item = (&'static str, ModifierSide)> {
-        self.sided().map(|(modifier, side)| {
+        self.sided_keycaps_for(keyboard_kind::detected())
+    }
+
+    fn sided_keycaps_for(
+        self,
+        kind: KeyboardKind,
+    ) -> impl Iterator<Item = (&'static str, ModifierSide)> {
+        self.sided().map(move |(modifier, side)| {
             let side = if cfg!(target_os = "linux") {
                 ModifierSide::Either
             } else {
                 side
             };
-            (modifier.keycap(), side)
+            (modifier.keycap_for(kind), side)
         })
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn keycaps(self) -> impl Iterator<Item = &'static str> {
-        self.sided_keycaps().map(|(label, _)| label)
+    fn keycaps_for(self, kind: KeyboardKind) -> impl Iterator<Item = &'static str> {
+        self.sided_keycaps_for(kind).map(|(label, _)| label)
     }
 }
 
@@ -307,13 +315,22 @@ pub enum Modifier {
 impl Modifier {
     /// The Mac's symbols; Windows names Command the Windows key and Option
     /// Alt, and Linux names them Super and Alt.
-    pub const fn keycap(self) -> &'static str {
+    pub fn keycap(self) -> &'static str {
+        self.keycap_for(keyboard_kind::detected())
+    }
+
+    /// The keycap on `kind` of keyboard: the Option key reads "Option" on an
+    /// Apple keyboard and "Alt" on any other (the Mac shows its symbol).
+    pub fn keycap_for(self, kind: KeyboardKind) -> &'static str {
         match self {
             Self::Function => "fn",
             #[cfg(target_os = "macos")]
             Self::Control => "⌃",
             #[cfg(target_os = "macos")]
-            Self::Option => "⌥",
+            Self::Option => {
+                let _ = kind;
+                "⌥"
+            }
             #[cfg(target_os = "macos")]
             Self::Shift => "⇧",
             #[cfg(target_os = "macos")]
@@ -321,7 +338,7 @@ impl Modifier {
             #[cfg(not(target_os = "macos"))]
             Self::Control => "Ctrl",
             #[cfg(not(target_os = "macos"))]
-            Self::Option => "Alt",
+            Self::Option => kind.option_label(),
             #[cfg(not(target_os = "macos"))]
             Self::Shift => "Shift",
             #[cfg(target_os = "windows")]
@@ -555,11 +572,11 @@ struct LegacyBinding {
 }
 
 fn legacy_default_modifiers() -> HotkeyModifiers {
-    HotkeyBinding::default().modifiers
+    HotkeyBinding::legacy_dictation_default_for(DefaultOs::current(), gnome_session()).modifiers
 }
 
 fn legacy_default_key() -> Option<HotkeyKey> {
-    HotkeyBinding::default().key
+    HotkeyBinding::legacy_dictation_default_for(DefaultOs::current(), gnome_session()).key
 }
 
 impl HotkeyBinding {
@@ -679,30 +696,78 @@ impl<'de> Deserialize<'de> for HotkeyBinding {
     }
 }
 
+/// macOS virtual key code of the Space bar (kVK_Space).
+const MAC_SPACE_KEY_CODE: u16 = 49;
+
 impl Default for HotkeyBinding {
-    /// Option on macOS, Ctrl+Space on Windows, Alt+Space on Linux, and
+    /// Option+Space on macOS, Alt+Space on Windows and Linux, and
     /// Ctrl+Alt+Space on GNOME, whose window menu takes Alt+Space (#723).
     fn default() -> Self {
-        #[cfg(target_os = "macos")]
-        let binding = Self {
-            modifiers: HotkeyModifiers::option(),
-            key: None,
-        };
-        #[cfg(target_os = "windows")]
-        let binding = Self::chord(HotkeyModifiers::control(), "space");
-        #[cfg(target_os = "linux")]
-        let binding = Self::linux_dictation_default(crate::linux::portal::gnome());
-        binding
+        Self::dictation_default_for(DefaultOs::current(), gnome_session())
     }
 }
 
-impl HotkeyBinding {
-    #[cfg(target_os = "linux")]
-    fn linux_dictation_default(gnome: bool) -> Self {
-        if gnome {
-            Self::chord(HotkeyModifiers::control_option(), "space")
+/// The OS whose shortcut default applies; a value rather than a `cfg` so
+/// every OS's default is testable on any host.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DefaultOs {
+    Mac,
+    Windows,
+    Linux,
+}
+
+impl DefaultOs {
+    const fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Mac
+        } else if cfg!(target_os = "windows") {
+            Self::Windows
         } else {
-            Self::chord(HotkeyModifiers::option(), "space")
+            Self::Linux
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn gnome_session() -> bool {
+    crate::linux::portal::gnome()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn gnome_session() -> bool {
+    false
+}
+
+impl HotkeyBinding {
+    /// The default dictation shortcut: the Option/Alt key plus Space. GNOME
+    /// keeps Alt+Space for its window menu, so a GNOME session adds Ctrl.
+    pub(crate) fn dictation_default_for(os: DefaultOs, gnome: bool) -> Self {
+        match os {
+            DefaultOs::Mac => Self {
+                modifiers: HotkeyModifiers::option(),
+                key: Some(HotkeyKey {
+                    code: MAC_SPACE_KEY_CODE,
+                    label: "Space".into(),
+                }),
+            },
+            DefaultOs::Windows => Self::chord(HotkeyModifiers::option(), "space"),
+            DefaultOs::Linux if gnome => Self::chord(HotkeyModifiers::control_option(), "space"),
+            DefaultOs::Linux => Self::chord(HotkeyModifiers::option(), "space"),
+        }
+    }
+
+    /// What a saved binding that lacks its modifiers or its key falls back
+    /// to. These are the defaults before Option/Alt+Space: changing them
+    /// would turn an older saved shortcut into a different one.
+    fn legacy_dictation_default_for(os: DefaultOs, gnome: bool) -> Self {
+        match os {
+            DefaultOs::Mac => Self {
+                modifiers: HotkeyModifiers::option(),
+                key: None,
+            },
+            DefaultOs::Windows => Self::chord(HotkeyModifiers::control(), "space"),
+            DefaultOs::Linux if gnome => Self::chord(HotkeyModifiers::control_option(), "space"),
+            DefaultOs::Linux => Self::chord(HotkeyModifiers::option(), "space"),
         }
     }
 
@@ -839,8 +904,13 @@ fn paste_key_code() -> u16 {
 
 impl HotkeyBinding {
     pub fn keycaps(&self) -> Vec<String> {
+        self.keycaps_for(keyboard_kind::detected())
+    }
+
+    /// The keycaps as they read on `kind` of keyboard.
+    pub fn keycaps_for(&self, kind: KeyboardKind) -> Vec<String> {
         self.modifiers
-            .keycaps()
+            .keycaps_for(kind)
             .map(str::to_string)
             .chain(self.key.iter().map(HotkeyKey::keycap))
             .collect()
@@ -1925,7 +1995,9 @@ pub struct AppSettings {
     pub text_replacements: Vec<TextReplacement>,
 }
 
-/// Moves English dictation to the streaming English model once.
+/// Hex moved English dictation to Parakeet Unified once. WordInk keeps the
+/// model a person chose (its default is Parakeet v3), so the ID is only
+/// recorded; it stays in the list so older files are not re-examined.
 const STREAMING_ENGLISH_MIGRATION: &str = "streaming-english-model";
 /// Annotate became a default feature: on for everyone once.
 #[cfg(hex_capture)]
@@ -2442,17 +2514,7 @@ impl AppSettings {
     /// Applies each one-time change this file has not seen, then records it
     /// so a later choice, such as switching back, sticks.
     fn apply_one_time_migrations(&mut self) {
-        self.apply_one_time_migrations_with(|model| {
-            crate::transcription::models::is_installed(model, "en")
-        });
-    }
-
-    fn apply_one_time_migrations_with(
-        &mut self,
-        installed: impl Fn(&crate::transcription::models::ModelDefinition) -> bool,
-    ) {
         if !self.has_migration(STREAMING_ENGLISH_MIGRATION) {
-            self.switch_english_to_streaming_model(installed);
             self.migrations.push(STREAMING_ENGLISH_MIGRATION.into());
         }
         if !self.has_migration(MEETING_RETENTION_DEFAULT_MIGRATION) {
@@ -2487,40 +2549,6 @@ impl AppSettings {
             self.write_to(path)?;
         }
         Ok(())
-    }
-
-    /// English dictation moves to Parakeet Unified English, which streams
-    /// while the shortcut is held. The previous model stays downloaded and
-    /// in the recent models, one click away. Other languages and Auto keep
-    /// their model because Parakeet Unified is English-only. Only an installed
-    /// model is switched to, so an upgrade never leaves dictation waiting on a
-    /// download.
-    fn switch_english_to_streaming_model(
-        &mut self,
-        installed: impl Fn(&crate::transcription::models::ModelDefinition) -> bool,
-    ) {
-        if self.transcription.language != "en"
-            || self.transcription.model == TranscriptionModelId::ParakeetUnifiedEnglish
-        {
-            return;
-        }
-        let model =
-            crate::transcription::models::definition(TranscriptionModelId::ParakeetUnifiedEnglish);
-        if !installed(model) {
-            return;
-        }
-        let selection = TranscriptionSelection {
-            model: model.id,
-            language: "en".into(),
-        };
-        if crate::transcription::models::validate(&selection).is_err() {
-            return;
-        }
-        tracing::info!(
-            from = self.transcription.model.as_str(),
-            "switched English dictation to the streaming English model"
-        );
-        self.remember_transcription(selection);
     }
 
     fn migrate_disabled_transcription_model(&mut self) {
@@ -3051,18 +3079,115 @@ mod tests {
 
     /// GNOME's window menu takes Alt+Space, so new GNOME setups dictate
     /// with Ctrl+Alt+Space; it shares no key with Paste last or Annotate.
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn gnome_dictates_with_a_key_gnome_leaves_free() {
+        let plain = HotkeyBinding::dictation_default_for(DefaultOs::Linux, false);
+        assert_eq!(plain.keycaps_for(KeyboardKind::Pc), ["Alt", "Space"]);
+        let gnome = HotkeyBinding::dictation_default_for(DefaultOs::Linux, true);
         assert_eq!(
-            HotkeyBinding::linux_dictation_default(false).keycaps(),
-            ["Alt", "Space"]
+            gnome.keycaps_for(KeyboardKind::Pc),
+            ["Ctrl", "Alt", "Space"]
         );
-        let gnome = HotkeyBinding::linux_dictation_default(true);
-        assert_eq!(gnome.keycaps(), ["Ctrl", "Alt", "Space"]);
         assert_ne!(gnome, HotkeyBinding::paste_last_default());
         #[cfg(hex_capture)]
         assert_ne!(gnome, HotkeyBinding::capture_default());
+    }
+
+    /// Option+Space on macOS, Alt+Space on Windows and Linux; only a GNOME
+    /// session, which owns Alt+Space, adds Ctrl.
+    #[test]
+    fn the_default_dictation_shortcut_per_os() {
+        let space = |binding: &HotkeyBinding| binding.key.clone().map(|key| key.label);
+        for (os, gnome, modifiers) in [
+            (DefaultOs::Mac, false, HotkeyModifiers::option()),
+            (DefaultOs::Windows, false, HotkeyModifiers::option()),
+            (DefaultOs::Linux, false, HotkeyModifiers::option()),
+            (DefaultOs::Linux, true, HotkeyModifiers::control_option()),
+            // Only Linux has GNOME sessions with this window menu.
+            (DefaultOs::Mac, true, HotkeyModifiers::option()),
+            (DefaultOs::Windows, true, HotkeyModifiers::option()),
+        ] {
+            let binding = HotkeyBinding::dictation_default_for(os, gnome);
+            assert_eq!(binding.modifiers, modifiers, "{os:?} gnome={gnome}");
+            assert_eq!(space(&binding).as_deref(), Some("Space"), "{os:?}");
+        }
+        assert_eq!(
+            HotkeyBinding::dictation_default_for(DefaultOs::Mac, false)
+                .key
+                .unwrap()
+                .code,
+            49,
+            "macOS binds Space by its virtual key code"
+        );
+    }
+
+    /// The Option key reads "Option" on an Apple keyboard and "Alt" on any
+    /// other, wherever it appears in a shortcut.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn the_shortcut_label_follows_the_keyboard() {
+        let alt_space = HotkeyBinding::dictation_default_for(DefaultOs::Linux, false);
+        assert_eq!(
+            alt_space.keycaps_for(KeyboardKind::Apple),
+            ["Option", "Space"]
+        );
+        assert_eq!(alt_space.keycaps_for(KeyboardKind::Pc), ["Alt", "Space"]);
+        let gnome = HotkeyBinding::dictation_default_for(DefaultOs::Linux, true);
+        assert_eq!(
+            gnome.keycaps_for(KeyboardKind::Apple),
+            ["Ctrl", "Option", "Space"]
+        );
+        let custom = HotkeyBinding::chord(HotkeyModifiers::control(), "k");
+        assert_eq!(custom.keycaps_for(KeyboardKind::Apple), ["Ctrl", "K"]);
+    }
+
+    /// A saved binding missing its modifiers or key keeps the fallback it
+    /// always had, so the new default doesn't rewrite older shortcuts.
+    #[test]
+    fn older_partial_bindings_keep_their_old_fallbacks() {
+        let legacy = HotkeyBinding::legacy_dictation_default_for;
+        let mac = legacy(DefaultOs::Mac, false);
+        assert_eq!((mac.modifiers, mac.key), (HotkeyModifiers::option(), None));
+        let windows = legacy(DefaultOs::Windows, false);
+        assert_eq!(windows.modifiers, HotkeyModifiers::control());
+        assert_eq!(windows.key.unwrap().label, "Space");
+        assert_eq!(
+            legacy(DefaultOs::Linux, false).modifiers,
+            HotkeyModifiers::option()
+        );
+        assert_eq!(
+            legacy(DefaultOs::Linux, true).modifiers,
+            HotkeyModifiers::control_option()
+        );
+    }
+
+    /// An upgrade never replaces a shortcut the person chose, and only a
+    /// file with no dictation shortcut gets the new default.
+    #[test]
+    fn a_custom_dictation_shortcut_survives_a_reload() {
+        let custom = HotkeyBinding::chord(HotkeyModifiers::control_option(), "d");
+        let settings = AppSettings {
+            dictation_hotkey: custom.clone(),
+            ..AppSettings::default()
+        };
+        let reloaded: AppSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(reloaded.dictation_hotkey, custom);
+        let fresh: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(fresh.dictation_hotkey, HotkeyBinding::default());
+        // A saved modifier-only shortcut is not given a key.
+        let modifier_only = HotkeyBinding {
+            modifiers: HotkeyModifiers::option(),
+            key: None,
+        };
+        let settings = AppSettings {
+            dictation_hotkey: modifier_only.clone(),
+            ..AppSettings::default()
+        };
+        let reloaded: AppSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(reloaded.dictation_hotkey, modifier_only);
     }
 
     /// Annotate is off out of the box, and its shortcut and the rest of the
@@ -3071,7 +3196,10 @@ mod tests {
     #[test]
     fn annotates_default_shortcuts_share_no_key() {
         let settings = AppSettings::default();
-        assert!(!settings.capture.enabled, "screen capture is off by default");
+        assert!(
+            !settings.capture.enabled,
+            "screen capture is off by default"
+        );
         assert!(!settings.hotkey_in_use(HotkeySlot::Capture, &settings.capture.hotkey));
     }
 
@@ -3085,10 +3213,10 @@ mod tests {
             ..AppSettings::default()
         };
         assert!(!settings.capture.enabled);
-        settings.apply_one_time_migrations_with(|_| true);
+        settings.apply_one_time_migrations();
         assert!(!settings.capture.enabled);
         settings.capture.enabled = true;
-        settings.apply_one_time_migrations_with(|_| true);
+        settings.apply_one_time_migrations();
         assert!(settings.capture.enabled, "a person's choice stays");
     }
 
@@ -3236,8 +3364,7 @@ mod tests {
             assert_eq!(decoded.indicator_style, style);
         }
         // A saved file from before the setting keeps working.
-        let old: AppSettings =
-            serde_json::from_str(r#"{"indicator_position":"bottom"}"#).unwrap();
+        let old: AppSettings = serde_json::from_str(r#"{"indicator_position":"bottom"}"#).unwrap();
         assert_eq!(old.indicator_style, IndicatorStyle::Pill);
         assert_eq!(old.indicator_position, IndicatorPosition::Bottom);
     }
@@ -3262,7 +3389,10 @@ mod tests {
         );
         // The Cancel binding can't be reused by another shortcut.
         settings.cancel_hotkey = Some(HotkeyBinding::paste_last_default());
-        assert!(settings.hotkey_in_use(HotkeySlot::RawDictation, &HotkeyBinding::paste_last_default()));
+        assert!(settings.hotkey_in_use(
+            HotkeySlot::RawDictation,
+            &HotkeyBinding::paste_last_default()
+        ));
     }
 
     #[test]
@@ -3518,48 +3648,42 @@ mod tests {
         )
     }
 
+    /// Hex switched English dictation to Parakeet Unified once; WordInk
+    /// leaves the model a person already chose alone, whichever it is.
     #[test]
-    fn english_dictation_switches_to_the_installed_streaming_model_once() {
-        let mut settings: AppSettings =
-            serde_json::from_str(&english(TranscriptionModelId::ParakeetV3)).unwrap();
-        settings.apply_one_time_migrations_with(|_| true);
+    fn an_existing_model_choice_is_kept_on_upgrade() {
+        for model in [
+            TranscriptionModelId::ParakeetV3,
+            TranscriptionModelId::WhisperLargeV3Turbo,
+            TranscriptionModelId::ParakeetV2,
+        ] {
+            let mut settings: AppSettings = serde_json::from_str(&english(model)).unwrap();
+            settings.apply_one_time_migrations();
+            assert_eq!(settings.transcription.model, model);
+            assert!(settings.has_migration(STREAMING_ENGLISH_MIGRATION));
+        }
+        let mut chosen: AppSettings =
+            serde_json::from_str(&english(TranscriptionModelId::ParakeetUnifiedEnglish)).unwrap();
+        chosen.apply_one_time_migrations();
         assert_eq!(
-            settings.transcription.model,
+            chosen.transcription.model,
             TranscriptionModelId::ParakeetUnifiedEnglish
-        );
-        assert!(settings.has_migration(STREAMING_ENGLISH_MIGRATION));
-        assert!(
-            settings
-                .transcription_recents
-                .iter()
-                .any(|recent| recent.model == TranscriptionModelId::ParakeetV3),
-            "the previous model stays one click away"
-        );
-
-        // Switching back after the migration sticks.
-        let dir = TestSettingsDir::new("streaming-english");
-        let mut chosen = settings.clone();
-        chosen.transcription.model = TranscriptionModelId::ParakeetV3;
-        chosen.write_to(&dir.path).unwrap();
-        let reloaded = AppSettings::load_from(&dir.path).unwrap();
-        assert_eq!(
-            reloaded.transcription.model,
-            TranscriptionModelId::ParakeetV3
         );
     }
 
     #[test]
-    fn english_dictation_keeps_its_model_when_the_streaming_model_is_missing() {
-        let mut settings: AppSettings =
-            serde_json::from_str(&english(TranscriptionModelId::ParakeetV3)).unwrap();
-        settings.apply_one_time_migrations_with(|_| false);
+    fn a_new_install_defaults_to_parakeet_v3() {
+        let settings: AppSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(
             settings.transcription.model,
-            TranscriptionModelId::ParakeetV3
+            crate::transcription::models::recommended_selection(
+                &crate::desktop::i18n::preferred_language()
+            )
+            .model
         );
-        assert!(
-            settings.has_migration(STREAMING_ENGLISH_MIGRATION),
-            "a later download never switches the model behind the user's back"
+        assert_eq!(
+            TranscriptionSelection::default().model,
+            TranscriptionModelId::ParakeetV3
         );
     }
 

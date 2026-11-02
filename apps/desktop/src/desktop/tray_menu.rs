@@ -246,13 +246,12 @@ mod tests {
         let installed = |model: &ModelDefinition, _: &str| {
             matches!(
                 model.id,
-                TranscriptionModelId::ParakeetUnifiedEnglish
-                    | TranscriptionModelId::WhisperLargeV3Turbo
+                TranscriptionModelId::ParakeetV3 | TranscriptionModelId::WhisperLargeV3Turbo
             )
         };
         let entries = model_menu_entries(&settings, false, installed);
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].title, "Parakeet Unified English · English");
+        assert_eq!(entries[0].title, "Parakeet v3 · English");
         assert!(entries[0].selected);
         assert!(!entries[0].enabled);
         assert_eq!(entries[1].title, "Whisper large-v3-turbo · French");

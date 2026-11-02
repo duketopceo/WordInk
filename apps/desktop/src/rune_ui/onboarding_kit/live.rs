@@ -133,7 +133,7 @@ fn clock(ui: &Ui) -> f64 {
 }
 
 fn english(selection: &TranscriptionSelection) -> bool {
-    selection.model == TranscriptionModelId::ParakeetUnifiedEnglish
+    selection.language == "en"
 }
 
 /// The selection the language capsule switches to.
@@ -152,7 +152,7 @@ fn other_selection(current: &TranscriptionSelection) -> TranscriptionSelection {
         }
     } else {
         TranscriptionSelection {
-            model: TranscriptionModelId::ParakeetUnifiedEnglish,
+            model: TranscriptionModelId::ParakeetV3,
             language: "en".into(),
         }
     }

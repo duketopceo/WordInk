@@ -31,6 +31,7 @@ mod history;
 mod keys;
 #[cfg(target_os = "macos")]
 mod keyboard;
+mod keyboard_kind;
 #[cfg_attr(target_os = "macos", path = "keyboard_input_sources/macos.rs")]
 #[cfg_attr(target_os = "windows", path = "keyboard_input_sources/windows.rs")]
 #[cfg_attr(target_os = "linux", path = "keyboard_input_sources/x11.rs")]

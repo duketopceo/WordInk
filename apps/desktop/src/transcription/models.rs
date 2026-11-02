@@ -30,9 +30,9 @@ pub use super::model_benchmarks::{BenchmarkRecord, benchmark};
 /// keeps the default for it without rewriting the file (#744).
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum TranscriptionModelId {
-    #[default]
     ParakeetUnifiedEnglish,
     ParakeetV2,
+    #[default]
     ParakeetV3,
     WhisperLargeV3Turbo,
     Qwen3Asr06B,
@@ -209,6 +209,8 @@ pub struct ModelDefinition {
     pub languages: &'static [&'static str],
     pub accepts_language_hint: bool,
     pub supports_language_detection: bool,
+    /// The licence the weights are published under (SPDX id where one exists).
+    pub license: &'static str,
 }
 
 /// How a model's transcription takes the vocabulary.
@@ -402,6 +404,7 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["en"],
         accepts_language_hint: true,
         supports_language_detection: false,
+        license: "NVIDIA Open Model License",
     },
     ModelDefinition {
         id: TranscriptionModelId::ParakeetV2,
@@ -416,6 +419,7 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["en"],
         accepts_language_hint: true,
         supports_language_detection: false,
+        license: "CC-BY-4.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::ParakeetV3,
@@ -431,6 +435,7 @@ pub const MODELS: &[ModelDefinition] = &[
         // The pinned v3 artifact detects language from audio and has no prompt input.
         accepts_language_hint: false,
         supports_language_detection: false,
+        license: "CC-BY-4.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::WhisperLargeV3Turbo,
@@ -445,6 +450,7 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["*"],
         accepts_language_hint: true,
         supports_language_detection: true,
+        license: "MIT",
     },
     ModelDefinition {
         id: TranscriptionModelId::Qwen3Asr06B,
@@ -459,6 +465,7 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: QWEN_LANGUAGES,
         accepts_language_hint: true,
         supports_language_detection: true,
+        license: "Apache-2.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::QwenCleoAsr17B,
@@ -475,6 +482,7 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["ar"],
         accepts_language_hint: true,
         supports_language_detection: false,
+        license: "Apache-2.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::IvritWhisperLargeV3Turbo,
@@ -493,6 +501,7 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["he"],
         accepts_language_hint: true,
         supports_language_detection: false,
+        license: "Apache-2.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::SenseVoiceSmall,
@@ -507,6 +516,7 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["zh", "yue", "en", "ja", "ko"],
         accepts_language_hint: true,
         supports_language_detection: true,
+        license: "FunASR Model License",
     },
     ModelDefinition {
         id: TranscriptionModelId::CohereTranscribe,
@@ -521,6 +531,7 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: COHERE_LANGUAGES,
         accepts_language_hint: true,
         supports_language_detection: false,
+        license: "Apache-2.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::UnderdogBark3Pro,
@@ -536,6 +547,7 @@ pub const MODELS: &[ModelDefinition] = &[
         // Like Parakeet v3, its base, the artifact has no language input.
         accepts_language_hint: false,
         supports_language_detection: false,
+        license: "CC-BY-4.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::UnderdogBark3Clean,
@@ -550,6 +562,7 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["en"],
         accepts_language_hint: false,
         supports_language_detection: false,
+        license: "CC-BY-4.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::ParakeetUltra,
@@ -570,6 +583,7 @@ pub const MODELS: &[ModelDefinition] = &[
         // no language input.
         accepts_language_hint: false,
         supports_language_detection: false,
+        license: "CC-BY-4.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::Nemotron35Asr,
@@ -592,6 +606,7 @@ pub const MODELS: &[ModelDefinition] = &[
         // it to the model.
         accepts_language_hint: true,
         supports_language_detection: true,
+        license: "OpenMDW-1.1",
     },
     ModelDefinition {
         id: TranscriptionModelId::AppleSpeech,
@@ -606,6 +621,7 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["*"],
         accepts_language_hint: true,
         supports_language_detection: false,
+        license: "Apple system model",
     },
 ];
 
@@ -641,8 +657,11 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
     };
     let choices: &[(TranscriptionModelId, Recommendation)] = match language {
         AUTO_LANGUAGE => &[(WhisperLargeV3Turbo, Recommended), (Qwen3Asr06B, Fastest)],
+        // Parakeet v3 is the default for its open licence; Unified streams
+        // but is under NVIDIA's own licence, so it is offered, not chosen.
         "en" => &[
-            (ParakeetUnifiedEnglish, Recommended),
+            (ParakeetV3, Recommended),
+            (ParakeetUnifiedEnglish, Fastest),
             (CohereTranscribe, MostAccurate),
             (WhisperLargeV3Turbo, Vocabulary),
         ],
@@ -1240,7 +1259,7 @@ fn verification_receipt_path(model_path: &Path) -> PathBuf {
 
 /// The best starting selection for a dictation language: its first
 /// recommended runtime model. Unknown languages fall back to English, so an
-/// English system starts with Parakeet Unified English.
+/// English system starts with Parakeet v3.
 pub fn recommended_selection(language: &str) -> TranscriptionSelection {
     let language = LANGUAGES
         .iter()
@@ -1251,9 +1270,7 @@ pub fn recommended_selection(language: &str) -> TranscriptionSelection {
         .iter()
         .find(|choice| choice.recommendation == Recommendation::Recommended)
         .or_else(|| choices.first())
-        .map_or(TranscriptionModelId::ParakeetUnifiedEnglish, |choice| {
-            choice.model.id
-        });
+        .map_or(TranscriptionModelId::ParakeetV3, |choice| choice.model.id);
     TranscriptionSelection {
         model,
         language: language.into(),
@@ -1457,15 +1474,92 @@ mod tests {
     }
 
     #[test]
+    fn parakeet_v3_is_the_default_local_model() {
+        assert_eq!(
+            TranscriptionModelId::default(),
+            TranscriptionModelId::ParakeetV3
+        );
+        assert_eq!(
+            TranscriptionSelection::default().model,
+            TranscriptionModelId::ParakeetV3
+        );
+        assert_eq!(
+            recommended_selection("en").model,
+            TranscriptionModelId::ParakeetV3
+        );
+        // Unified stays offered, but never as the recommended model.
+        assert!(
+            choices_for_runtime("en")
+                .iter()
+                .any(
+                    |choice| choice.model.id == TranscriptionModelId::ParakeetUnifiedEnglish
+                        && choice.recommendation != Recommendation::Recommended
+                )
+        );
+    }
+
+    /// The licences a model may carry and still be recommended or default.
+    const OPEN_LICENSES: [&str; 3] = ["MIT", "Apache-2.0", "CC-BY-4.0"];
+
+    #[test]
+    fn every_catalog_entry_names_its_license() {
+        for model in MODELS {
+            assert!(!model.license.trim().is_empty(), "{}", model.name);
+        }
+        let license = |id| definition(id).license;
+        // Each value is the source repository's own licence tag.
+        assert_eq!(license(TranscriptionModelId::ParakeetV3), "CC-BY-4.0");
+        assert_eq!(license(TranscriptionModelId::ParakeetV2), "CC-BY-4.0");
+        assert_eq!(
+            license(TranscriptionModelId::ParakeetUnifiedEnglish),
+            "NVIDIA Open Model License"
+        );
+        assert_eq!(license(TranscriptionModelId::WhisperLargeV3Turbo), "MIT");
+        assert_eq!(license(TranscriptionModelId::Qwen3Asr06B), "Apache-2.0");
+        assert_eq!(
+            license(TranscriptionModelId::SenseVoiceSmall),
+            "FunASR Model License"
+        );
+        assert_eq!(license(TranscriptionModelId::Nemotron35Asr), "OpenMDW-1.1");
+        assert_eq!(
+            license(TranscriptionModelId::CohereTranscribe),
+            "Apache-2.0"
+        );
+    }
+
+    #[test]
+    fn the_default_and_every_recommended_model_carry_an_open_license() {
+        let default = definition(TranscriptionModelId::default());
+        assert!(
+            OPEN_LICENSES.contains(&default.license),
+            "{}",
+            default.license
+        );
+        for (language, _) in LANGUAGES {
+            for choice in choices_for_runtime(language) {
+                if choice.recommendation == Recommendation::Recommended {
+                    assert!(
+                        OPEN_LICENSES.contains(&choice.model.license),
+                        "{language}: {} is {}",
+                        choice.model.name,
+                        choice.model.license
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn recommendations_are_language_specific() {
         let english = choices_for_runtime("en");
+        assert_eq!(english[0].model.id, TranscriptionModelId::ParakeetV3);
+        assert_eq!(english[0].recommendation, Recommendation::Recommended);
         assert_eq!(
-            english[0].model.id,
+            english[1].model.id,
             TranscriptionModelId::ParakeetUnifiedEnglish
         );
-        assert_eq!(english[0].recommendation, Recommendation::Recommended);
-        assert_eq!(english[1].model.id, TranscriptionModelId::CohereTranscribe);
-        assert_eq!(english[1].recommendation, Recommendation::MostAccurate);
+        assert_eq!(english[2].model.id, TranscriptionModelId::CohereTranscribe);
+        assert_eq!(english[2].recommendation, Recommendation::MostAccurate);
         let mandarin = choices_for_runtime("zh");
         assert_eq!(mandarin[0].model.id, TranscriptionModelId::Qwen3Asr06B);
         assert_eq!(mandarin[1].model.id, TranscriptionModelId::SenseVoiceSmall);

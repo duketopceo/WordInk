@@ -340,6 +340,10 @@ fn build(id: CustomModelId, manifest: &Manifest) -> &'static ModelDefinition {
         // entry is the same); the other families do.
         accepts_language_hint: architecture != "parakeet",
         supports_language_detection: manifest.detects_language && architecture != "parakeet",
+        license: manifest
+            .license
+            .as_deref()
+            .map_or("Unknown (imported file)", leak),
     }))
 }
 

@@ -11,11 +11,11 @@ contextual Modes can rewrite completed dictation through the same
 deadline-bounded OpenCode processing policy as macOS, then run ordered built-in
 or user-defined TypeScript transformations.
 
-The default shortcut is `Ctrl+Space`. In **Hold** mode, hold both keys while
+The default shortcut is `Alt+Space`. In **Hold** mode, hold both keys while
 speaking and release Space to transcribe and paste. In **Toggle** mode, press
-`Ctrl+Space` to start and again to finish. Escape never cancels (every
+`Alt+Space` to start and again to finish. Escape never cancels (every
 dictation finishes and pastes), and holding a modifier on its own does nothing. Hex consumes the chord while it matches, so
-applications and input methods no longer see `Ctrl+Space`; rebind it in Settings
+applications and input methods no longer see `Alt+Space`; rebind it in Settings
 if you rely on that chord elsewhere. To let another app use the same key, such as
 a Discord push-to-talk key, turn on **Share dictation shortcut with other apps**
 under Advanced: Hex still reacts to it but passes its key-down and key-up on,
