@@ -96,7 +96,7 @@ impl AppSettings {
         Ok((settings, migrated))
     }
 
-    pub(super) fn write_to(&self, path: &Path) -> Result<()> {
+    pub(crate) fn write_to(&self, path: &Path) -> Result<()> {
         self.validate_recording_duck_volume()?;
         let bytes = serde_json::to_vec_pretty(self)?;
         let _writer = WRITER.lock().unwrap_or_else(|error| error.into_inner());

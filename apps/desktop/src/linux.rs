@@ -84,6 +84,11 @@ enum Command {
         #[command(subcommand)]
         command: crate::keys::KeysCommand,
     },
+    /// Bring settings across from another dictation app.
+    Import {
+        #[command(subcommand)]
+        command: crate::voxtype_import::ImportCommand,
+    },
     /// Transcribe a WAV file with the current engine and print the text.
     #[command(hide = true)]
     TranscribeFile {
@@ -113,6 +118,7 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
     // Keys and file transcription need no log, lock, or running Hex.
     let command = match command {
         Command::Keys { command } => std::process::exit(crate::keys::run_cli(&command)),
+        Command::Import { command } => std::process::exit(crate::voxtype_import::run_cli(&command)),
         Command::TranscribeFile { path } => {
             std::process::exit(crate::transcription::cloud::transcribe_file_cli(&path))
         }
@@ -176,7 +182,11 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
             }
             Ok(())
         }
-        Command::Control(_) | Command::Stop | Command::Keys { .. } | Command::TranscribeFile { .. } => {
+        Command::Control(_)
+        | Command::Stop
+        | Command::Keys { .. }
+        | Command::Import { .. }
+        | Command::TranscribeFile { .. } => {
             unreachable!("handled before logging")
         }
     }
