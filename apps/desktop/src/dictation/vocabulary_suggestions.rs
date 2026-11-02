@@ -144,14 +144,15 @@ pub fn from_replacements(
     found
 }
 
-/// Signal 2: how often each replacement output was produced by a rule that
-/// fired in History: its phrase is in `raw_text` and the output is in
-/// `final_text`. Keyed by the output in lowercase.
+/// Signal 2: in how many dictations a replacement fired, per output: the
+/// phrase is in `raw_text` (changed) and the output is in `final_text`. A
+/// dictation counts once per output however many rules or matches fired in
+/// it. Keyed by the output in lowercase.
 pub fn replacement_firings(
     rules: &[TextReplacement],
     history: &[HistoryEntry],
 ) -> HashMap<String, u32> {
-    let mut counts: HashMap<String, u32> = HashMap::new();
+    let mut dictations: HashMap<String, std::collections::HashSet<usize>> = HashMap::new();
     for rule in rules {
         let Some(term) = term_of(rule) else { continue };
         let phrase = clean(&rule.matched_phrase);
@@ -166,25 +167,25 @@ pub fn replacement_firings(
         .build() else {
             continue;
         };
-        let fired: u32 = history
-            .iter()
-            .filter(|entry| entry.raw_text != entry.final_text)
-            .filter(|entry| entry.final_text.contains(&term))
-            .map(|entry| {
-                // A match already spelled as the output wasn't changed.
-                let changed = matcher
+        for (index, entry) in history.iter().enumerate() {
+            // A match already spelled as the output wasn't changed.
+            if entry.raw_text != entry.final_text
+                && entry.final_text.contains(&term)
+                && matcher
                     .captures_iter(&entry.raw_text)
-                    .filter(|found| found.get(1).is_some_and(|text| text.as_str() != term))
-                    .count();
-                u32::try_from(changed).unwrap_or(u32::MAX)
-            })
-            .fold(0, u32::saturating_add);
-        if fired > 0 {
-            let total = counts.entry(term.to_lowercase()).or_insert(0);
-            *total = total.saturating_add(fired);
+                    .any(|found| found.get(1).is_some_and(|text| text.as_str() != term))
+            {
+                dictations
+                    .entry(term.to_lowercase())
+                    .or_default()
+                    .insert(index);
+            }
         }
     }
-    counts
+    dictations
+        .into_iter()
+        .map(|(term, seen)| (term, u32::try_from(seen.len()).unwrap_or(u32::MAX)))
+        .collect()
 }
 
 /// A tiny list of very common words that are capitalised or look unusual
@@ -318,7 +319,8 @@ fn looks_unusual(word: &str, sentence_start: bool) -> bool {
 }
 
 /// Signal 3: words from `final_text` that recur at least [`MIN_RECURRENCES`]
-/// times, look unusual and aren't in the Vocabulary. Most frequent first.
+/// times, look unusual and aren't in the Vocabulary. Most frequent first;
+/// [`local`] applies the [`MAX_RECURRING`] cap after dismissals.
 pub fn recurring_words(
     history: &[HistoryEntry],
     vocabulary: &[VocabularyEntry],
@@ -359,7 +361,6 @@ pub fn recurring_words(
             .cmp(&right.rank())
             .then(left.word.cmp(&right.word))
     });
-    found.truncate(MAX_RECURRING);
     found
 }
 
@@ -380,7 +381,20 @@ pub fn local(
     }
     all.extend(recurring_words(history, vocabulary));
     all.sort_by_key(Suggestion::rank);
+    // Cap the recurring words after dismissals, so dismissed ones don't
+    // use up the slots.
+    let mut recurring = 0;
     filter_known(all, vocabulary, dismissed)
+        .into_iter()
+        .filter(|suggestion| {
+            if matches!(suggestion.reason, Reason::Recurring { .. }) {
+                recurring += 1;
+                recurring <= MAX_RECURRING
+            } else {
+                true
+            }
+        })
+        .collect()
 }
 
 /// Adds `word` to the end of `dismissed`, once and within the cap.

@@ -221,3 +221,27 @@ fn suggest_with_no_transcripts_sends_nothing() {
     );
     assert!(net.sent.lock().unwrap().is_empty());
 }
+
+#[test]
+fn json_is_found_with_nested_objects_fences_and_brackets_in_strings() {
+    let nested = "Sure!\n```json\n[{\"word\": \"Foo\", \"reason\": \"see [1] and {x}\", \"extra\": {\"a\": [1, 2]}}]\n```\nHope that helps [really].";
+    let found = parse_guesses(nested, &[], &[]);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].word, "Foo");
+    let wrapped = "{\"words\": [{\"word\": \"Bar\"}]} trailing ]";
+    assert_eq!(parse_guesses(wrapped, &[], &[])[0].word, "Bar");
+    assert!(parse_guesses("[note] nothing here", &[], &[]).is_empty());
+}
+
+#[test]
+fn a_huge_vocabulary_is_capped_in_the_request() {
+    let vocabulary: Vec<VocabularyEntry> = (0..5_000)
+        .map(|i| term(&format!("word{i:04}xxxxxxxx")))
+        .collect();
+    let body = request_body("m", "hello", &vocabulary).to_string();
+    assert!(body.len() < 4_000 + MAX_VOCABULARY_CHARS);
+    assert!(body.contains("word0000"));
+    assert!(!body.contains("word4999"));
+    let long = [term(&"a".repeat(10_000))];
+    assert!(request_body("m", "hi", &long).to_string().len() < 2_500);
+}

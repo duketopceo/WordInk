@@ -21,6 +21,8 @@ const OPENROUTER_MODEL: &str = "meta-llama/llama-3.1-8b-instruct";
 const MAX_WORD_CHARS: usize = 64;
 const MAX_REASON_CHARS: usize = 160;
 const MAX_VOCABULARY_SENT: usize = 200;
+/// The vocabulary list sent, in characters (terms are cut off past this).
+const MAX_VOCABULARY_CHARS: usize = 2_000;
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Keys and the one HTTP call this feature makes.
@@ -99,10 +101,15 @@ const INSTRUCTION: &str = "You review speech-to-text transcripts. Find up to 10 
 
 /// The chat request body: the instruction, the vocabulary, the transcripts.
 pub fn request_body(model: &str, transcripts: &str, vocabulary: &[VocabularyEntry]) -> Value {
+    let mut chars = 0;
     let terms: Vec<&str> = vocabulary
         .iter()
         .take(MAX_VOCABULARY_SENT)
         .map(|entry| entry.term.as_str())
+        .take_while(|term| {
+            chars += term.chars().count() + 2;
+            chars <= MAX_VOCABULARY_CHARS
+        })
         .collect();
     json!({
         "model": model,
@@ -129,27 +136,23 @@ fn clip(text: &str, limit: usize) -> String {
 }
 
 /// The JSON inside a model's text: bare, in a code fence, or after a line of
-/// talk. An array, or an object holding one.
+/// talk. An array, or an object holding one. Each `[` or `{` is tried as the
+/// start of a value, and the parser finds where it ends, so nested objects
+/// and brackets inside strings are fine.
 fn extract_json(content: &str) -> Option<Value> {
-    let content = content.trim();
-    let mut tries: Vec<&str> = vec![content];
-    if let (Some(open), Some(close)) = (content.find('['), content.rfind(']'))
-        && open < close
-    {
-        tries.push(&content[open..=close]);
-    }
-    if let (Some(open), Some(close)) = (content.find('{'), content.rfind('}'))
-        && open < close
-    {
-        tries.push(&content[open..=close]);
-    }
-    tries
-        .into_iter()
-        .filter_map(|text| serde_json::from_str::<Value>(text).ok())
-        .find_map(|value| match value {
-            Value::Array(_) => Some(value),
-            Value::Object(object) => object.into_values().find(Value::is_array),
-            _ => None,
+    content
+        .char_indices()
+        .filter(|(_, character)| matches!(character, '[' | '{'))
+        .find_map(|(start, _)| {
+            let value = serde_json::Deserializer::from_str(&content[start..])
+                .into_iter::<Value>()
+                .next()?
+                .ok()?;
+            match value {
+                Value::Array(_) => Some(value),
+                Value::Object(object) => object.into_values().find(Value::is_array),
+                _ => None,
+            }
         })
 }
 

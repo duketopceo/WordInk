@@ -74,8 +74,49 @@ fn history_counts_the_times_a_replacement_fired() {
         entry("Omarchy", "Omarchy"),
     ];
     let counts = replacement_firings(&rules, &history);
-    assert_eq!(counts.get("omarchy"), Some(&3));
+    // Per dictation: the second entry has two matches but counts once.
+    assert_eq!(counts.get("omarchy"), Some(&2));
     assert_eq!(counts.get("dax"), None);
+}
+
+#[test]
+fn firings_count_a_dictation_once_across_rules_sharing_an_output() {
+    let rules = [rule("omarky", "Omarchy"), rule("omarkie", "Omarchy")];
+    let history = [entry("omarky and omarkie", "Omarchy and Omarchy")];
+    assert_eq!(
+        replacement_firings(&rules, &history).get("omarchy"),
+        Some(&1)
+    );
+}
+
+#[test]
+fn merging_replacements_keeps_the_reason_and_adds_sounds_like() {
+    let rules = [rule("omarky", "Omarchy"), rule("omarkie", "Omarchy")];
+    let found = from_replacements(&rules, &[]);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].reason, Reason::Replacement { fired: 0 });
+    assert_eq!(found[0].sounds_like, ["omarky", "omarkie"]);
+}
+
+#[test]
+fn the_recurring_cap_applies_after_dismissals() {
+    // 25 words, each seen 3 times; word i is seen (100 - i) times for order.
+    let mut texts_in = Vec::new();
+    for i in 0..25 {
+        let word = format!("Zq{}x", (b'a' + i as u8) as char);
+        for _ in 0..(100 - i) {
+            texts_in.push(format!("we use {word} often"));
+        }
+    }
+    let history: Vec<HistoryEntry> = texts_in.iter().map(|t| entry(t, t)).collect();
+    let dismissed: Vec<String> = (0..5)
+        .map(|i| format!("Zq{}x", (b'a' + i as u8) as char))
+        .collect();
+    let found = local(&[], &history, &[], &dismissed);
+    assert_eq!(found.len(), MAX_RECURRING);
+    assert_eq!(found[0].word, "Zqfx");
+    let none = local(&[], &history, &[], &[]);
+    assert_eq!(none.len(), MAX_RECURRING);
 }
 
 #[test]
