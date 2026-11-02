@@ -49,7 +49,7 @@ pub fn host(url: &str) -> String {
 /// Why a request failed, in a person's words, without the URL.
 pub fn reason(error: &ureq::Error) -> String {
     match error {
-        ureq::Error::StatusCode(407) => "the proxy needs a sign-in Hex can't give".into(),
+        ureq::Error::StatusCode(407) => "the proxy needs a sign-in WordInk can't give".into(),
         ureq::Error::StatusCode(code) => format!("the server answered HTTP {code}"),
         ureq::Error::HostNotFound => "the name couldn't be looked up (DNS)".into(),
         ureq::Error::ConnectProxyFailed(detail) => format!("the proxy refused ({detail})"),

@@ -191,7 +191,7 @@ pub(crate) fn ready(
                     .gap(10.0)
                     .items_center()
                     .child(
-                        text(tr("Hex is ready"))
+                        text(tr("WordInk is ready"))
                             .key("title")
                             .font(title_font(p))
                             .color(p.text()),

@@ -249,7 +249,7 @@ impl BrowserTap {
         let description = unsafe {
             let description =
                 CATapDescription::initMonoMixdownOfProcesses(CATapDescription::alloc(), &processes);
-            description.setName(&NSString::from_str("Hex browser level"));
+            description.setName(&NSString::from_str("WordInk browser level"));
             description.setPrivate(true);
             description.setMuteBehavior(CATapMuteBehavior::Unmuted);
             description
@@ -271,8 +271,8 @@ impl BrowserTap {
         let tap_uid = unsafe { description.UUID() }.UUIDString();
         source.aggregate = crate::meeting::create_tap_aggregate(
             &tap_uid,
-            "Hex Browser Level",
-            &format!("anomaly.hex.browser-tap.{}", std::process::id()),
+            "WordInk Browser Level",
+            &format!("io.github.duketopceo.wordink.browser-tap.{}", std::process::id()),
         )?;
         let peak = source.peak.clone();
         let callbacks = source.callbacks.clone();

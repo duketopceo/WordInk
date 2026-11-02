@@ -38,7 +38,7 @@ impl MouseCapture {
         let mut ancestor = window;
         loop {
             if ancestor == root || ancestor <= 1 {
-                return Err(eyre!("Hex must be focused to record a mouse shortcut"));
+                return Err(eyre!("WordInk must be focused to record a mouse shortcut"));
             }
             let property = connection
                 .get_property(
@@ -52,7 +52,7 @@ impl MouseCapture {
                 .reply()?;
             if let Some(pid) = property.value32().and_then(|mut values| values.next()) {
                 if pid != std::process::id() {
-                    return Err(eyre!("Hex must be focused to record a mouse shortcut"));
+                    return Err(eyre!("WordInk must be focused to record a mouse shortcut"));
                 }
                 break;
             }
@@ -115,7 +115,7 @@ impl MouseCapture {
                     || event.event_x as u16 >= size.width
                     || event.event_y as u16 >= size.height
                 {
-                    return Err(eyre!("Shortcut recording clicked outside Hex"));
+                    return Err(eyre!("Shortcut recording clicked outside WordInk"));
                 }
                 let Some(key) = mouse_name(event.detail) else {
                     continue;
@@ -261,7 +261,7 @@ impl LinuxHotkey {
     pub(crate) fn portal_trigger(&self) -> Result<String> {
         if mouse_button(&self.key).is_some() {
             return Err(eyre!(
-                "Wayland's shortcuts portal cannot request mouse buttons; bind the hex commands in the desktop settings"
+                "Wayland's shortcuts portal cannot request mouse buttons; bind the wordink commands in the desktop settings"
             ));
         }
         let key = keysym_name(&self.key)?;
@@ -1157,7 +1157,7 @@ impl Backend {
         if let Err(error) = portal.forget_legacy_kde_shortcuts(&keep) {
             tracing::warn!(
                 error = format!("{error:#}"),
-                "could not remove Hex's old shortcuts from KDE"
+                "could not remove WordInk's old shortcuts from KDE"
             );
         }
         // GNOME asks for approval whenever Hex binds shortcuts it hasn't
@@ -1168,7 +1168,7 @@ impl Backend {
             Err(error) if self.stopping() => return Err(error),
             Err(error) => {
                 return Err(error.wrap_err(
-                    "the desktop did not approve Hex's shortcuts; choose Enable to ask again",
+                    "the desktop did not approve WordInk's shortcuts; choose Enable to ask again",
                 ));
             }
         };
@@ -1191,13 +1191,13 @@ impl Backend {
                 None if shortcut.unconfirmed => {
                     tracing::info!(
                         name = %shortcut.name,
-                        "the desktop assigns this Hex shortcut's key itself; Hex cannot confirm it"
+                        "the desktop assigns this WordInk shortcut's key itself; WordInk cannot confirm it"
                     );
                 }
                 None => {
                     tracing::warn!(
                         name = %shortcut.name,
-                        "the desktop did not grant a Hex shortcut"
+                        "the desktop did not grant a WordInk shortcut"
                     );
                 }
                 Some(_) => {}
@@ -1244,7 +1244,7 @@ impl Backend {
                         dispatcher.keys.released_all();
                         dispatcher.input(Input::Lost);
                         let _ = dispatcher.flush();
-                        return Err(eyre!("the desktop closed Hex's shortcuts portal session"));
+                        return Err(eyre!("the desktop closed WordInk's shortcuts portal session"));
                     }
                 };
                 dispatcher.input(input);
@@ -1273,7 +1273,7 @@ impl Backend {
         {
             tracing::warn!(
                 error = format!("{error:#}"),
-                "could not clear Hex's shortcuts from the desktop"
+                "could not clear WordInk's shortcuts from the desktop"
             );
         }
         Ok(())

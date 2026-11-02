@@ -59,11 +59,11 @@ pub fn call_developer(
     let (status, body) = post_json("/dev/control", &body, DEVELOPER_CONTROL_TIMEOUT, 64 * 1024)?;
     if status != 200 {
         bail!(
-            "Hex developer control failed: {}",
+            "WordInk developer control failed: {}",
             error_code(status, &body)
         );
     }
-    serde_json::from_slice(&body).wrap_err("Hex developer response is invalid")
+    serde_json::from_slice(&body).wrap_err("WordInk developer response is invalid")
 }
 
 /// Sends one `hex` control request to the running app.
@@ -83,17 +83,17 @@ pub fn call_control(
         let code = error_code(status, &body);
         bail!(match code.as_str() {
             "control-unavailable" => {
-                "the running Hex doesn't accept control commands; update Hex".to_string()
+                "the running WordInk doesn't accept control commands; update WordInk".to_string()
             }
-            "control-busy" => "Hex is busy with other control commands; try again".into(),
-            "control-timeout" => "Hex didn't answer in time; check `hex status`".into(),
+            "control-busy" => "WordInk is busy with other control commands; try again".into(),
+            "control-timeout" => "WordInk didn't answer in time; check `wordink status`".into(),
             "invalid-control-command" => {
-                "the running Hex doesn't know this command; update Hex".into()
+                "the running WordInk doesn't know this command; update WordInk".into()
             }
-            _ => format!("Hex refused the request ({code})"),
+            _ => format!("WordInk refused the request ({code})"),
         });
     }
-    serde_json::from_slice(&body).wrap_err("Hex sent an invalid control reply")
+    serde_json::from_slice(&body).wrap_err("WordInk sent an invalid control reply")
 }
 
 /// The running app's process id, if its local API is live.
@@ -107,16 +107,16 @@ pub(super) fn live_discovery() -> Result<DiscoveryDocument> {
     let bytes = match fs::read(&path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            bail!("Hex is not running")
+            bail!("WordInk is not running")
         }
         Err(error) => {
             return Err(error).wrap_err_with(|| format!("could not read {}", path.display()));
         }
     };
     let document: DiscoveryDocument =
-        serde_json::from_slice(&bytes).wrap_err("Hex's local API discovery file is invalid")?;
+        serde_json::from_slice(&bytes).wrap_err("WordInk's local API discovery file is invalid")?;
     if !valid_discovery(&document) || !discovery_is_live(&document) {
-        bail!("Hex is not running");
+        bail!("WordInk is not running");
     }
     Ok(document)
 }
@@ -130,7 +130,7 @@ pub(super) fn post_json(
     let document = live_discovery()?;
     let address = SocketAddr::from(([127, 0, 0, 1], document.port));
     let mut stream = TcpStream::connect_timeout(&address, CONNECTION_TIMEOUT)
-        .wrap_err("could not connect to Hex's local API")?;
+        .wrap_err("could not connect to WordInk's local API")?;
     stream.set_read_timeout(Some(read_timeout))?;
     stream.set_write_timeout(Some(CONNECTION_TIMEOUT))?;
     write!(
@@ -146,12 +146,12 @@ pub(super) fn post_json(
     (&mut stream)
         .take(max_response as u64 + 1)
         .read_to_end(&mut response)
-        .wrap_err("Hex didn't answer")?;
+        .wrap_err("WordInk didn't answer")?;
     if response.len() > max_response {
-        bail!("Hex's response is too large");
+        bail!("WordInk's response is too large");
     }
     let Some(header_end) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
-        bail!("Hex's response is malformed");
+        bail!("WordInk's response is malformed");
     };
     let headers = std::str::from_utf8(&response[..header_end])?;
     let status = headers
@@ -159,7 +159,7 @@ pub(super) fn post_json(
         .next()
         .and_then(|line| line.split_ascii_whitespace().nth(1))
         .and_then(|status| status.parse::<u16>().ok())
-        .ok_or_else(|| eyre!("Hex's response has no HTTP status"))?;
+        .ok_or_else(|| eyre!("WordInk's response has no HTTP status"))?;
     Ok((status, response.split_off(header_end + 4)))
 }
 

@@ -145,7 +145,7 @@ fn a_mouse_shortcut_on_wayland_explains_the_desktop_command_route() {
     assert!(
         shown
             .iter()
-            .any(|text| text.contains("Wayland desktop using the hex commands"))
+            .any(|text| text.contains("Wayland desktop using the wordink commands"))
     );
     assert!(!shown.iter().any(|text| text.contains("config.kdl")));
 }
@@ -193,7 +193,7 @@ fn an_unconfirmed_portal_shortcut_is_not_called_refused() {
     assert!(
         shown
             .iter()
-            .any(|text| text == "Your desktop assigns this key itself, so Hex can't confirm it")
+            .any(|text| text == "Your desktop assigns this key itself, so WordInk can't confirm it")
     );
     assert!(
         !shown
@@ -245,7 +245,7 @@ fn each_panes_advanced_fold_starts_closed_and_stays_its_own() {
 #[test]
 fn desktops_without_a_portal_list_commands_instead_of_recording_rows() {
     let rt = runtime("commands", true, GOLDEN_SIZE);
-    assert!(texts(&rt).iter().any(|text| text == "hex dictation toggle"));
+    assert!(texts(&rt).iter().any(|text| text == "wordink dictation toggle"));
     assert!(rt.find("dictation-hotkey").is_none());
     assert!(rt.find("paste-last-hotkey").is_none());
 }
@@ -1279,7 +1279,7 @@ fn mode_corrections_and_names_save_from_their_fields() {
         .iter()
         .map(|r| r.matched_phrase.clone())
         .collect();
-    assert_eq!(phrases, ["hex app", "dax"]);
+    assert_eq!(phrases, ["wordink app", "dax"]);
 }
 
 #[test]
@@ -1910,7 +1910,7 @@ fn onboarding_downloads_the_model_through_the_service() {
             ..
         }]
     ));
-    assert!(texts(&rt).contains(&"Setting up Hex".to_owned()));
+    assert!(texts(&rt).contains(&"Setting up WordInk".to_owned()));
     // The service finishes: the model is installed and the practice opens.
     rt.state.picker.installed = Some(vec![TranscriptionModelId::ParakeetUnifiedEnglish]);
     settle(&mut rt);
@@ -1921,7 +1921,7 @@ fn onboarding_downloads_the_model_through_the_service() {
     // The practice can be left with Done; Start using Hex closes onboarding.
     tap(&mut rt, "done");
     tap(&mut rt, "start-using-hex");
-    assert!(rt.state.tour.is_none(), "Start using Hex closes setup");
+    assert!(rt.state.tour.is_none(), "Start using WordInk closes setup");
     assert!(rt.state.first_run.is_none());
 }
 
@@ -1943,7 +1943,7 @@ fn a_found_model_moves_on_without_a_download_and_back_returns_to_it() {
         shown.contains(&"Choose a speech model".to_owned()),
         "{shown:?}"
     );
-    assert!(!shown.contains(&"Setting up Hex".to_owned()), "{shown:?}");
+    assert!(!shown.contains(&"Setting up WordInk".to_owned()), "{shown:?}");
     assert!(
         shown.contains(&"Parakeet Unified English".to_owned()),
         "the rows stay"
@@ -1953,7 +1953,7 @@ fn a_found_model_moves_on_without_a_download_and_back_returns_to_it() {
     settle(&mut rt);
     let s = rt.state.first_run.as_ref().unwrap();
     assert!(s.had_model, "a model here needs no download pill");
-    assert!(!texts(&rt).contains(&"Setting up Hex".to_owned()));
+    assert!(!texts(&rt).contains(&"Setting up WordInk".to_owned()));
     // Back returns to the list to change the pick.
     tap(&mut rt, "back");
     assert!(rt.find("model-list").is_some());
@@ -2003,7 +2003,7 @@ fn with_no_model_found_onboarding_downloads_the_recommended_model_with_no_list()
         let shown = texts(&rt);
         assert!(rt.find("model-list").is_none(), "{scene}: no model list");
         assert!(
-            shown.contains(&"Setting up Hex".to_owned()),
+            shown.contains(&"Setting up WordInk".to_owned()),
             "{scene}: {shown:?}"
         );
         assert!(
@@ -2054,7 +2054,7 @@ fn the_microphone_field_names_the_input_in_use() {
 
 #[test]
 fn a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone() {
-    let note = "MacBook Pro Microphone is off while the lid is closed, so Hex listens to Studio Display Microphone";
+    let note = "MacBook Pro Microphone is off while the lid is closed, so WordInk listens to Studio Display Microphone";
     let field = |rt: &Runtime<Ui>| element(rt, "microphone-control").label;
     let mut rt = runtime("mac-microphone-lid-closed", true, PANE_SIZE);
     assert_eq!(
@@ -2081,7 +2081,7 @@ fn a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone() {
 
 #[test]
 fn a_passed_over_bluetooth_default_names_the_input_in_use() {
-    let note = "Kit Pods is Bluetooth, so Hex listens to MacBook Pro Microphone";
+    let note = "Kit Pods is Bluetooth, so WordInk listens to MacBook Pro Microphone";
     let mut rt = runtime("mac-microphone-bluetooth", true, TALL_SIZE);
     assert_eq!(
         element(&rt, "microphone-control").label.as_deref(),

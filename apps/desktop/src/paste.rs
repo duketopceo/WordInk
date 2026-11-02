@@ -329,7 +329,7 @@ impl Paster {
                     snapshot
                 };
                 if self.clipboard.changeCount() != previous_change_count {
-                    return Err(eyre!("clipboard changed while Hex was preserving it"));
+                    return Err(eyre!("clipboard changed while WordInk was preserving it"));
                 }
                 Ok((restore, previous, previous_change_count))
             },

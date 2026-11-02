@@ -116,7 +116,7 @@ pub(super) fn reveal(ui: &mut Ui, name: Option<&str>, tx: &mut Tx) {
             tx.scroll_center(row_key(feature));
             tx.wake_after(FLASH);
         }
-        None => tracing::warn!(feature = name, "a Labs link named no feature this Hex has"),
+        None => tracing::warn!(feature = name, "a Labs link named no feature this WordInk has"),
     }
 }
 
@@ -204,7 +204,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
             Feature::SubtitleExport,
             &HINTS,
             tr("Subtitle export"),
-            tr("Export meeting transcripts as SRT or VTT subtitles with hex meetings show"),
+            tr("Export meeting transcripts as SRT or VTT subtitles with wordink meetings show"),
         ));
     }
     rows.push(row(
@@ -232,7 +232,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
             Feature::PauseBrowser,
             &GLOBE,
             tr("Also pause the browser"),
-            tr("While dictating with Pause media: YouTube and other tabs, resumed only if Hex paused them"),
+            tr("While dictating with Pause media: YouTube and other tabs, resumed only if WordInk paused them"),
         ));
         rows.push(row(
             Feature::KeepOnClipboard,
@@ -327,7 +327,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         Feature::HistoryStats,
         &HINTS,
         tr("Dictation stats"),
-        tr("Show a summary of your retained dictations at the top of History, with hex history stats"),
+        tr("Show a summary of your retained dictations at the top of History, with wordink history stats"),
     ));
     rows.push(row(
         Feature::PickerSortFilter,

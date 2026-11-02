@@ -12,8 +12,8 @@ pub fn is_local_build() -> bool {
     option_env!("HEX_LOCAL_BUILD") == Some("1")
 }
 
-/// Whether this is a macOS `Hex Test.app` build (`HEX_TEST_BUILD=1`), which
-/// keeps its data, settings, and user config apart from the installed Hex.
+/// Whether this is a macOS `WordInk Test.app` build (`HEX_TEST_BUILD=1`), which
+/// keeps its data, settings, and user config apart from the installed WordInk.
 pub fn is_macos_test_build() -> bool {
     cfg!(target_os = "macos") && option_env!("HEX_TEST_BUILD") == Some("1")
 }
@@ -22,9 +22,9 @@ pub fn is_macos_test_build() -> bool {
 #[cfg(target_os = "macos")]
 pub fn app_name() -> &'static str {
     if is_macos_test_build() {
-        "Hex Test"
+        "WordInk Test"
     } else {
-        "Hex"
+        "WordInk"
     }
 }
 
@@ -35,9 +35,9 @@ pub fn support_dir() -> Result<PathBuf> {
     let data =
         dirs::data_dir().ok_or_else(|| eyre!("application data directory is unavailable"))?;
     let folder = if is_macos_test_build() {
-        "hex-test"
+        "wordink-test"
     } else {
-        "hex"
+        "wordink"
     };
     Ok(data.join(folder))
 }
@@ -104,7 +104,7 @@ pub fn personal_commands_workspace() -> Result<PathBuf> {
     user_config_dir()
 }
 
-/// The per-user config folder holding `hex.config.ts` on every OS: `~/.config/hex`, or `~/.config/hex-test` for `Hex Test.app`.
+/// The per-user config folder holding `hex.config.ts` on every OS: `~/.config/wordink`, or `~/.config/wordink-test` for `WordInk Test.app`.
 fn user_config_dir() -> Result<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| eyre!("home directory is unavailable"))?;
     Ok(user_config_dir_in(&home, is_macos_test_build()))
@@ -112,7 +112,11 @@ fn user_config_dir() -> Result<PathBuf> {
 
 fn user_config_dir_in(home: &std::path::Path, test_build: bool) -> PathBuf {
     home.join(".config")
-        .join(if test_build { "hex-test" } else { "hex" })
+        .join(if test_build {
+            "wordink-test"
+        } else {
+            "wordink"
+        })
 }
 
 #[cfg(test)]
@@ -120,15 +124,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_data_folder_is_wordink_not_hex() {
+        if std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_none() {
+            let dir = support_dir().unwrap();
+            assert_eq!(dir.file_name().unwrap(), "wordink");
+        }
+    }
+
+    #[test]
     fn each_build_has_its_own_config_folder() {
         let home = std::path::Path::new("/Users/kit");
         assert_eq!(
             user_config_dir_in(home, false),
-            home.join(".config").join("hex")
+            home.join(".config").join("wordink")
         );
         assert_eq!(
             user_config_dir_in(home, true),
-            home.join(".config").join("hex-test")
+            home.join(".config").join("wordink-test")
         );
     }
 }

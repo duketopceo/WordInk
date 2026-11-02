@@ -581,7 +581,7 @@ fn grantable(state: PermissionState) -> bool {
 }
 
 /// Bundle identifiers of older macOS Hex releases (2.3.1 and the Swift app)
-/// whose stale TCC rows can shadow or confuse grants for `anomaly.hex`.
+/// whose stale TCC rows can shadow or confuse grants for `io.github.duketopceo.wordink`.
 pub const LEGACY_MAC_BUNDLE_IDS: [&str; 3] = [
     "com.kitlangton.hex2",
     "com.kitlangton.Hex",
@@ -640,9 +640,9 @@ pub fn classify_tccutil_reset(code: Option<i32>, stderr: &str) -> TccResetOutcom
 /// unavailable (such as a loose binary).
 pub fn default_mac_bundle_id(test_build: Option<&str>) -> &'static str {
     if test_build == Some("1") {
-        "anomaly.hex.test"
+        "io.github.duketopceo.wordink.test"
     } else {
-        "anomaly.hex"
+        "io.github.duketopceo.wordink"
     }
 }
 
@@ -871,7 +871,7 @@ pub(crate) fn completion_recorded_at(directory: &Path) -> bool {
     true
 }
 
-/// Once per settings file from before `anomaly.hex` (2.3.1 shared the `hex`
+/// Once per settings file from before `io.github.duketopceo.wordink` (2.3.1 shared the `hex`
 /// folder): macOS gave the new identity none of the old grants, so setup
 /// that is not ready at launch reopens the tour instead of counting the old
 /// completion. Setup that is ready changes nothing.
@@ -1190,7 +1190,7 @@ mod tests {
             ("HEXAGON", "no"),
         ]
         .map(|(key, value)| (key.into(), value.into()));
-        let arguments = relaunch_arguments(42, Path::new("/Applications/Hex.app"), vars);
+        let arguments = relaunch_arguments(42, Path::new("/Applications/WordInk.app"), vars);
         let arguments = arguments
             .iter()
             .map(|argument| argument.to_str().unwrap())
@@ -1208,7 +1208,7 @@ mod tests {
                 "HEX_EXPERIMENTAL_MIC=a=b,c",
                 "--env",
                 "HEX_RETAIN_DICTATION_AUDIO=1",
-                "/Applications/Hex.app",
+                "/Applications/WordInk.app",
             ]
         );
     }
@@ -2024,9 +2024,9 @@ mod tests {
                 "com.kitlangton.Hex.debug"
             ]
         );
-        assert_eq!(default_mac_bundle_id(None), "anomaly.hex");
-        assert_eq!(default_mac_bundle_id(Some("0")), "anomaly.hex");
-        assert_eq!(default_mac_bundle_id(Some("1")), "anomaly.hex.test");
+        assert_eq!(default_mac_bundle_id(None), "io.github.duketopceo.wordink");
+        assert_eq!(default_mac_bundle_id(Some("0")), "io.github.duketopceo.wordink");
+        assert_eq!(default_mac_bundle_id(Some("1")), "io.github.duketopceo.wordink.test");
 
         assert_eq!(
             own_tcc_services(PermissionKind::Accessibility),

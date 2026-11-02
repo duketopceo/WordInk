@@ -140,7 +140,7 @@ pub fn restart() {
     if crate::desktop::onboarding::spawn_relaunch() {
         crate::macos_rune::quit();
     } else {
-        tracing::warn!("could not restart Hex for a capture permission");
+        tracing::warn!("could not restart WordInk for a capture permission");
     }
 }
 

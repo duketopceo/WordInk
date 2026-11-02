@@ -167,7 +167,7 @@ fn test_build_commit() {
 fn embed_windows_resources() {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let output_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    let icon = manifest_dir.join("resources/windows/hex.ico");
+    let icon = manifest_dir.join("resources/windows/wordink.ico");
     println!("cargo:rerun-if-changed={}", icon.display());
     let version = std::env::var("CARGO_PKG_VERSION").unwrap();
     let numeric = version
@@ -191,12 +191,12 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "FileDescription", "Hex"
-      VALUE "ProductName", "Hex"
+      VALUE "FileDescription", "WordInk"
+      VALUE "ProductName", "WordInk"
       VALUE "FileVersion", "{version}"
       VALUE "ProductVersion", "{version}"
-      VALUE "OriginalFilename", "hex.exe"
-      VALUE "InternalName", "hex"
+      VALUE "OriginalFilename", "wordink.exe"
+      VALUE "InternalName", "wordink"
     END
   END
   BLOCK "VarFileInfo"
@@ -207,7 +207,7 @@ END
 "#,
         icon = icon.display().to_string().replace('\\', "/"),
     );
-    let resource = output_dir.join("hex.rc");
+    let resource = output_dir.join("wordink.rc");
     std::fs::write(&resource, script).expect("write the Windows resource script");
     embed_resource::compile(&resource, embed_resource::NONE)
         .manifest_optional()

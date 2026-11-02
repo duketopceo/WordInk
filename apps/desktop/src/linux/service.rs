@@ -36,7 +36,7 @@ const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CLIENTS: usize = 8;
 /// A send waits for the router's answer (it waits 8 s itself).
 const SEND_WAIT: Duration = Duration::from_secs(10);
-const UNIT: &str = "hex.service";
+const UNIT: &str = "wordink.service";
 /// How long a launch waits for a started unit's socket. `Type=notify`
 /// units are ready when `systemctl start` returns; units an older installer
 /// wrote are `Type=simple` and need the wait.
@@ -249,11 +249,11 @@ pub(crate) fn route_shortcut(
     command: ShortcutCommand,
 ) -> Result<()> {
     let route = route
-        .ok_or_else(|| eyre!("Hex is not listening; enable it in Settings or run `hex start`"))?;
+        .ok_or_else(|| eyre!("WordInk is not listening; enable it in Settings or run `wordink start`"))?;
     route
         .commands
         .try_send(command.into())
-        .map_err(|_| eyre!("Hex is busy; try again"))
+        .map_err(|_| eyre!("WordInk is busy; try again"))
 }
 
 /// What the socket reads without waiting on the host or the window: the
@@ -303,7 +303,7 @@ fn private_directory(path: &Path) -> Result<()> {
     fs::create_dir_all(path)?;
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.is_dir() || metadata.uid() != unsafe { libc::geteuid() } {
-        bail!("Hex requires a user-owned, non-symlink data directory");
+        bail!("WordInk requires a user-owned, non-symlink data directory");
     }
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
     Ok(())
@@ -322,7 +322,7 @@ fn check_peer(stream: &UnixStream) -> Result<()> {
         )
     };
     if result != 0 || credentials.uid != unsafe { libc::geteuid() } {
-        bail!("Hex only accepts local IPC from the same user");
+        bail!("WordInk only accepts local IPC from the same user");
     }
     Ok(())
 }
@@ -331,11 +331,11 @@ fn read_exact(stream: &mut UnixStream, mut bytes: &mut [u8], deadline: Instant) 
     while !bytes.is_empty() {
         let remaining = deadline
             .checked_duration_since(Instant::now())
-            .ok_or_else(|| eyre!("Hex read timed out"))?;
+            .ok_or_else(|| eyre!("WordInk read timed out"))?;
         stream.set_read_timeout(Some(remaining))?;
         let count = stream.read(bytes)?;
         if count == 0 {
-            bail!("Hex disconnected");
+            bail!("WordInk disconnected");
         }
         bytes = &mut bytes[count..];
     }
@@ -352,7 +352,7 @@ fn read_frame_within<T: DeserializeOwned>(stream: &mut UnixStream, wait: Duratio
     read_exact(stream, &mut header, deadline)?;
     let length = u32::from_be_bytes(header) as usize;
     if length == 0 || length > MAX_FRAME {
-        bail!("Invalid Hex frame size");
+        bail!("Invalid WordInk frame size");
     }
     let mut body = vec![0; length];
     read_exact(stream, &mut body, deadline)?;
@@ -362,7 +362,7 @@ fn read_frame_within<T: DeserializeOwned>(stream: &mut UnixStream, wait: Duratio
 fn write_frame<T: Serialize>(stream: &mut UnixStream, message: &T) -> Result<()> {
     let body = serde_json::to_vec(message)?;
     if body.len() > MAX_FRAME {
-        bail!("Hex message exceeds the size limit");
+        bail!("WordInk message exceeds the size limit");
     }
     let deadline = Instant::now() + IO_TIMEOUT;
     write_all(stream, &(body.len() as u32).to_be_bytes(), deadline)?;
@@ -373,11 +373,11 @@ fn write_all(stream: &mut UnixStream, mut bytes: &[u8], deadline: Instant) -> Re
     while !bytes.is_empty() {
         let remaining = deadline
             .checked_duration_since(Instant::now())
-            .ok_or_else(|| eyre!("Hex write timed out"))?;
+            .ok_or_else(|| eyre!("WordInk write timed out"))?;
         stream.set_write_timeout(Some(remaining))?;
         let count = stream.write(bytes)?;
         if count == 0 {
-            bail!("Hex disconnected");
+            bail!("WordInk disconnected");
         }
         bytes = &bytes[count..];
     }
@@ -397,10 +397,10 @@ pub(crate) enum RequestError {
 impl std::fmt::Display for RequestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotRunning => write!(f, "Hex is not running; run `hex start`"),
+            Self::NotRunning => write!(f, "WordInk is not running; run `wordink start`"),
             Self::Outdated => write!(
                 f,
-                "An older Hex is running; quit it or run `hex restart`, then try again"
+                "An older WordInk is running; quit it or run `wordink restart`, then try again"
             ),
             Self::Failed(error) => write!(f, "{error:#}"),
         }
@@ -419,7 +419,7 @@ fn connect() -> std::result::Result<UnixStream, RequestError> {
         || metadata.mode() & 0o077 != 0
     {
         return Err(RequestError::Failed(eyre!(
-            "Refusing an insecure Hex socket"
+            "Refusing an insecure WordInk socket"
         )));
     }
     // A crashed instance leaves its socket behind.
@@ -435,13 +435,13 @@ pub(crate) fn capture(action: crate::control::ScrawlCaptureAction) -> crate::con
         return match exchange(Request::CaptureStatus, SEND_WAIT) {
             Ok(reply) => reply
                 .control
-                .unwrap_or_else(|| ControlReply::error("failed", "Hex did not say how it went")),
+                .unwrap_or_else(|| ControlReply::error("failed", "WordInk did not say how it went")),
             Err(RequestError::NotRunning) => crate::control::cli::not_running(),
             Err(error) => ControlReply::error("failed", format!("{error}")),
         };
     }
     match request(Request::Capture(action)) {
-        Ok(_) => ControlReply::done("Sent to Hex"),
+        Ok(_) => ControlReply::done("Sent to WordInk"),
         Err(error) => ControlReply::error("failed", format!("{error}")),
     }
 }
@@ -464,7 +464,7 @@ pub(crate) fn capture_send(
     match sent {
         Ok(reply) => reply
             .control
-            .unwrap_or_else(|| ControlReply::error("failed", "Hex did not say how it went")),
+            .unwrap_or_else(|| ControlReply::error("failed", "WordInk did not say how it went")),
         Err(error) => ControlReply::error("failed", format!("{error}")),
     }
 }
@@ -473,7 +473,7 @@ pub(crate) fn capture_send(
 pub(crate) fn capture_area(rect: [f64; 4]) -> crate::control::ControlReply {
     use crate::control::ControlReply;
     match request(Request::CaptureArea { rect }) {
-        Ok(_) => ControlReply::done("Sent to Hex"),
+        Ok(_) => ControlReply::done("Sent to WordInk"),
         Err(error) => ControlReply::error("failed", format!("{error}")),
     }
 }
@@ -491,7 +491,7 @@ pub(crate) fn capture_draw() -> crate::control::ControlReply {
 pub(crate) fn capture_undo() -> crate::control::ControlReply {
     use crate::control::ControlReply;
     match request(Request::CaptureUndo) {
-        Ok(_) => ControlReply::done("Asked Hex to take the newest send back"),
+        Ok(_) => ControlReply::done("Asked WordInk to take the newest send back"),
         Err(error) => ControlReply::error("failed", format!("{error}")),
     }
 }
@@ -543,7 +543,7 @@ pub(crate) fn request(request: Request) -> std::result::Result<Status, RequestEr
     let reply = exchange(request, IO_TIMEOUT)?;
     reply
         .status
-        .ok_or_else(|| RequestError::Failed(eyre!("Invalid Hex reply")))
+        .ok_or_else(|| RequestError::Failed(eyre!("Invalid WordInk reply")))
 }
 
 /// One request and its reply, which may take up to `wait`.
@@ -581,14 +581,14 @@ impl Server {
     /// Claims the data root. Fails when another instance holds it.
     pub(crate) fn bind() -> Result<Self> {
         if unsafe { libc::geteuid() } == 0 {
-            bail!("Run Hex as a desktop user, never root");
+            bail!("Run WordInk as a desktop user, never root");
         }
         let path = socket_path()?;
         private_directory(path.parent().unwrap())?;
         let lock = crate::desktop::instance::acquire("service")?;
         if let Ok(metadata) = fs::symlink_metadata(&path) {
             if !metadata.file_type().is_socket() || metadata.uid() != unsafe { libc::geteuid() } {
-                bail!("Refusing to replace an unmanaged Hex socket path");
+                bail!("Refusing to replace an unmanaged WordInk socket path");
             }
             fs::remove_file(&path)?;
         }
@@ -675,7 +675,7 @@ fn serve_client(
                 &Reply {
                     version: VERSION,
                     status: None,
-                    error: Some("Unsupported Hex request; restart Hex".into()),
+                    error: Some("Unsupported WordInk request; restart WordInk".into()),
                     control: None,
                 },
             );
@@ -692,7 +692,7 @@ fn serve_client(
                 if show && caller == *session {
                     control
                         .try_send(Control::Activate(activation))
-                        .map_err(|_| eyre!("Hex is busy; try again"))
+                        .map_err(|_| eyre!("WordInk is busy; try again"))
                 } else {
                     Ok(())
                 }
@@ -735,7 +735,7 @@ fn serve_client(
         let status = published.status.lock().unwrap().clone();
         let error = match (&result, &status) {
             (Err(error), _) => Some(format!("{error:#}")),
-            (Ok(()), None) => Some("Hex is starting; try again".into()),
+            (Ok(()), None) => Some("WordInk is starting; try again".into()),
             (Ok(()), Some(_)) => None,
         };
         if write_frame(
@@ -868,7 +868,7 @@ fn wait_ready() -> Result<Status> {
             Err(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),
             Err(error) => {
                 return Err(eyre!(
-                    "Hex did not become ready ({error}); inspect `journalctl --user -u {}`",
+                    "WordInk did not become ready ({error}); inspect `journalctl --user -u {}`",
                     unit()
                 ));
             }
@@ -916,7 +916,7 @@ pub(crate) fn launch(activation: &Activation, show: bool) -> Result<Launch> {
             restart()?;
         }
         Ok(_) => {
-            bail!("Hex is running in another desktop session; run `hex quit`, then launch it again")
+            bail!("WordInk is running in another desktop session; run `wordink quit`, then launch it again")
         }
         Err(RequestError::Outdated) if supervised() => restart()?,
         Err(RequestError::NotRunning) if supervised() => {
@@ -939,7 +939,7 @@ pub(crate) fn launch(activation: &Activation, show: bool) -> Result<Launch> {
 
 pub(crate) fn restart() -> Result<()> {
     if !supervised() {
-        bail!("Only Hex started by its systemd unit restarts; run `hex quit`, then launch it");
+        bail!("Only WordInk started by its systemd unit restarts; run `wordink quit`, then launch it");
     }
     // Without a desktop (over SSH), keep the one Hex last ran in.
     if graphical_session() || !session_environment_path()?.exists() {
@@ -1017,7 +1017,7 @@ fn session_environment_path() -> Result<PathBuf> {
 
 fn write_session_environment() -> Result<()> {
     if !graphical_session() {
-        bail!("Start Hex from your graphical login session");
+        bail!("Start WordInk from your graphical login session");
     }
     let directory = crate::app_paths::support_dir()?;
     private_directory(&directory)?;
@@ -1097,7 +1097,7 @@ mod tests {
     #[test]
     fn version_one_replies_parse_as_outdated() {
         let reply: Reply = serde_json::from_str(
-            r#"{"version":1,"state":null,"error":"Hex service version mismatch; restart the service"}"#,
+            r#"{"version":1,"state":null,"error":"WordInk service version mismatch; restart the service"}"#,
         )
         .unwrap();
         assert_eq!(reply.version, 1);

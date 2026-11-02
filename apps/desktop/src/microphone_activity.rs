@@ -851,7 +851,7 @@ mod tests {
                 true,
             ),
             ("company.thebrowser.dia", "Dia", None, false),
-            ("anomaly.hex", "Hex", None, false),
+            ("io.github.duketopceo.wordink", "WordInk", None, false),
             ("zoom", "Zoom", Some("us.zoom.xos"), false),
             (
                 "ms-teams.exe",

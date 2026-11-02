@@ -1587,7 +1587,7 @@ mod tests {
     fn the_site_is_resolved_while_hex_is_in_front() {
         let t0 = Instant::now();
         let mut memory = BrowserPageMemory::default();
-        let hex = context("Hex", None, "Hex");
+        let hex = context("WordInk", None, "WordInk");
 
         // Nothing seen yet: the site is unknown.
         let page = memory.recall(&brave(), hex.clone(), t0);
@@ -1608,7 +1608,7 @@ mod tests {
     fn a_page_seen_minutes_ago_no_longer_names_the_call() {
         let t0 = Instant::now();
         let mut memory = BrowserPageMemory::default();
-        let hex = context("Hex", None, "Hex");
+        let hex = context("WordInk", None, "WordInk");
         memory.recall(&brave(), banshee_page(), t0);
         let page = memory.recall(&brave(), hex.clone(), t0 + Duration::from_secs(61));
         assert_eq!(page, hex);
@@ -1624,7 +1624,7 @@ mod tests {
     fn a_remembered_page_belongs_to_its_browser_and_its_call() {
         let t0 = Instant::now();
         let mut memory = BrowserPageMemory::default();
-        let hex = context("Hex", None, "Hex");
+        let hex = context("WordInk", None, "WordInk");
         memory.recall(&brave(), banshee_page(), t0);
 
         let chrome = ActiveMicrophoneApplication {

@@ -30,7 +30,7 @@ pub(super) fn ensure_system_audio() -> Result<()> {
         Ok(())
     } else {
         Err(eyre!(
-            "Install PipeWire's pw-record (the pipewire-audio package) so Hex can hear the other participants, then try again"
+            "Install PipeWire's pw-record (the pipewire-audio package) so WordInk can hear the other participants, then try again"
         ))
     }
 }
@@ -84,7 +84,7 @@ impl MonitorSource {
                 "Capture",
                 "-P",
                 "{ stream.capture.sink = true node.name = hex-meeting-system-audio \
-                 node.description = \"Hex meeting system audio\" }",
+                 node.description = \"WordInk meeting system audio\" }",
                 "-",
             ])
             .stdin(Stdio::null())

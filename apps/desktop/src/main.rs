@@ -75,15 +75,15 @@ use color_eyre::eyre::eyre;
 #[cfg(target_os = "macos")]
 #[derive(Parser)]
 #[command(
-    name = "hex",
+    name = "wordink",
     version = crate::VERSION,
     about = "Local, observable voice control",
     long_about = "Local, observable voice control.\n\n\
         Control commands (status, dictation, meetings record, settings, model, window, …) drive \
-        the one running Hex over its owner-only local API and never launch it, except `start` \
+        the one running WordInk over its owner-only local API and never launch it, except `start` \
         and `restart`. Every one takes --json for a versioned reply (docs/cli.md). Exit codes: \
-        0 done or nothing to change, 1 refused or failed, 2 usage, 3 Hex isn't running.",
-    after_help = "Run `hex <command> --help` for details, or `hex settings list` for every setting."
+        0 done or nothing to change, 1 refused or failed, 2 usage, 3 WordInk isn't running.",
+    after_help = "Based on Hex by Anomaly (MIT). Run `wordink <command> --help` for details, or `wordink settings list` for every setting."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -598,7 +598,7 @@ fn mcp_alias_arguments(mut arguments: Vec<std::ffi::OsString>) -> Vec<std::ffi::
 
 #[cfg(target_os = "macos")]
 fn is_bundled_app_executable(name: Option<&std::ffi::OsStr>) -> bool {
-    name.is_some_and(|name| name == "hex")
+    name.is_some_and(|name| name == "wordink")
 }
 
 /// Whether this launch runs the app: `hex app` without Rune's own (headless)
@@ -825,7 +825,7 @@ mod tests {
             opens_app(Cli::parse_from(arguments).command.as_ref(), bundled)
         };
         assert!(opens(&["hex"]));
-        assert!(opens(&["/Applications/Hex.app/Contents/MacOS/hex"]));
+        assert!(opens(&["/Applications/WordInk.app/Contents/MacOS/hex"]));
         assert!(opens(&["hex", "app"]));
         assert!(opens(&["hex", "app", "--device", "MacBook Pro Microphone"]));
         assert!(!opens(&["hex", "app", "--", "--snap", "/tmp/a.png"]));

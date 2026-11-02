@@ -75,7 +75,7 @@ impl Pump {
                         if restart && !crate::desktop::onboarding::spawn_relaunch() {
                             return Err(ControlError::new(
                                 "unsupported",
-                                "only an installed Hex.app can restart itself; quit it and open \
+                                "only an installed WordInk.app can restart itself; quit it and open \
                                  it again",
                             ));
                         }
@@ -84,8 +84,8 @@ impl Pump {
                     let quitting = answer.is_ok();
                     let _ = reply.send(
                         match answer {
-                            Ok(()) if restart => ControlReply::done("Restarting Hex"),
-                            Ok(()) => ControlReply::done("Quitting Hex"),
+                            Ok(()) if restart => ControlReply::done("Restarting WordInk"),
+                            Ok(()) => ControlReply::done("Quitting WordInk"),
                             Err(error) => error.into(),
                         }
                         .into(),
@@ -250,7 +250,7 @@ impl Pump {
                     return Some(ControlReply::error(
                         "not-installed",
                         format!(
-                            "{} isn't installed; `hex model install {}` downloads it ({})",
+                            "{} isn't installed; `wordink model install {}` downloads it ({})",
                             definition.name,
                             selection.model.as_str(),
                             definition.size_label()
@@ -279,8 +279,8 @@ impl Pump {
                         .map_err(|error| ControlError::new("unavailable", error.to_string()))
                         .map(|()| {
                             ControlReply::done(format!(
-                                "Downloading {} ({}); Hex switches to it once it's ready. \
-                                 `hex status` shows progress, `hex model cancel` stops it",
+                                "Downloading {} ({}); WordInk switches to it once it's ready. \
+                                 `wordink status` shows progress, `wordink model cancel` stops it",
                                 definition.name,
                                 definition.size_label()
                             ))
@@ -330,10 +330,10 @@ impl Pump {
                     ControlReply::error("unsupported", "updates are managed by your organization")
                 }
                 DesktopUpdateStatus::Unavailable | DesktopUpdateStatus::SourceBuild => {
-                    ControlReply::error("unavailable", "this Hex build doesn't update itself")
+                    ControlReply::error("unavailable", "this WordInk build doesn't update itself")
                 }
                 _ => match crate::macos_rune::update_action(&DesktopAction::CheckForUpdates) {
-                    Ok(()) => ControlReply::done("Checking for updates; Hex shows what it finds"),
+                    Ok(()) => ControlReply::done("Checking for updates; WordInk shows what it finds"),
                     Err(error) => ControlReply::error("unavailable", format!("{error:#}")),
                 },
             }),
@@ -371,7 +371,7 @@ impl Pump {
         if !crate::app_settings::meetings_enabled() {
             return Some(ControlReply::error(
                 "feature-off",
-                "Meetings are off; turn them on with `hex settings set meetings.enabled on`",
+                "Meetings are off; turn them on with `wordink settings set meetings.enabled on`",
             ));
         }
         let request = match (&self.meeting_state, stop) {
@@ -425,7 +425,7 @@ impl Pump {
             let answer = match (event, waiter.stop) {
                 (Some(ControllerEvent::RecordingStarted { title, .. }), false) => {
                     ControlReply::done(format!(
-                        "Recording “{title}”; `hex meetings stop` stops and transcribes it"
+                        "Recording “{title}”; `wordink meetings stop` stops and transcribes it"
                     ))
                 }
                 (Some(ControllerEvent::Transcribing | ControllerEvent::Finished(_)), true) => {
@@ -435,9 +435,9 @@ impl Pump {
                     ControlReply::error("failed", format!("{title}: {error}"))
                 }
                 _ if now >= waiter.deadline => ControlReply::done(if waiter.stop {
-                    "Asked the meeting to stop; `hex status` shows when it's transcribing"
+                    "Asked the meeting to stop; `wordink status` shows when it's transcribing"
                 } else {
-                    "Hex is starting the recording; `hex status` shows when it's recording"
+                    "WordInk is starting the recording; `wordink status` shows when it's recording"
                 }),
                 _ => return true,
             };
@@ -535,7 +535,7 @@ impl Pump {
         }
         self.window.update(move |_, tx| {
             if let Err(why) = story_link::open(&link, tx) {
-                tracing::warn!(story = %link.story, %why, "hex window story opened only the window");
+                tracing::warn!(story = %link.story, %why, "wordink window story opened only the window");
             }
         });
         bring_window_forward();
@@ -589,12 +589,12 @@ fn listener_ready(runtime: &RuntimeHandle) -> Result<(), ControlError> {
     if let Some(failure) = listener.and_then(|listener| listener.warning.as_ref()) {
         return Err(ControlError::new(
             "listener-stopped",
-            format!("the listener stopped ({failure}); restart Hex"),
+            format!("the listener stopped ({failure}); restart WordInk"),
         ));
     }
     Err(ControlError::new(
         "not-ready",
-        "Hex is waiting for setup (permissions or the dictation model); run `hex status`",
+        "WordInk is waiting for setup (permissions or the dictation model); run `wordink status`",
     ))
 }
 
@@ -610,7 +610,7 @@ fn ask<T: Send + 'static>(
     receiver.recv_timeout(LISTENER_TIMEOUT).map_err(|_| {
         ControlError::new(
             "unavailable",
-            "the listener didn't answer in time; check `hex status`",
+            "the listener didn't answer in time; check `wordink status`",
         )
     })
 }
@@ -675,7 +675,7 @@ fn launch_at_login(enabled: Option<bool>) -> Result<ControlReply, ControlError> 
     if !bundled {
         return Err(ControlError::new(
             "unsupported",
-            "only an installed Hex.app can launch at login",
+            "only an installed WordInk.app can launch at login",
         ));
     }
     let after = crate::desktop::login_item::set_now(Some(enabled)).map_err(|error| {
@@ -753,7 +753,7 @@ fn wait_for_model(
         }
     }
     Ok(ControlReply::done(format!(
-        "Loading {name}; `hex status` shows when it's ready"
+        "Loading {name}; `wordink status` shows when it's ready"
     )))
 }
 
@@ -820,7 +820,7 @@ fn status(
 ) -> Result<ControlReply, ControlError> {
     let published = runtime
         .published()
-        .ok_or_else(|| ControlError::new("not-ready", "Hex is still starting; try again"))?;
+        .ok_or_else(|| ControlError::new("not-ready", "WordInk is still starting; try again"))?;
     // A stopped listener cannot say what it was doing.
     let snapshot = match &published.listener.warning {
         Some(failure) => Err(ControlError::new("listener-stopped", failure.clone())),

@@ -69,7 +69,7 @@ impl Backend {
             }
             request => match &self.runtime {
                 Some(runtime) => runtime.send(request),
-                None => Err(color_eyre::eyre::eyre!("Hex's runtime is not running")),
+                None => Err(color_eyre::eyre::eyre!("WordInk's runtime is not running")),
             },
         }
     }
@@ -84,7 +84,7 @@ impl Backend {
     /// tray's Quit Hex does.
     pub(super) fn quit(&mut self) {
         if let Err(error) = self.send(Request::Quit) {
-            tracing::warn!(%error, "could not quit Hex");
+            tracing::warn!(%error, "could not quit WordInk");
         }
     }
 
@@ -98,7 +98,7 @@ impl Backend {
     pub(super) fn error(&self) -> Option<String> {
         self.runtime
             .is_none()
-            .then(|| "Hex's runtime is not running".into())
+            .then(|| "WordInk's runtime is not running".into())
     }
 
     pub(super) fn state(&self) -> Option<HostState> {

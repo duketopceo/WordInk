@@ -96,7 +96,7 @@ pub(crate) fn serve(
             }
         });
     if let Err(error) = spawned {
-        tracing::warn!(%error, "`hex` control commands will not reach this Hex");
+        tracing::warn!(%error, "`hex` control commands will not reach this WordInk");
     }
 }
 
@@ -121,9 +121,9 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
                     .and_then(|()| host.quit(restart))
                     .map(|()| {
                         ControlReply::done(if restart {
-                            "Restarting Hex"
+                            "Restarting WordInk"
                         } else {
-                            "Quitting Hex"
+                            "Quitting WordInk"
                         })
                     }),
             )
@@ -213,11 +213,11 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
                 | DesktopUpdateStatus::SourceBuild
                 | DesktopUpdateStatus::PackageManager => Err(ControlError::new(
                     "unavailable",
-                    "this Hex build doesn't update itself",
+                    "this WordInk build doesn't update itself",
                 )),
                 _ => host
                     .check_for_updates()
-                    .map(|()| ControlReply::done("Checking for updates; Hex shows what it finds")),
+                    .map(|()| ControlReply::done("Checking for updates; WordInk shows what it finds")),
             }
         })),
         ControlCommand::LaunchAtLogin { enabled } => launch_at_login(host, enabled),
@@ -277,7 +277,7 @@ fn meeting(stop: bool, title: Option<String>) -> ControlReply {
     if !crate::app_settings::meetings_enabled() {
         return ControlReply::error(
             "feature-off",
-            "Meetings are off; turn them on with `hex settings set meetings.enabled on`",
+            "Meetings are off; turn them on with `wordink settings set meetings.enabled on`",
         );
     }
     let request = match (crate::meeting::runtime::state(), stop) {
@@ -315,7 +315,7 @@ fn meeting(stop: bool, title: Option<String>) -> ControlReply {
         match (crate::meeting::runtime::state(), stop) {
             (MeetingMenuState::Recording { title, .. }, false) => {
                 return ControlReply::done(format!(
-                    "Recording “{title}”; `hex meetings stop` stops and transcribes it"
+                    "Recording “{title}”; `wordink meetings stop` stops and transcribes it"
                 ));
             }
             (MeetingMenuState::Transcribing | MeetingMenuState::Idle, true) => {
@@ -325,9 +325,9 @@ fn meeting(stop: bool, title: Option<String>) -> ControlReply {
         }
     }
     ControlReply::done(if stop {
-        "Asked the meeting to stop; `hex status` shows when it's transcribing"
+        "Asked the meeting to stop; `wordink status` shows when it's transcribing"
     } else {
-        "Hex is starting the recording; `hex status` shows when it's recording"
+        "WordInk is starting the recording; `wordink status` shows when it's recording"
     })
 }
 
@@ -416,7 +416,7 @@ fn use_model(
         return Err(ControlError::new(
             "not-installed",
             format!(
-                "{} isn't installed; `hex model install {}` downloads it ({})",
+                "{} isn't installed; `wordink model install {}` downloads it ({})",
                 definition.name,
                 selection.model.as_str(),
                 definition.size_label()
@@ -426,8 +426,8 @@ fn use_model(
     host.choose_model(selection.clone())?;
     if !installed {
         return Ok(ControlReply::done(format!(
-            "Downloading {} ({}); Hex switches to it once it's ready. \
-             `hex status` shows progress, `hex model cancel` stops it",
+            "Downloading {} ({}); WordInk switches to it once it's ready. \
+             `wordink status` shows progress, `wordink model cancel` stops it",
             definition.name,
             definition.size_label()
         )));
@@ -470,7 +470,7 @@ fn wait_for_model(
         }
     }
     Ok(ControlReply::done(format!(
-        "Loading {name}; `hex status` shows when it's ready"
+        "Loading {name}; `wordink status` shows when it's ready"
     )))
 }
 

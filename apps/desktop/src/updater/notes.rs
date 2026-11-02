@@ -12,8 +12,9 @@ use serde_json::Value;
 use super::transport::ManifestCache;
 use crate::desktop::host::UpdateNotes;
 
-const URL: &str = "https://anoma.ly/hex/files/dev-notes.json";
-const PAGE: &str = "https://anoma.ly/hex/dev";
+/// The dev-notes feed. Empty until U14 publishes one, so nothing is fetched.
+const URL: &str = "";
+const PAGE: &str = crate::updater::RELEASES_URL;
 const TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_ITEMS: usize = 40;
 const MAX_TITLE: usize = 200;
@@ -25,6 +26,9 @@ pub fn fetch(
     running: &str,
     offered: &str,
 ) -> Option<UpdateNotes> {
+    if URL.is_empty() {
+        return None;
+    }
     std::fs::create_dir_all(scratch).ok()?;
     let text = ManifestCache::default()
         .fetch(URL, user_agent, scratch, TIMEOUT)
@@ -104,7 +108,7 @@ mod tests {
         assert_eq!(notes.items, ["Fix A", "Fix B", "Fix C"]);
         assert_eq!(
             notes.url,
-            "https://anoma.ly/hex/dev?since=0.0.0-dev-8#0.0.0-dev-11"
+            "https://github.com/duketopceo/WordInk/releases?since=0.0.0-dev-8#0.0.0-dev-11"
         );
     }
 
@@ -113,7 +117,7 @@ mod tests {
         let notes = parse(NOTES, "0.0.0-dev-2", "0.0.0-dev-9").unwrap();
         assert_eq!(notes.items, ["Fix A", "Fix C", "Already running"]);
         let from_stable = parse(NOTES, "3.1.1", "0.0.0-dev-9").unwrap();
-        assert_eq!(from_stable.url, "https://anoma.ly/hex/dev#0.0.0-dev-9");
+        assert_eq!(from_stable.url, "https://github.com/duketopceo/WordInk/releases#0.0.0-dev-9");
     }
 
     #[test]

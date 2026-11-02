@@ -233,14 +233,14 @@ fn inspect(path: &Path, repository: &str, revision: &str, bytes: u64) -> Option<
     let header = match super::gguf_header::read(path) {
         Ok(header) => header,
         Err(error) => {
-            tracing::debug!(path = %path.display(), %error, "skipping a cached file Hex can't read");
+            tracing::debug!(path = %path.display(), %error, "skipping a cached file WordInk can't read");
             return None;
         }
     };
     let profile = match super::custom_models::profile_of(&header, &file_name) {
         Ok(profile) => profile,
         Err(error) => {
-            tracing::debug!(path = %path.display(), %error, "skipping a cached model Hex can't run");
+            tracing::debug!(path = %path.display(), %error, "skipping a cached model WordInk can't run");
             return None;
         }
     };
@@ -402,14 +402,14 @@ pub fn adopt_catalog(
     let metadata = fs::metadata(path)?;
     if metadata.len() != artifact.bytes {
         bail!(
-            "{} found on this computer is not the size Hex pins",
+            "{} found on this computer is not the size WordInk pins",
             model.name
         );
     }
     let sha256 = super::models::sha256_hex(path, Some(canceled))?;
     if sha256 != artifact.sha256 {
         bail!(
-            "{} found on this computer doesn't match the checksum Hex pins",
+            "{} found on this computer doesn't match the checksum WordInk pins",
             model.name
         );
     }

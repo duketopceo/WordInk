@@ -1,6 +1,6 @@
 //! Windows installs: the per-user version layout our installers receipt
-//! (`%APPDATA%\hex\install.json`) updates itself by staging the
-//! new `hex.exe` into its own version directory and switching the
+//! (`%APPDATA%\wordink\install.json`) updates itself by staging the
+//! new `wordink.exe` into its own version directory and switching the
 //! `current-version` pointer. Before anything runs, the download must carry
 //! a valid Authenticode signature from Anomaly's Artifact Signing identity.
 //! Administrators turn updates off with the `DisableUpdates` policy value.
@@ -28,13 +28,13 @@ pub const DOWNLOAD_TARGET: &str = "windows-arm64-setup";
 /// The common name of the certificate Azure Artifact Signing issues to
 /// Anomaly (as on OpenCode's signed Windows builds); updates signed by
 /// anyone else are refused.
-pub const AUTHENTICODE_SIGNER: &str = "Anomaly Innovations, Inc https://anoma.ly/";
-/// `HKLM` (or `HKCU`) `\SOFTWARE\Policies\Anomaly\Hex`, value `DisableUpdates`.
-const POLICY_KEY: &str = r"SOFTWARE\Policies\Anomaly\Hex";
-/// The Apps & Features entry that packaging/windows/hex.iss registers.
-const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{6ED48C92-5177-41F4-B8D6-37B7B02CFDF4}_is1";
+pub const AUTHENTICODE_SIGNER: &str = "WordInk contributors (Authenticode signing is deferred; set in U14)";
+/// `HKLM` (or `HKCU`) `\SOFTWARE\Policies\WordInk`, value `DisableUpdates`.
+const POLICY_KEY: &str = r"SOFTWARE\Policies\WordInk";
+/// The Apps & Features entry that packaging/windows/wordink.iss registers.
+const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{DCAC91D8-E7C0-4CEF-A61F-A42EC0FB6BC8}_is1";
 
-/// The activated `hex.exe`.
+/// The activated `wordink.exe`.
 #[derive(Clone, Debug)]
 pub struct Staged(PathBuf);
 
@@ -85,7 +85,7 @@ pub fn stage(file: &Path, version: &str) -> Result<Staged> {
         .open(support.join("updates").join("update.lock"))?;
     lock.try_lock_exclusive()
         .wrap_err("another Windows update is already in progress")?;
-    let staging = support.join("updates").join("hex.exe.staging");
+    let staging = support.join("updates").join("wordink.exe.staging");
     let _ = fs::remove_file(&staging);
     fs::copy(file, &staging)?;
     let activation =
@@ -95,10 +95,10 @@ pub fn stage(file: &Path, version: &str) -> Result<Staged> {
     }
     let executable = activation?;
     if let Err(error) = crate::windows::login_item::repoint(&executable) {
-        tracing::warn!(%error, "could not repoint Launch at login to the updated Hex");
+        tracing::warn!(%error, "could not repoint Launch at login to the updated WordInk");
     }
     if let Err(error) = repoint_start_menu_shortcut(&executable) {
-        tracing::warn!(%error, "could not repoint the Start Menu shortcut to the updated Hex");
+        tracing::warn!(%error, "could not repoint the Start Menu shortcut to the updated WordInk");
     }
     if let Err(error) = update_uninstall_entry(version) {
         tracing::warn!(%error, "could not update the Apps & Features version");
@@ -143,7 +143,7 @@ fn repoint_start_menu_shortcut(executable: &Path) -> Result<()> {
     let Some(appdata) = dirs::config_dir() else {
         return Ok(());
     };
-    let shortcut = appdata.join(r"Microsoft\Windows\Start Menu\Programs\Hex.lnk");
+    let shortcut = appdata.join(r"Microsoft\Windows\Start Menu\Programs\WordInk.lnk");
     if !shortcut.exists() {
         return Ok(());
     }
@@ -154,7 +154,7 @@ fn repoint_start_menu_shortcut(executable: &Path) -> Result<()> {
             "Hidden",
             "-Command",
             "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:HEX_SHORTCUT); \
-             if ($s.Description -eq 'Hex managed install') { \
+             if ($s.Description -eq 'WordInk managed install') { \
              $s.TargetPath = $env:HEX_EXECUTABLE; \
              $s.WorkingDirectory = (Split-Path -Parent $env:HEX_EXECUTABLE); \
              $s.Save() }",
@@ -219,8 +219,8 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
     let versions = support.join("versions");
     let version_dir = versions.join(version);
     fs::create_dir_all(&version_dir)?;
-    let executable = version_dir.join("hex.exe");
-    let staged = version_dir.join("hex.exe.partial");
+    let executable = version_dir.join("wordink.exe");
+    let staged = version_dir.join("wordink.exe.partial");
     let _ = fs::remove_file(&staged);
     fs::rename(staging, &staged)?;
     // FlushFileBuffers requires write access on Windows, unlike fsync.
@@ -247,7 +247,7 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
             && is_version_name(name)
             && let Err(error) = fs::remove_dir_all(entry.path())
         {
-            tracing::warn!(%error, path = %entry.path().display(), "could not prune an old Hex version");
+            tracing::warn!(%error, path = %entry.path().display(), "could not prune an old WordInk version");
         }
     }
     Ok(executable)
@@ -271,7 +271,7 @@ pub fn restart_into(staged: &Staged) -> Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .wrap_err("could not schedule the updated Hex version")?;
+        .wrap_err("could not schedule the updated WordInk version")?;
     Ok(())
 }
 
@@ -296,11 +296,11 @@ mod tests {
         let root = std::env::temp_dir().join(format!("hex-win-activate-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("versions/1.0.0")).unwrap();
-        fs::write(root.join("versions/1.0.0/hex.exe"), b"old").unwrap();
+        fs::write(root.join("versions/1.0.0/wordink.exe"), b"old").unwrap();
         fs::create_dir_all(root.join("versions/0.9.0")).unwrap();
-        fs::write(root.join("versions/0.9.0/hex.exe"), b"older").unwrap();
+        fs::write(root.join("versions/0.9.0/wordink.exe"), b"older").unwrap();
         fs::write(root.join("current-version"), "1.0.0\n").unwrap();
-        let staging = root.join("hex.exe.staging");
+        let staging = root.join("wordink.exe.staging");
         fs::write(&staging, b"new").unwrap();
 
         let executable = activate(&root, "1.1.0", &staging).unwrap();
@@ -313,7 +313,7 @@ mod tests {
             "1.1.0"
         );
         assert_eq!(
-            fs::read(root.join("versions/1.0.0/hex.exe")).unwrap(),
+            fs::read(root.join("versions/1.0.0/wordink.exe")).unwrap(),
             b"old"
         );
         assert!(!root.join("versions/0.9.0").exists());

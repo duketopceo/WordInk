@@ -33,8 +33,8 @@ test "$(head -c 4 "$executable" | od -An -tx1 | tr -d ' ')" = 7f454c46
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 install -m755 "$executable" "$temporary/hex"
-sed 's#@HEX_BIN@#/usr/bin/hex#g' "$root/packaging/anomaly.hex.desktop" > "$temporary/anomaly.hex.desktop"
-cp "$root/packaging/hex.service" "$root/LICENSE" "$root/packaging/linux/refresh-desktop.sh" "$temporary/"
+sed 's#@HEX_BIN@#/usr/bin/wordink#g' "$root/packaging/io.github.duketopceo.wordink.desktop" > "$temporary/io.github.duketopceo.wordink.desktop"
+cp "$root/packaging/wordink.service" "$root/LICENSE" "$root/packaging/linux/refresh-desktop.sh" "$temporary/"
 cp -R "$root/packaging/linux/icons" "$temporary/icons"
 
 # Debian and RPM order a tilde before a release, and neither allows a hyphen

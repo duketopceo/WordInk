@@ -85,7 +85,7 @@ impl Backend {
                 }
                 Ok(())
             }
-            Self::Status(..) => Err(eyre!("This window only shows `hex status`")),
+            Self::Status(..) => Err(eyre!("This window only shows `wordink status`")),
         }
     }
 
@@ -93,7 +93,7 @@ impl Backend {
     pub(super) fn save(&mut self, settings: &AppSettings) -> Result<()> {
         match self {
             Self::Host(host, _) => host.save_settings(settings.clone()),
-            Self::Status(..) => Err(eyre!("This window only shows `hex status`")),
+            Self::Status(..) => Err(eyre!("This window only shows `wordink status`")),
         }
     }
 
@@ -193,7 +193,7 @@ pub(super) fn validate_hotkey(
         && crate::linux::session::LinuxSession::detect().is_wayland()
     {
         return Err(tr(
-            "Configure mouse shortcuts in your Wayland desktop using the hex commands",
+            "Configure mouse shortcuts in your Wayland desktop using the wordink commands",
         ));
     }
     LinuxHotkey::from(binding)

@@ -2,7 +2,7 @@
 name = "hex"
 version = "3.2.0"
 edition = "2024"
-default-run = "hex"
+default-run = "wordink"
 license = "MIT"
 repository = "https://github.com/anomalyco/hex"
 
@@ -16,6 +16,10 @@ repository = "https://github.com/anomalyco/hex"
 [workspace]
 members = ["crates/router"]
 exclude = ["crates/capture", "crates/capture-core"]
+
+[[bin]]
+name = "wordink"
+path = "src/main.rs"
 
 [[test]]
 name = "keyboard_layout"

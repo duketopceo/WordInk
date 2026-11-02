@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stages and tests the AUR package hex-bin from a release's Linux executable,
+# Stages and tests the AUR package wordink-bin from a release's Linux executable,
 # without secrets. Runs on Arch (CI uses the archlinux container). The
 # Release workflow's AUR job pushes the staged files with
 # .github/release/push-aur.sh, which holds the AUR key.
@@ -12,7 +12,7 @@
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-package=hex-bin
+package=wordink-bin
 icon_sizes='16 24 32 48 64 128 256 512'
 usage() {
   echo "Usage: $0 stage <version> <x64 executable> <x64 url> <arm64 executable> <arm64 url> <dir> | test <dir>" >&2
@@ -40,13 +40,13 @@ case "$mode" in
       test "$(head -c 4 "$executable" | od -An -tx1 | tr -d ' ')" = 7f454c46
     done
     mkdir -p "$dir"
-    sed 's#@HEX_BIN@#/usr/bin/hex#g' "$root/packaging/anomaly.hex.desktop" > "$dir/anomaly.hex.desktop"
-    cp "$root/packaging/hex.service" "$root/packaging/aur/$package.install" "$dir/"
+    sed 's#@HEX_BIN@#/usr/bin/wordink#g' "$root/packaging/io.github.duketopceo.wordink.desktop" > "$dir/io.github.duketopceo.wordink.desktop"
+    cp "$root/packaging/wordink.service" "$root/packaging/aur/$package.install" "$dir/"
     cp "$root/LICENSE" "$dir/LICENSE"
     icon_sums=
     for size in $icon_sizes; do
-      cp "$root/packaging/linux/icons/hicolor/${size}x${size}/apps/anomaly.hex.png" "$dir/anomaly.hex-$size.png"
-      icon_sums="$icon_sums '$(sha256_of "$dir/anomaly.hex-$size.png")'"
+      cp "$root/packaging/linux/icons/hicolor/${size}x${size}/apps/io.github.duketopceo.wordink.png" "$dir/io.github.duketopceo.wordink-$size.png"
+      icon_sums="$icon_sums '$(sha256_of "$dir/io.github.duketopceo.wordink-$size.png")'"
     done
     # makepkg uses a source already present under its file name, so `test`
     # downloads nothing.
@@ -57,7 +57,7 @@ case "$mode" in
       -e "s#@URL_ARM64@#$arm64_url#" \
       -e "s/@SHA256_X64@/$(sha256_of "$x64")/" \
       -e "s/@SHA256_ARM64@/$(sha256_of "$arm64")/" \
-      -e "s/@DESKTOP_SHA256@/$(sha256_of "$dir/anomaly.hex.desktop")/" \
+      -e "s/@DESKTOP_SHA256@/$(sha256_of "$dir/io.github.duketopceo.wordink.desktop")/" \
       -e "s/@SERVICE_SHA256@/$(sha256_of "$dir/hex.service")/" \
       -e "s/@LICENSE_SHA256@/$(sha256_of "$dir/LICENSE")/" \
       -e "s/@ICON_SHA256S@/${icon_sums# }/" \
@@ -76,9 +76,9 @@ case "$mode" in
     test -f "$built"
     bsdtar -tf "$built" | grep -qx usr/bin/hex
     bsdtar -tf "$built" | grep -qx usr/lib/systemd/user/hex.service
-    bsdtar -tf "$built" | grep -qx usr/share/applications/anomaly.hex.desktop
+    bsdtar -tf "$built" | grep -qx usr/share/applications/io.github.duketopceo.wordink.desktop
     for size in $icon_sizes; do
-      bsdtar -tf "$built" | grep -qx "usr/share/icons/hicolor/${size}x${size}/apps/anomaly.hex.png"
+      bsdtar -tf "$built" | grep -qx "usr/share/icons/hicolor/${size}x${size}/apps/io.github.duketopceo.wordink.png"
     done
     echo "$built"
     ;;

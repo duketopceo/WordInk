@@ -285,7 +285,7 @@ pub(super) fn send_bundle(
     }
     answer
         .recv_timeout(CLI_WAIT)
-        .unwrap_or_else(|_| Ok("Still sending; `hex capture show` tells how it went".into()))
+        .unwrap_or_else(|_| Ok("Still sending; `wordink capture show` tells how it went".into()))
 }
 
 /// The `capture-route` thread and its queue.

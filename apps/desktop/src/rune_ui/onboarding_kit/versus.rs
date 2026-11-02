@@ -190,12 +190,12 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
             tr("Talk instead of typing"),
             line(
                 "lead-intro",
-                tr("Hold a key and talk. Hex types it wherever your cursor is.").into(),
+                tr("Hold a key and talk. WordInk types it wherever your cursor is.").into(),
             ),
         ),
         Step::Parked if !typed_done(s) => (
             "without",
-            tr("Without Hex"),
+            tr("Without WordInk"),
             line(
                 "lead-usual",
                 tr("Answering under pressure, the usual way.").into(),
@@ -203,20 +203,20 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
         ),
         Step::Parked if s.demo_hears() => (
             "without",
-            tr("Without Hex"),
+            tr("Without WordInk"),
             line("lead-sent", tr("Two panic typos later.").into()),
         ),
         Step::Parked => (
             "with",
-            tr("With Hex"),
+            tr("With WordInk"),
             line(
                 "lead-wait",
-                tr("Hex starts listening once the speech model has downloaded.").into(),
+                tr("WordInk starts listening once the speech model has downloaded.").into(),
             ),
         ),
         Step::YourTurn | Step::Hearing => (
             "with",
-            tr("With Hex"),
+            tr("With WordInk"),
             row()
                 .key("hold")
                 .gap(8.0)
@@ -518,7 +518,7 @@ fn stopwatch_pill(p: Paint, s: &Onboard) -> El {
             .child(verdict(
                 p,
                 "voice-stat",
-                "Hex",
+                "WordInk",
                 finished.then_some(tr("fast")),
                 if finished { p.success() } else { p.text() },
             ));

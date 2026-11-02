@@ -1,5 +1,5 @@
 //! Launch at login on Linux: the XDG autostart entry
-//! `~/.config/autostart/anomaly.hex.desktop`, named for Hex's app id, the
+//! `~/.config/autostart/io.github.duketopceo.wordink.desktop`, named for Hex's app id, the
 //! same managed file the installer writes. Hex only replaces or removes an entry that carries its
 //! `X-Hex-Managed=true` mark; the file on disk is the only state.
 
@@ -20,14 +20,11 @@ fn entry_path() -> Result<PathBuf> {
     Ok(autostart_dir()?.join(format!("{}.desktop", crate::linux::portal::APP_ID)))
 }
 
-/// Renames Hex's managed `hex.desktop` autostart entry, the name before
-/// #579, to the app id's, unless an entry already has the new name, then
-/// keeps Hex's managed entry current: its icon (#652), and its command when
+/// Keeps WordInk's managed autostart entry current: its icon (#652), and its command when
 /// the program it starts is gone, as after a downloaded binary moved or a
 /// package replaced it (#736). A symlink is the user's, whatever it points to.
 pub fn tidy() -> Result<()> {
     let directory = autostart_dir()?;
-    move_legacy_entry_in(&directory)?;
     refresh_in(&directory, &launcher()?)
 }
 
@@ -50,7 +47,7 @@ fn refresh_in(directory: &Path, launcher: &Path) -> Result<()> {
         && program(&current).is_none_or(|program| superseded(&program, launcher))
         && launcher.is_file()
     {
-        tracing::info!(entry = %entry.display(), "pointed Launch at login at this Hex");
+        tracing::info!(entry = %entry.display(), "pointed Launch at login at this WordInk");
         self::entry(launcher)
     } else {
         crate::linux::portal::with_icon(&current)
@@ -103,30 +100,6 @@ pub(crate) fn program(entry: &str) -> Option<PathBuf> {
     }
 }
 
-fn move_legacy_entry_in(directory: &Path) -> Result<()> {
-    let legacy = directory.join("hex.desktop");
-    match fs::symlink_metadata(&legacy) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return Ok(()),
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(error).wrap_err_with(|| format!("could not read {}", legacy.display()));
-        }
-    }
-    let old = fs::read_to_string(&legacy)
-        .wrap_err_with(|| format!("could not read {}", legacy.display()))?;
-    if !old.lines().any(|line| line.trim() == MANAGED_MARK) {
-        return Ok(());
-    }
-    let entry = directory.join(format!("{}.desktop", crate::linux::portal::APP_ID));
-    if fs::symlink_metadata(&entry).is_ok() {
-        fs::remove_file(&legacy)
-    } else {
-        fs::rename(&legacy, &entry)
-    }
-    .wrap_err_with(|| format!("could not move {}", legacy.display()))
-}
-
 /// Whether the desktop starts Hex at login.
 pub fn is_enabled() -> Result<bool> {
     let path = entry_path()?;
@@ -150,7 +123,7 @@ pub fn set_enabled(enabled: bool) -> Result<()> {
         && !ours(entry)
     {
         bail!(
-            "{} is not Hex's; edit or remove it yourself",
+            "{} is not WordInk's; edit or remove it yourself",
             path.display()
         );
     }
@@ -231,7 +204,7 @@ fn ours(entry: &str) -> bool {
 /// The executable the entry starts: a managed install's `current/hex`,
 /// which outlives the version directory this process runs from.
 pub(crate) fn launcher() -> Result<PathBuf> {
-    let executable = std::env::current_exe().wrap_err("could not locate the Hex executable")?;
+    let executable = std::env::current_exe().wrap_err("could not locate the WordInk executable")?;
     // Linux names a running binary that was removed or replaced "… (deleted)".
     let executable = match executable
         .to_str()
@@ -240,7 +213,7 @@ pub(crate) fn launcher() -> Result<PathBuf> {
         Some(path) if !executable.is_file() => PathBuf::from(path),
         _ => executable,
     };
-    let current = crate::app_paths::support_dir()?.join("current").join("hex");
+    let current = crate::app_paths::support_dir()?.join("current").join("wordink");
     let managed = executable
         .parent()
         .and_then(Path::parent)
@@ -366,7 +339,7 @@ fn entry(executable: &Path) -> String {
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
-         Name=Hex\n\
+         Name=WordInk\n\
          Comment=Local voice dictation\n\
          Exec={} start\n\
          Icon={}\n\
@@ -432,9 +405,9 @@ mod tests {
         let root = std::env::temp_dir().join(format!("hex-login-link-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         let target = root.join("target.desktop");
-        fs::write(&target, "[Desktop Entry]\nX-XDP-Autostart=anomaly.hex\n").unwrap();
+        fs::write(&target, "[Desktop Entry]\nX-XDP-Autostart=io.github.duketopceo.wordink\n").unwrap();
         assert!(ours(&read(&target).unwrap().unwrap()));
-        let link = root.join("anomaly.hex.desktop");
+        let link = root.join("io.github.duketopceo.wordink.desktop");
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert!(!ours(&read(&link).unwrap().unwrap()));
         assert_eq!(read(&root.join("missing.desktop")).unwrap(), None);
@@ -449,24 +422,7 @@ mod tests {
             .as_nanos();
         let directory = std::env::temp_dir().join(format!("hex-autostart-{unique}"));
         fs::create_dir_all(&directory).unwrap();
-        let legacy = directory.join("hex.desktop");
-        let entry = directory.join("anomaly.hex.desktop");
-        fs::write(
-            &legacy,
-            "[Desktop Entry]\nExec=hex start\nX-Hex-Managed=true\n",
-        )
-        .unwrap();
-        move_legacy_entry_in(&directory).unwrap();
-        assert!(!legacy.exists());
-        assert!(starts(&fs::read_to_string(&entry).unwrap()));
-        fs::write(&legacy, "[Desktop Entry]\nExec=mine\n").unwrap();
-        move_legacy_entry_in(&directory).unwrap();
-        assert!(legacy.exists());
-        fs::remove_file(&legacy).unwrap();
-        std::os::unix::fs::symlink(&entry, &legacy).unwrap();
-        move_legacy_entry_in(&directory).unwrap();
-        assert!(legacy.is_symlink());
-        fs::remove_file(&legacy).unwrap();
+        let entry = directory.join("io.github.duketopceo.wordink.desktop");
         fs::write(
             &entry,
             "[Desktop Entry]\nIcon=audio-input-microphone\nX-Hex-Managed=true\n",
@@ -476,7 +432,7 @@ mod tests {
         assert!(
             fs::read_to_string(&entry)
                 .unwrap()
-                .contains("\nIcon=anomaly.hex\n")
+                .contains("\nIcon=io.github.duketopceo.wordink\n")
         );
         fs::remove_dir_all(directory).unwrap();
     }
@@ -495,7 +451,7 @@ mod tests {
         fs::create_dir_all(&directory).unwrap();
         let launcher = directory.join("hex");
         fs::write(&launcher, "").unwrap();
-        let path = directory.join("anomaly.hex.desktop");
+        let path = directory.join("io.github.duketopceo.wordink.desktop");
         // A downloaded binary that has since moved.
         fs::write(&path, entry(&directory.join("Downloads/hex"))).unwrap();
         refresh_in(&directory, &launcher).unwrap();

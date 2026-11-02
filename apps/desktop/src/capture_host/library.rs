@@ -165,7 +165,7 @@ mod tests {
               "words":[{{"text":"make","t0":0,"t1":1}},{{"text":"it","t0":1,"t1":2}},
                        {{"text":"blue","t0":2,"t1":3}}]}},
             "strokes":[],"marks":[],"events":[],"keyframes":[],"contactSheet":"sheet.jpg",
-            "destination":{{"session":"ses_1","title":"Hex","via":"chosen"}}}}"#
+            "destination":{{"session":"ses_1","title":"WordInk","via":"chosen"}}}}"#
         );
         std::fs::write(dir.join("scrawl.json"), manifest).unwrap();
         std::fs::write(dir.join(delivery::PENDING), "{}").unwrap();
@@ -181,7 +181,7 @@ mod tests {
             summary.sent_to,
             Some(ScrawlCaptureSession {
                 session: "ses_1".into(),
-                title: "Hex".into()
+                title: "WordInk".into()
             })
         );
         assert!(summary.queued);

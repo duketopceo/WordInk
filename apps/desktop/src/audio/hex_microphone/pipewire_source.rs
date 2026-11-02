@@ -12,7 +12,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 /// A low session priority keeps WirePlumber from choosing Hex
 /// Microphone as the default input, which Hex itself would record.
 const PROPERTIES: &str = "{ media.class = Audio/Source node.name = hex_microphone \
-    node.description = \"Hex Microphone\" application.name = Hex \
+    node.description = \"Hex Microphone\" application.name = WordInk \
     priority.session = 1 priority.driver = 1 }";
 /// Frames per write (11 ms): half the pipe, so one block waits in the
 /// pipe while the next gathers, and large enough that the ring's

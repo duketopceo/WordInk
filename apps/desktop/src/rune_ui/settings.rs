@@ -570,7 +570,7 @@ pub(super) fn error_notes(p: Paint, error: &str) -> [El; 2] {
     [
         note(
             "error-title",
-            tr("Hex could not apply this change."),
+            tr("WordInk could not apply this change."),
             p.danger(),
         ),
         note("error", error, p.muted()),
@@ -604,7 +604,7 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
             &shortcut,
         ),
         (true, ShortcutMode::Hold) => tr_fill("Ready anywhere · Hold {} to dictate", &shortcut),
-        (false, _) => tr_fill("Enable Hex to dictate into any app with {}", &shortcut),
+        (false, _) => tr_fill("Enable WordInk to dictate into any app with {}", &shortcut),
     };
     let failure = ui
         .view
@@ -693,7 +693,7 @@ pub(super) fn granted(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<(Stri
             unconfirmed: true,
             ..
         } => (
-            tr("Your desktop assigns this key itself, so Hex can't confirm it").to_string(),
+            tr("Your desktop assigns this key itself, so WordInk can't confirm it").to_string(),
             p.muted(),
         ),
         DesktopGrantedShortcut { trigger: None, .. } => (
@@ -801,7 +801,7 @@ pub(super) fn gnome_clash_note(ui: &Ui, p: Paint, target: ShortcutTarget) -> Opt
         note(
             "gnome-clash",
             &tr_fill(
-                "GNOME uses {} itself, so it never reaches Hex. Record another shortcut, or change it in GNOME Settings › Keyboard › Keyboard Shortcuts.",
+                "GNOME uses {} itself, so it never reaches WordInk. Record another shortcut, or change it in GNOME Settings › Keyboard › Keyboard Shortcuts.",
                 &keys,
             ),
             p.danger(),
@@ -817,7 +817,7 @@ pub(super) fn refused_note(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<
             note(
                 "refused",
                 if binding(&ui.settings, target).is_some_and(|binding| binding.key.as_ref().is_some_and(HotkeyKey::is_mouse)) {
-                    tr("Configure mouse shortcuts in your Wayland desktop using the hex commands")
+                    tr("Configure mouse shortcuts in your Wayland desktop using the wordink commands")
                 } else {
                     tr("Your desktop kept a shortcut for itself. Record another one, or free it in your desktop's keyboard settings (on niri, remove its bind from config.kdl).")
                 },
@@ -842,14 +842,14 @@ pub(super) fn desktop_commands(ui: &Ui, p: Paint) -> El {
             "hold",
             tr("Hold to dictate"),
             tr("Bind start to the key press and stop to its release"),
-            &["hex dictation start", "hex dictation stop"],
+            &["wordink dictation start", "wordink dictation stop"],
         ),
         command_row(
             p,
             "toggle",
             tr("Toggle dictation"),
             tr("Press to start dictating, press again to transcribe"),
-            &["hex dictation toggle"],
+            &["wordink dictation toggle"],
         ),
         command_row(
             p,
@@ -862,8 +862,8 @@ pub(super) fn desktop_commands(ui: &Ui, p: Paint) -> El {
             p,
             "raw-dictation",
             tr("Dictate without processing"),
-            tr("Paste your words as Hex heard them, skipping every step"),
-            &["hex dictation toggle --raw"],
+            tr("Paste your words as WordInk heard them, skipping every step"),
+            &["wordink dictation toggle --raw"],
         ),
     ];
     // GNOME without a shortcuts portal (GNOME 46 and older, #781): Hex writes
@@ -879,7 +879,7 @@ fn gnome_shortcuts_row(ui: &Ui, p: Paint) -> El {
     let on = ui.settings.gnome_keyboard_shortcuts;
     let description = if on {
         tr(
-            "Added to GNOME Settings › Keyboard › Custom Shortcuts while Hex is enabled. GNOME runs them on the key press, so your dictation shortcut toggles dictation. Change the keys there.",
+            "Added to GNOME Settings › Keyboard › Custom Shortcuts while WordInk is enabled. GNOME runs them on the key press, so your dictation shortcut toggles dictation. Change the keys there.",
         )
     } else {
         tr(

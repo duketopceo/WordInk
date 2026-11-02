@@ -128,7 +128,7 @@ impl RuntimeHandle {
     pub(crate) fn send(&self, request: Request) -> Result<()> {
         self.requests
             .send(request)
-            .map_err(|_| eyre!("Hex's runtime stopped"))
+            .map_err(|_| eyre!("WordInk's runtime stopped"))
     }
 
     pub(crate) fn published(&self) -> Option<Arc<Published>> {
@@ -196,7 +196,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
         // Without a tray, closing the window quits: Hex must not run on
         // with no way back to it.
         Err(error) => {
-            tracing::warn!(%error, "Windows system tray is unavailable; closing Hex will quit");
+            tracing::warn!(%error, "Windows system tray is unavailable; closing WordInk will quit");
             None
         }
     };
@@ -216,7 +216,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
             shared: shared.clone(),
             history: history.clone(),
         })
-        .map_err(|_| eyre!("the Hex runtime already started"))?;
+        .map_err(|_| eyre!("the WordInk runtime already started"))?;
     let (control_calls, control_receiver) = mpsc::sync_channel(8);
     let local_api = crate::local_api::LocalApi::start_for_app(&event_path, control_calls);
     let quit = window.clone();
@@ -375,12 +375,12 @@ impl WindowsControl {
         let listener = lock(&self.shared.listener).clone().ok_or_else(|| {
             ControlError::new(
                 "not-ready",
-                "Hex is not listening; turn it on in the tray or the window",
+                "WordInk is not listening; turn it on in the tray or the window",
             )
         })?;
         listener
             .send(command)
-            .map_err(|_| ControlError::new("busy", "Hex's listener stopped; try again"))
+            .map_err(|_| ControlError::new("busy", "WordInk's listener stopped; try again"))
     }
 }
 
@@ -389,7 +389,7 @@ impl crate::control::host::Host for WindowsControl {
         let published = self
             .runtime
             .published()
-            .ok_or_else(|| ControlError::new("not-ready", "Hex is starting; try again"))?;
+            .ok_or_else(|| ControlError::new("not-ready", "WordInk is starting; try again"))?;
         Ok(crate::control::host::HostState {
             settings: published.settings.clone(),
             listener: published.listener.clone(),
@@ -527,7 +527,7 @@ impl crate::control::host::Host for WindowsControl {
             } => capture::send_capture(&capture, to, always),
             C::ScrawlCaptureUndo => {
                 capture::send_to_listener(CaptureControl::Command(CaptureCommand::Undo))
-                    .map(|()| ControlReply::done("Asked Hex to take the newest send back"))
+                    .map(|()| ControlReply::done("Asked WordInk to take the newest send back"))
                     .map_err(|error| ControlError::new("not-ready", format!("{error:#}")))
             }
             C::ScrawlCaptureRoute { capture, ask_jev } => {
@@ -662,7 +662,7 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
         tray_icon_pixels(taskbar_is_light()),
     );
     let view = TrayView::default();
-    let spec = rune::TraySpec::new("hex", "Hex", icon)
+    let spec = rune::TraySpec::new("wordink", "WordInk", icon)
         .tooltip(view.tooltip())
         .menu(view.menu());
     let tray = rune::Tray::new(spec, move |event| match event {

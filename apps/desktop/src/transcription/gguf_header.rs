@@ -91,7 +91,7 @@ impl<R: Read + Seek> Reader<R> {
         }
         let version = self.u32()?;
         if !(2..=3).contains(&version) {
-            bail!("it is GGUF version {version}; Hex reads versions 2 and 3");
+            bail!("it is GGUF version {version}; WordInk reads versions 2 and 3");
         }
         let tensors = self.u64()?;
         let keys = self.u64()?;

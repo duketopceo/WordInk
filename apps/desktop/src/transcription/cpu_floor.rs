@@ -8,7 +8,7 @@
 //! `--version` and `--help` stay available on any CPU: installers and the
 //! updater run `hex --version` to check what they install.
 
-pub const MESSAGE: &str = "Hex needs a 2013 or newer processor (Intel Haswell / AMD Excavator or later) with AVX2. This PC's processor isn't supported.";
+pub const MESSAGE: &str = "WordInk needs a 2013 or newer processor (Intel Haswell / AMD Excavator or later) with AVX2. This PC's processor isn't supported.";
 
 /// Whether this processor has every x86-64-v3 feature ggml is built with.
 pub fn supported() -> bool {
@@ -46,7 +46,7 @@ pub fn require() {
 fn show() {
     use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
     let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
-    let (text, title) = (wide(MESSAGE), wide("Hex"));
+    let (text, title) = (wide(MESSAGE), wide("WordInk"));
     // Both strings are NUL-terminated UTF-16 that outlive the call.
     unsafe {
         MessageBoxW(
@@ -74,9 +74,9 @@ fn show() {
         return;
     }
     let attempts: [(&str, &[&str]); 3] = [
-        ("zenity", &["--error", "--title=Hex", "--text", MESSAGE]),
-        ("kdialog", &["--title", "Hex", "--error", MESSAGE]),
-        ("notify-send", &["--urgency=critical", "Hex", MESSAGE]),
+        ("zenity", &["--error", "--title=WordInk", "--text", MESSAGE]),
+        ("kdialog", &["--title", "WordInk", "--error", MESSAGE]),
+        ("notify-send", &["--urgency=critical", "WordInk", MESSAGE]),
     ];
     for (program, arguments) in attempts {
         let shown = Command::new(program)

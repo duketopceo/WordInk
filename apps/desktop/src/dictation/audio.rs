@@ -1760,7 +1760,7 @@ mod tests {
 
     #[test]
     fn startup_microphone_failure_keeps_audio_owner_alive() {
-        let device = "Hex nonexistent microphone for startup recovery test";
+        let device = "WordInk nonexistent microphone for startup recovery test";
         let input = DictationAudio::with_input(
             RecoveringAudioInput::failed_for_test(device),
             device.into(),

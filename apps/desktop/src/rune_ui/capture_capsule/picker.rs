@@ -871,7 +871,7 @@ impl PickerOverlay {
         act: impl Fn(Action) + Send + Sync + 'static,
     ) -> Self {
         use rune::{OverlayLevel, OverlayOptions, OverlayPlacement, OverlaySpec};
-        let spec = OverlaySpec::new("Hex capture picker", (1440.0, 900.0), view)
+        let spec = OverlaySpec::new("WordInk capture picker", (1440.0, 900.0), view)
             .options(OverlayOptions {
                 placement: Some(OverlayPlacement::FullScreen),
                 display: DISPLAY,

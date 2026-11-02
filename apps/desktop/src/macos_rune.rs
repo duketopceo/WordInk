@@ -181,11 +181,11 @@ impl RuntimeHandle {
             // choice, so it cannot later undo the newer manual choice.
             self.requests
                 .send(Request::InputSourceChanged(source))
-                .map_err(|_| eyre!("Hex's runtime stopped"))?;
+                .map_err(|_| eyre!("WordInk's runtime stopped"))?;
         }
         self.requests
             .send(request)
-            .map_err(|_| eyre!("Hex's runtime stopped"))
+            .map_err(|_| eyre!("WordInk's runtime stopped"))
     }
 
     pub(crate) fn published(&self) -> Option<Arc<Published>> {
@@ -410,7 +410,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     };
     RUNTIME
         .set(handle.clone())
-        .map_err(|_| eyre!("the Hex runtime already started"))?;
+        .map_err(|_| eyre!("the WordInk runtime already started"))?;
     let runtime_settings = settings.clone();
     let runtime = thread::Builder::new()
         .name("hex-runtime".into())
@@ -869,7 +869,7 @@ fn start_main_thread_after(seconds: f64) {
 /// the pump's timer; the first call does, later ones do nothing.
 fn start_main_thread() {
     let Some(mtm) = MainThreadMarker::new() else {
-        tracing::error!("Hex's main-thread setup ran off the main thread");
+        tracing::error!("WordInk's main-thread setup ran off the main thread");
         return;
     };
     let Some(Launch { mut pump, target }) = LAUNCH.with(|slot| slot.borrow_mut().take()) else {
@@ -878,7 +878,7 @@ fn start_main_thread() {
     pump.status_actions = match crate::macos_rune::status_item::install() {
         Ok(actions) => Some(actions),
         Err(error) => {
-            tracing::error!(%error, "could not install Hex status item; opening the window");
+            tracing::error!(%error, "could not install WordInk status item; opening the window");
             show(&pump.window, Destination::Settings);
             None
         }

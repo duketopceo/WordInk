@@ -33,15 +33,15 @@ use crate::linux::service::{Activation, Launch};
 
 #[derive(Parser)]
 #[command(
-    name = "hex",
+    name = "wordink",
     version = crate::VERSION,
     about = "Local, observable voice recognition (Linux beta)",
     long_about = "Local, observable voice recognition (Linux beta).\n\n\
         Control commands (status, dictation, settings, model, window, …) drive the one running \
-        Hex over its owner-only socket and never launch it, except `start` and `restart`. Every \
+        WordInk over its owner-only socket and never launch it, except `start` and `restart`. Every \
         one takes --json for a versioned reply (docs/cli.md). Exit codes: 0 done or nothing to \
-        change, 1 refused or failed, 2 usage, 3 Hex isn't running.",
-    after_help = "Run `hex <command> --help` for details, or `hex settings list` for every setting."
+        change, 1 refused or failed, 2 usage, 3 WordInk isn't running.",
+    after_help = "Based on Hex by Anomaly (MIT). Run `wordink <command> --help` for details, or `wordink settings list` for every setting."
 )]
 struct Cli {
     #[command(subcommand)]

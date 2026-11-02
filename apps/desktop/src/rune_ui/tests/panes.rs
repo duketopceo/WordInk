@@ -738,7 +738,7 @@ fn the_practice_game_follows_hex_s_own_dictation_on_every_os() {
         assert!(!holding(&rt));
         onboarding::input(&mut rt.state, Input::Dictation(Observation::Started));
         refresh(&mut rt);
-        assert!(holding(&rt), "{scene}: the shortcut held, as Hex records");
+        assert!(holding(&rt), "{scene}: the shortcut held, as WordInk records");
         onboarding::input(&mut rt.state, Input::Dictation(Observation::Transcribing));
         refresh(&mut rt);
         assert!(!holding(&rt), "{scene}: released");
@@ -1366,7 +1366,7 @@ fn a_refused_microphone_points_to_system_settings() {
     assert!(
         shown
             .iter()
-            .any(|text| text == "Switch on Hex in System Settings")
+            .any(|text| text == "Switch on WordInk in System Settings")
     );
     tap(&mut rt, "mic-pill-allow");
     assert_eq!(
@@ -1382,7 +1382,7 @@ fn windows_onboarding_asks_only_for_the_microphone_switch() {
     let mut rt = runtime("windows-onboarding-microphone", true, PANE_SIZE);
     let shown = texts(&rt);
     assert!(
-        shown.iter().any(|text| text == "Let Hex hear you"),
+        shown.iter().any(|text| text == "Let WordInk hear you"),
         "{shown:?}"
     );
     assert!(rt.find("ax-row").is_none(), "no Accessibility on Windows");
@@ -1411,7 +1411,7 @@ fn stale_permissions_offer_fix_it_and_reset_entries_across_panes() {
     assert!(
         shown
             .iter()
-            .any(|text| text == "An older Hex entry can keep this off")
+            .any(|text| text == "An older WordInk entry can keep this off")
     );
     tap(&mut rt, "ax-pill-allow");
     assert_eq!(
@@ -1429,7 +1429,7 @@ fn stale_permissions_offer_fix_it_and_reset_entries_across_panes() {
     assert!(
         shown
             .iter()
-            .any(|text| text == "An older Hex entry can keep this off")
+            .any(|text| text == "An older WordInk entry can keep this off")
     );
     tap(&mut rt, "permission-accessibility-allow");
     assert_eq!(
@@ -1450,7 +1450,7 @@ fn stale_permissions_offer_fix_it_and_reset_entries_across_panes() {
     assert!(
         shown
             .iter()
-            .any(|text| text == "An older Hex entry can keep this off")
+            .any(|text| text == "An older WordInk entry can keep this off")
     );
     tap(&mut rt, "meeting-system-audio-allow");
     assert_eq!(

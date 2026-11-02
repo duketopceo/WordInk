@@ -595,7 +595,7 @@ fn subtitles_follow_the_range_and_need_the_labs_toggle() {
         require_subtitle_export(false)
             .unwrap_err()
             .to_string()
-            .contains("hex labs on subtitle-export")
+            .contains("wordink labs on subtitle-export")
     );
     assert_eq!(SubtitleFormat::from_flags(false, false), None);
     assert_eq!(

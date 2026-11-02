@@ -533,7 +533,7 @@ pub fn record(
             write_manifest(&meeting_dir, &manifest)?;
             tracing::info!(
                 meeting = manifest.id,
-                "Hex quit while recording; the transcript finishes at the next launch"
+                "WordInk quit while recording; the transcript finishes at the next launch"
             );
             return Ok(manifest);
         }
@@ -911,7 +911,7 @@ pub fn finish_pending(id: &str) -> Result<Option<MeetingManifest>> {
     let mut manifest = read_manifest(&directory)?;
     tracing::info!(
         meeting = id,
-        "finishing the transcript of a meeting Hex quit while recording"
+        "finishing the transcript of a meeting WordInk quit while recording"
     );
     match transcribe(&directory, &mut manifest, &selection, None) {
         Ok(()) => {
@@ -1188,7 +1188,7 @@ fn trash_expired(
         } else {
             tracing::info!(
                 meeting = manifest.id,
-                "kept the meeting's Markdown, which changed since Hex wrote it"
+                "kept the meeting's Markdown, which changed since WordInk wrote it"
             );
         }
     }

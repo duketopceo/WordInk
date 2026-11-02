@@ -37,7 +37,7 @@ pub fn signature_target() -> String {
 }
 
 fn signed_message(sha256: &str) -> String {
-    format!("anomaly.hex.linux-artifact.v1\n{sha256}\n")
+    format!("wordink.linux-artifact.v1\n{sha256}\n")
 }
 
 /// Whether `signature` is Anomaly's release key signing the executable whose
@@ -170,7 +170,7 @@ pub fn stage(file: &Path, version: &str) -> Result<Staged> {
 
 pub fn restart_into(staged: &Staged) -> Result<()> {
     if !staged.0.is_file() {
-        bail!("the prepared Hex update is no longer installed");
+        bail!("the prepared WordInk update is no longer installed");
     }
     crate::linux::service::schedule_restart()
 }
@@ -204,7 +204,7 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
     fs::create_dir_all(&version_dir)?;
     fs::set_permissions(&versions, fs::Permissions::from_mode(0o700))?;
     fs::set_permissions(&version_dir, fs::Permissions::from_mode(0o700))?;
-    let executable = version_dir.join("hex");
+    let executable = version_dir.join("wordink");
     let staged = version_dir.join(".hex.partial");
     let _ = fs::remove_file(&staged);
     fs::rename(staging, &staged)?;
@@ -231,10 +231,10 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
             && name.to_str().is_some_and(is_version_name)
             && let Err(error) = fs::remove_dir_all(entry.path())
         {
-            tracing::warn!(%error, path = %entry.path().display(), "could not prune an old Hex version");
+            tracing::warn!(%error, path = %entry.path().display(), "could not prune an old WordInk version");
         }
     }
-    Ok(current.join("hex"))
+    Ok(current.join("wordink"))
 }
 
 #[cfg(test)]
@@ -295,16 +295,16 @@ mod tests {
         let root = std::env::temp_dir().join(format!("hex-linux-activate-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("versions/1.0.0")).unwrap();
-        fs::write(root.join("versions/1.0.0/hex"), b"old").unwrap();
+        fs::write(root.join("versions/1.0.0/wordink"), b"old").unwrap();
         fs::create_dir_all(root.join("versions/0.9.0")).unwrap();
-        fs::write(root.join("versions/0.9.0/hex"), b"older").unwrap();
+        fs::write(root.join("versions/0.9.0/wordink"), b"older").unwrap();
         symlink("versions/1.0.0", root.join("current")).unwrap();
         let staging = root.join("hex.staging");
         fs::write(&staging, b"new").unwrap();
 
         let executable = activate(&root, "1.1.0", &staging).unwrap();
         assert_eq!(fs::read(executable).unwrap(), b"new");
-        assert_eq!(fs::read(root.join("versions/1.0.0/hex")).unwrap(), b"old");
+        assert_eq!(fs::read(root.join("versions/1.0.0/wordink")).unwrap(), b"old");
         assert!(!root.join("versions/0.9.0").exists());
         let _ = fs::remove_dir_all(root);
     }
@@ -315,7 +315,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         let running = root.join("versions").join(crate::VERSION);
         fs::create_dir_all(&running).unwrap();
-        fs::write(running.join("hex"), b"running").unwrap();
+        fs::write(running.join("wordink"), b"running").unwrap();
         symlink(
             Path::new("versions").join(crate::VERSION),
             root.join("current"),
@@ -326,8 +326,8 @@ mod tests {
             fs::write(&staging, bytes).unwrap();
             activate(&root, version, &staging).unwrap();
         }
-        assert_eq!(fs::read(root.join("current/hex")).unwrap(), b"newer");
-        assert_eq!(fs::read(running.join("hex")).unwrap(), b"running");
+        assert_eq!(fs::read(root.join("current/wordink")).unwrap(), b"newer");
+        assert_eq!(fs::read(running.join("wordink")).unwrap(), b"running");
         let _ = fs::remove_dir_all(root);
     }
 }

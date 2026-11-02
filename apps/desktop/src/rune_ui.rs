@@ -226,7 +226,7 @@ fn on_open_url(ui: &mut Ui, link: &str, tx: &mut Tx) {
     if let Some(target) = deep_link::parse(link, story_link::scheme()) {
         match target {
             Ok(target) => deep_link::open(ui, target, tx),
-            Err(why) => tracing::warn!(%why, "ignored a link opened with Hex"),
+            Err(why) => tracing::warn!(%why, "ignored a link opened with WordInk"),
         }
         crate::macos_rune::bring_window_forward();
         return;
@@ -234,7 +234,7 @@ fn on_open_url(ui: &mut Ui, link: &str, tx: &mut Tx) {
     let link = match story_link::parse(link, story_link::scheme()) {
         Ok(link) => link,
         Err(why) => {
-            tracing::warn!(%why, "ignored a link opened with Hex");
+            tracing::warn!(%why, "ignored a link opened with WordInk");
             return;
         }
     };
@@ -587,7 +587,7 @@ pub(crate) fn fixed_window() -> rune::WindowOptions {
 
 fn spec() -> AppSpec<Ui> {
     AppSpec {
-        title: "Hex",
+        title: "WordInk",
         size: WINDOW_SIZE,
         // Narrower windows crowd the sidebar and rows.
         min_size: Some((860.0, 560.0)),
@@ -1682,6 +1682,7 @@ fn footer(ui: &Ui, p: Paint) -> El {
             line("version", &version_label(), p.faint()),
         ))
         .children(status)
+        .child(line("credits", "Based on Hex by Anomaly (MIT)", p.faint()))
 }
 
 /// A local or test build marks itself beside the version, quietly: an outline
@@ -1835,7 +1836,7 @@ fn quit_item(p: Paint) -> El {
     row()
         .key("quit")
         .role("button")
-        .label(tr("Quit Hex"))
+        .label(tr("Quit WordInk"))
         .h(NAV_ROW_HEIGHT)
         .px(6.0)
         .mt(NAV_ROW_GAP)
@@ -1847,7 +1848,7 @@ fn quit_item(p: Paint) -> El {
         .focusable(true)
         .focus_ring(2.0, -2.0, c.border_focus)
         .child(
-            text(tr("Quit Hex"))
+            text(tr("Quit WordInk"))
                 .key("label")
                 .font(p.k.ty.ui)
                 .color(c.text_muted)

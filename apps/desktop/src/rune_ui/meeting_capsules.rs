@@ -420,12 +420,12 @@ impl MeetingCapsules {
         };
         let panel = overlay(
             app,
-            "Hex meeting",
+            "WordInk meeting",
             (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
         );
         let recording = overlay(
             app,
-            "Hex meeting recording",
+            "WordInk meeting recording",
             (RECORDING_PANEL_WIDTH, RECORDING_PANEL_HEIGHT),
         );
         Self {
@@ -732,7 +732,7 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         Kind::CallEnded { app } => (
             p.danger(),
             tr_fill("{} left the call", app),
-            tr("Hex is still recording.").to_owned(),
+            tr("WordInk is still recording.").to_owned(),
             vec![
                 button(p, "keep-recording", tr("Keep recording"), false, |c| {
                     c.close();
@@ -805,7 +805,7 @@ fn reminder(
         return (
             p.accent(),
             meeting.display_title(),
-            tr_fill("{} · Hex records automatically", &when),
+            tr_fill("{} · WordInk records automatically", &when),
             actions,
         );
     }
@@ -1305,7 +1305,7 @@ mod tests {
     #[test]
     fn an_always_record_reminder_says_so_and_never_offers_record() {
         let (mut rt, commands, _) = runtime(reminder(true, true), false, true, REMINDER);
-        assert!(texts(&rt).contains(&"Starts in 1 min · Hex records automatically".to_string()));
+        assert!(texts(&rt).contains(&"Starts in 1 min · WordInk records automatically".to_string()));
         assert!(rt.find("record").is_none());
         assert!(rt.find("join-record").is_none());
         tap(&mut rt, "join");

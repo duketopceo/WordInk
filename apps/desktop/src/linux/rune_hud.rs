@@ -164,8 +164,8 @@ impl Limitation {
     fn describe(&self) -> (String, String) {
         match self {
             Self::NoDisplay => (
-                "Hex has no Wayland or X11 display (no WAYLAND_DISPLAY or DISPLAY in its environment)".into(),
-                "Recording HUD unavailable: Hex can't reach your display. If Hex runs as a systemd service, import the session's environment (on Hyprland: exec-once = dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP). Dictation still works.".into(),
+                "WordInk has no Wayland or X11 display (no WAYLAND_DISPLAY or DISPLAY in its environment)".into(),
+                "Recording HUD unavailable: WordInk can't reach your display. If WordInk runs as a systemd service, import the session's environment (on Hyprland: exec-once = dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP). Dictation still works.".into(),
             ),
             Self::NoLayerShell => (
                 "compositor has no layer-shell and XWayland is not running".into(),

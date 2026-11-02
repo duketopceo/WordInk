@@ -13,7 +13,7 @@ build_number=$(hex_build_number "$version")
 cargo build --release --manifest-path "$root/Cargo.toml"
 rm -rf "$bundle"
 mkdir -p "$bundle/Contents/MacOS"
-cp "$root/target/release/hex" "$executable"
+cp "$root/target/release/wordink" "$executable"
 cp "$root/app/ServiceInfo.plist" "$bundle/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$bundle/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$bundle/Contents/Info.plist"

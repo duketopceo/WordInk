@@ -349,7 +349,7 @@ pub(super) fn human_status(report: &StatusReport) -> String {
         _ => "closed".into(),
     };
     format!(
-        "Hex {} (pid {}{memory})\n\
+        "WordInk {} (pid {}{memory})\n\
          Listener     {}\n\
          Capture      {capture}{pending}\n\
          Meeting      {meeting}\n\

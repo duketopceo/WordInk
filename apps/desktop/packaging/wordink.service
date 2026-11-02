@@ -1,5 +1,5 @@
 [Unit]
-Description=Hex background dictation
+Description=WordInk background dictation
 PartOf=graphical-session.target
 After=graphical-session.target
 StartLimitIntervalSec=60
@@ -8,8 +8,8 @@ StartLimitBurst=5
 [Service]
 Type=notify
 NotifyAccess=main
-ExecStart=/usr/bin/hex service
-EnvironmentFile=-%h/.local/share/hex/session.env
+ExecStart=/usr/bin/wordink service
+EnvironmentFile=-%h/.local/share/wordink/session.env
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=30

@@ -319,18 +319,14 @@ pub(crate) fn run(
     activation: Option<Activation>,
 ) -> Result<()> {
     let mut server = linux_service::Server::bind()?;
-    // Installs before #579 named the entries hex.desktop.
     if let Err(error) = crate::linux::icons::install() {
-        tracing::warn!(%error, "could not install Hex's icon");
+        tracing::warn!(%error, "could not install WordInk's icon");
     }
     if let Err(error) = crate::linux::portal::tidy_desktop_entries() {
-        tracing::warn!(%error, "could not move Hex's desktop entry");
-    }
-    if let Err(error) = crate::linux::portal::forget_legacy_gnome_shortcuts() {
-        tracing::warn!(%error, "could not remove Hex's old GNOME shortcuts");
+        tracing::warn!(%error, "could not move WordInk's desktop entry");
     }
     if let Err(error) = crate::linux::login_item::tidy() {
-        tracing::warn!(%error, "could not tidy Hex's autostart entry");
+        tracing::warn!(%error, "could not tidy WordInk's autostart entry");
     }
     // Off the main thread: the portal may take a moment to answer.
     let _ = std::thread::Builder::new()
@@ -372,7 +368,7 @@ pub(crate) fn run(
         crate::linux::tray::start(host.clone(), published.clone(), control.clone(), shutdown)
             .map(Arc::new);
     linux_service::notify("READY=1");
-    tracing::info!(pid = std::process::id(), "Hex instance ready");
+    tracing::info!(pid = std::process::id(), "WordInk instance ready");
 
     let worker = {
         let host = host.clone();
@@ -473,7 +469,7 @@ fn run_window(
     }))
     .is_err()
     {
-        tracing::error!("the Hex window failed; Hex keeps running without it");
+        tracing::error!("the WordInk window failed; WordInk keeps running without it");
         while !shutdown.load(Ordering::Acquire) {
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -701,7 +697,7 @@ impl LinuxDesktopHost {
             crate::linux::gnome_shortcuts::remove()
         };
         match result {
-            Ok(()) => tracing::info!(written = wanted, "updated Hex's GNOME keyboard shortcuts"),
+            Ok(()) => tracing::info!(written = wanted, "updated WordInk's GNOME keyboard shortcuts"),
             Err(error) => {
                 self.error = Some(format!(
                     "Could not update GNOME keyboard shortcuts: {error:#}"
@@ -727,7 +723,7 @@ impl LinuxDesktopHost {
         // Restart to update asks systemd to restart Hex after the updater's
         // final check; only a failure needs showing.
         if let Some(Err(error)) = self.updater.take_restart() {
-            self.error = Some(format!("Could not restart Hex: {error:#}"));
+            self.error = Some(format!("Could not restart WordInk: {error:#}"));
         }
         // Settings may set up the transformations workspace at any time.
         if self.personal_commands_checked_at.elapsed() >= Duration::from_secs(2) {
@@ -1190,7 +1186,7 @@ impl LinuxControl {
     fn published(&self) -> std::result::Result<Arc<Published>, ControlError> {
         self.published
             .upgrade()
-            .ok_or_else(|| ControlError::new("unavailable", "Hex is quitting"))
+            .ok_or_else(|| ControlError::new("unavailable", "WordInk is quitting"))
     }
 
     fn route(&self) -> std::result::Result<ShortcutRoute, ControlError> {
@@ -1202,7 +1198,7 @@ impl LinuxControl {
             .ok_or_else(|| {
                 ControlError::new(
                     "not-ready",
-                    "Hex is not listening; enable it in Settings or run `hex start`",
+                    "WordInk is not listening; enable it in Settings or run `wordink start`",
                 )
             })
     }
@@ -1215,7 +1211,7 @@ impl LinuxControl {
     fn window(&self, control: Control) -> std::result::Result<(), ControlError> {
         self.window
             .try_send(control)
-            .map_err(|_| ControlError::new("busy", "Hex is busy; try again"))
+            .map_err(|_| ControlError::new("busy", "WordInk is busy; try again"))
     }
 }
 
@@ -1227,7 +1223,7 @@ impl crate::control::host::Host for LinuxControl {
             .lock()
             .unwrap()
             .clone()
-            .ok_or_else(|| ControlError::new("not-ready", "Hex is starting; try again"))?;
+            .ok_or_else(|| ControlError::new("not-ready", "WordInk is starting; try again"))?;
         Ok(crate::control::host::HostState {
             capture: crate::control::host::capture_from_state(status.desktop.activity.state),
             listener: status.desktop.listener,
@@ -1249,7 +1245,7 @@ impl crate::control::host::Host for LinuxControl {
                 .route()?
                 .commands
                 .try_send(ListenerCommand::StopAndPrint(print))
-                .map_err(|_| ControlError::new("busy", "Hex is busy; try again"));
+                .map_err(|_| ControlError::new("busy", "WordInk is busy; try again"));
         }
         self.shortcut(match (action, raw) {
             (CaptureAction::Start, false) => ShortcutCommand::DictationStart,
@@ -1350,12 +1346,12 @@ impl crate::control::host::Host for LinuxControl {
                 match crate::capture_host::send_to_listener(
                     crate::capture_host::CaptureControl::Scrawl(action),
                 ) {
-                    Ok(()) => ControlReply::done("Sent to Hex"),
+                    Ok(()) => ControlReply::done("Sent to WordInk"),
                     Err(error) => ControlReply::error("failed", format!("{error:#}")),
                 }
             }
             _ => crate::control::host::unsupported(
-                "run this `hex annotate` command directly; it reads the captures folder itself",
+                "run this `wordink annotate` command directly; it reads the captures folder itself",
             ),
         }
     }
@@ -1450,7 +1446,7 @@ impl LinuxDesktopHost {
                     let _ = std::fs::write(marker, b"");
                 }
                 if let Err(error) = self.updater.act(&action) {
-                    self.error = Some(format!("Could not restart Hex: {error:#}"));
+                    self.error = Some(format!("Could not restart WordInk: {error:#}"));
                     return Err(error);
                 }
             }

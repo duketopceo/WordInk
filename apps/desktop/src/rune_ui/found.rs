@@ -262,7 +262,7 @@ pub(super) fn section(ui: &Ui, p: super::controls::Paint) -> Option<rune::El> {
                                     .color(p.text()),
                             )
                             .child(
-                                Badge::new(crate::desktop::i18n::tr("Not tested by Hex"))
+                                Badge::new(crate::desktop::i18n::tr("Not tested by WordInk"))
                                     .build(p.k),
                             ),
                     )

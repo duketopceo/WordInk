@@ -1,7 +1,7 @@
 //! The desktop's Background portal (`org.freedesktop.portal.Background`,
 //! #812): Hex tells the desktop it runs in the background, and where the
 //! portal exists it owns Launch at login. Asked to, the portal writes or
-//! removes `~/.config/autostart/anomaly.hex.desktop` itself, the entry
+//! removes `~/.config/autostart/io.github.duketopceo.wordink.desktop` itself, the entry
 //! [`crate::linux::login_item`] writes on desktops without it. Every request
 //! also sets autostart, and turning it off removes that file, so Hex asks
 //! only while the file is absent or its own.
@@ -42,7 +42,7 @@ pub(crate) fn request(autostart: bool, launcher: &Path) -> Result<Option<bool>> 
                     (
                         "reason",
                         Variant::from(
-                            "Hex keeps listening for your dictation shortcut when its window is closed",
+                            "WordInk keeps listening for your dictation shortcut when its window is closed",
                         ),
                     ),
                     ("autostart", Variant::from(autostart)),
@@ -81,7 +81,7 @@ mod tests {
 
     #[test]
     fn only_plain_paths_go_to_the_portal() {
-        assert!(plain("/home/a/.local/share/hex/current/hex"));
+        assert!(plain("/home/a/.local/share/wordink/current/wordink"));
         assert!(plain("/usr/bin/hex"));
         assert!(!plain("/home/a b/hex"));
         assert!(!plain("/tmp/100%/hex"));

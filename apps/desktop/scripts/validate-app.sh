@@ -24,7 +24,7 @@ plist_value() {
 
 [ -d "$bundle" ] || fail "$bundle does not exist"
 [ "$(basename "$bundle")" = "$expected_name" ] || fail "expected $expected_name, found $(basename "$bundle")"
-[ "$(plist_value CFBundleIdentifier)" = anomaly.hex ] || fail "wrong bundle identifier"
+[ "$(plist_value CFBundleIdentifier)" = io.github.duketopceo.wordink ] || fail "wrong bundle identifier"
 [ "$(plist_value CFBundleExecutable)" = hex ] || fail "wrong executable name"
 [ "$(plist_value CFBundleDisplayName)" = Hex ] || fail "wrong display name"
 [ "$(plist_value CFBundleName)" = Hex ] || fail "wrong bundle name"
@@ -47,7 +47,7 @@ plist_value NSCameraUsageDescription >/dev/null 2>&1 || fail "Info.plist does no
 
 codesign --verify --deep --strict --verbose=2 "$bundle"
 signature=$(codesign -d --verbose=4 "$bundle" 2>&1)
-printf '%s\n' "$signature" | grep -Fq 'Identifier=anomaly.hex' || fail "code signature has the wrong identifier"
+printf '%s\n' "$signature" | grep -Fq 'Identifier=io.github.duketopceo.wordink' || fail "code signature has the wrong identifier"
 printf '%s\n' "$signature" | grep -Fq "TeamIdentifier=$team_id" || fail "code signature has the wrong team"
 printf '%s\n' "$signature" | grep -Fq 'Authority=Developer ID Application:' || fail "not signed for Developer ID distribution"
 entitlements=$(codesign -d --entitlements - "$bundle" 2>/dev/null)

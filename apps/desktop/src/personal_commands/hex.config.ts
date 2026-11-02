@@ -1,9 +1,9 @@
 import { defineHexConfig } from "@hex/commands"
 
-// Hex runs this file itself and reloads it when you save. It is plain
+// WordInk runs this file itself and reloads it when you save. It is plain
 // TypeScript or JavaScript with no npm packages: transformations return text.
-// fetch and node:child_process are there once you allow them in Hex; see
-// https://anoma.ly/hex/docs/transforms
+// fetch and node:child_process are there once you allow them in WordInk; see
+// https://github.com/duketopceo/WordInk/tree/master/apps/desktop/docs
 export default defineHexConfig({
   // Transformations appear as optional final steps in every dictation mode.
   transformations: {

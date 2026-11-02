@@ -670,7 +670,7 @@ impl<E: Engine> Worker<E> {
                     return End::Cancelled;
                 }
                 if self.engine.quitting() {
-                    return failed("hex-quitting", "Hex is quitting");
+                    return failed("hex-quitting", "WordInk is quitting");
                 }
                 if !state.finishing && Instant::now() >= state.lease_deadline {
                     return failed("lease-expired", "no audio or heartbeat within the lease");
@@ -830,7 +830,7 @@ impl<E: Engine> Worker<E> {
         if !self.engine.holds_model() {
             return Err(failed(
                 MODEL_CHANGED,
-                "Hex's dictation model changed during the stream",
+                "WordInk's dictation model changed during the stream",
             ));
         }
         let text = match self.stream_window(&mut window) {
@@ -845,7 +845,7 @@ impl<E: Engine> Worker<E> {
                     Err(message) if message == MODEL_CHANGED => {
                         return Err(failed(
                             MODEL_CHANGED,
-                            "Hex's dictation model changed during the stream",
+                            "WordInk's dictation model changed during the stream",
                         ));
                     }
                     Err(message) => return Err(failed("transcription-failed", &message)),

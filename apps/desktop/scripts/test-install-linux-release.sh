@@ -62,7 +62,7 @@ bytes=$(wc -c < "$unsigned" | tr -d ' ')
 file="hex-$version-$target"
 mkdir -p "$server/release/hex/desktop" "$server/release/hex/files/$sha256"
 cp "$unsigned" "$server/release/hex/files/$sha256/$file"
-printf 'anomaly.hex.linux-artifact.v1\n%s\n' "$sha256" > "$temporary/signed"
+printf 'io.github.duketopceo.wordink.linux-artifact.v1\n%s\n' "$sha256" > "$temporary/signed"
 openssl pkeyutl -sign -rawin -inkey "$temporary/signing.pem" -in "$temporary/signed" -out "$temporary/hex.sig"
 signature_sha256=$(sha256sum "$temporary/hex.sig" | awk '{ print $1 }')
 mkdir -p "$server/release/hex/files/$signature_sha256"
@@ -124,43 +124,43 @@ install
 test -L "$install_dir/hex"
 test ! -e "$home/.local/share/applications/hex.desktop"
 test ! -e "$home/.config/autostart/hex.desktop"
-grep -Fxq 'StartupWMClass=anomaly.hex' "$home/.local/share/applications/anomaly.hex.desktop"
-grep -Fxq 'Icon=anomaly.hex' "$home/.local/share/applications/anomaly.hex.desktop"
+grep -Fxq 'StartupWMClass=io.github.duketopceo.wordink' "$home/.local/share/applications/io.github.duketopceo.wordink.desktop"
+grep -Fxq 'Icon=io.github.duketopceo.wordink' "$home/.local/share/applications/io.github.duketopceo.wordink.desktop"
 test "$("$install_dir/hex" --version)" = "hex $version"
-grep -Fq 'X-Hex-Managed=true' "$home/.local/share/applications/anomaly.hex.desktop"
-grep -Fq 'X-Hex-Managed=true' "$home/.config/autostart/anomaly.hex.desktop"
-grep -Fq '" start' "$home/.config/autostart/anomaly.hex.desktop"
+grep -Fq 'X-Hex-Managed=true' "$home/.local/share/applications/io.github.duketopceo.wordink.desktop"
+grep -Fq 'X-Hex-Managed=true' "$home/.config/autostart/io.github.duketopceo.wordink.desktop"
+grep -Fq '" start' "$home/.config/autostart/io.github.duketopceo.wordink.desktop"
 grep -Fq '# X-Hex-Managed=true' "$home/.config/systemd/user/hex.service"
 grep -Fq '" service' "$home/.config/systemd/user/hex.service"
 grep -Fxq 'Type=notify' "$home/.config/systemd/user/hex.service"
 grep -Fxq 'NotifyAccess=main' "$home/.config/systemd/user/hex.service"
-grep -Fxq "Exec=\"$install_dir/hex\"" "$home/.local/share/applications/anomaly.hex.desktop"
-grep -Fxq "Exec=\"$install_dir/hex\" quit" "$home/.local/share/applications/anomaly.hex.desktop"
+grep -Fxq "Exec=\"$install_dir/hex\"" "$home/.local/share/applications/io.github.duketopceo.wordink.desktop"
+grep -Fxq "Exec=\"$install_dir/hex\" quit" "$home/.local/share/applications/io.github.duketopceo.wordink.desktop"
 grep -Fxq "EnvironmentFile=-$support_dir/session.env" "$home/.config/systemd/user/hex.service"
 test ! -e "$support_dir/versions/$version/source-build"
 test "$(jq -c . "$support_dir/install.json")" = \
   "$(jq -cn --arg root "$support_dir" '{app: "hex", artifact: "desktop", channel: "stable", method: "direct", root: $root}')"
 
 mkdir -p "$home/.local/share/icons/hicolor/48x48/apps" "$home/.local/share/icons/hicolor/64x64/apps"
-printf 'png X-Hex-Managed=true' > "$home/.local/share/icons/hicolor/48x48/apps/anomaly.hex.png"
-printf 'mine' > "$home/.local/share/icons/hicolor/64x64/apps/anomaly.hex.png"
+printf 'png X-Hex-Managed=true' > "$home/.local/share/icons/hicolor/48x48/apps/io.github.duketopceo.wordink.png"
+printf 'mine' > "$home/.local/share/icons/hicolor/64x64/apps/io.github.duketopceo.wordink.png"
 # The Background portal's own autostart entry for Hex counts as Hex's.
 portal_entry() {
-  printf '[Desktop Entry]\nType=Application\nName=Hex\nX-XDP-Autostart=anomaly.hex\nExec=%s start\n' "$install_dir/hex" > "$home/.config/autostart/anomaly.hex.desktop"
+  printf '[Desktop Entry]\nType=Application\nName=Hex\nX-XDP-Autostart=io.github.duketopceo.wordink\nExec=%s start\n' "$install_dir/hex" > "$home/.config/autostart/io.github.duketopceo.wordink.desktop"
 }
 portal_entry
 install > /dev/null
 portal_entry
 install uninstall
-test ! -e "$home/.config/autostart/anomaly.hex.desktop"
-test ! -e "$home/.local/share/icons/hicolor/48x48/apps/anomaly.hex.png"
-test -f "$home/.local/share/icons/hicolor/64x64/apps/anomaly.hex.png"
+test ! -e "$home/.config/autostart/io.github.duketopceo.wordink.desktop"
+test ! -e "$home/.local/share/icons/hicolor/48x48/apps/io.github.duketopceo.wordink.png"
+test -f "$home/.local/share/icons/hicolor/64x64/apps/io.github.duketopceo.wordink.png"
 test ! -e "$install_dir/hex"
 test ! -e "$support_dir/versions"
 test ! -e "$support_dir/install.json"
 test ! -e "$home/.config/systemd/user/hex.service"
-test ! -e "$home/.local/share/applications/anomaly.hex.desktop"
-test ! -e "$home/.config/autostart/anomaly.hex.desktop"
+test ! -e "$home/.local/share/applications/io.github.duketopceo.wordink.desktop"
+test ! -e "$home/.config/autostart/io.github.duketopceo.wordink.desktop"
 test -f "$support_dir/settings.json"
 
 # The dev channel: its manifest, its receipt.

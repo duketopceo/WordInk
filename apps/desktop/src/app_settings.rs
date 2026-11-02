@@ -1465,9 +1465,9 @@ pub fn default_meeting_output_folder() -> PathBuf {
         .or_else(|| dirs::home_dir().map(|home| home.join("Documents")))
         .unwrap_or_else(|| PathBuf::from("."))
         .join(if crate::app_paths::is_macos_test_build() {
-            "Hex Test Meetings"
+            "WordInk Test Meetings"
         } else {
-            "Hex Meetings"
+            "WordInk Meetings"
         })
 }
 
@@ -1594,7 +1594,8 @@ impl Default for DictationPostProcessing {
 }
 
 /// Annotate: Scrawl's captures inside Hex, on macOS, Linux, and Windows
-/// (`capture_host`). On by default; off means no capture work at all.
+/// (`capture_host`). Off by default in WordInk; off means no capture work at
+/// all and no shortcut.
 #[cfg(hex_capture)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
@@ -1659,7 +1660,7 @@ impl Default for CaptureSettings {
     fn default() -> Self {
         let week = scrawl_capture::retention::Preset::Week.policy();
         Self {
-            enabled: true,
+            enabled: false,
             hotkey: HotkeyBinding::capture_default(),
             transcriber: CaptureTranscriber::default(),
             folder: None,
@@ -2421,7 +2422,7 @@ impl AppSettings {
         }
         #[cfg(hex_capture)]
         if !self.has_migration(ANNOTATE_DEFAULT_MIGRATION) {
-            self.capture.enabled = true;
+            // Hex turned Annotate on here; WordInk leaves it as the person set it.
             self.migrations.push(ANNOTATE_DEFAULT_MIGRATION.into());
         }
     }
@@ -2962,7 +2963,7 @@ pub fn set_dock_icon_visible(visible: bool) {
 #[cfg(target_os = "macos")]
 pub fn hide_application() {
     let Some(marker) = MainThreadMarker::new() else {
-        tracing::warn!("cannot hide Hex outside the main thread");
+        tracing::warn!("cannot hide WordInk outside the main thread");
         return;
     };
     NSApplication::sharedApplication(marker).hide(None);
@@ -2998,31 +2999,31 @@ mod tests {
         assert_ne!(gnome, HotkeyBinding::capture_default());
     }
 
-    /// Annotate is on out of the box, so its shortcut and the rest of the
+    /// Annotate is off out of the box, and its shortcut and the rest of the
     /// defaults share no key on any OS.
     #[cfg(hex_capture)]
     #[test]
     fn annotates_default_shortcuts_share_no_key() {
         let settings = AppSettings::default();
-        assert!(settings.capture.enabled);
+        assert!(!settings.capture.enabled, "screen capture is off by default");
         assert!(!settings.hotkey_in_use(HotkeySlot::Capture, &settings.capture.hotkey));
     }
 
-    /// A settings file from before Annotate was on by default turns it on
-    /// once.
+    /// Hex turned Annotate on for older settings files; WordInk never does,
+    /// so a file without the migration keeps what the person chose.
     #[cfg(hex_capture)]
     #[test]
-    fn annotate_turns_on_once_for_older_settings() {
+    fn older_settings_never_turn_annotate_on() {
         let mut settings = AppSettings {
             migrations: vec![STREAMING_ENGLISH_MIGRATION.into()],
             ..AppSettings::default()
         };
-        settings.capture.enabled = false;
+        assert!(!settings.capture.enabled);
         settings.apply_one_time_migrations_with(|_| true);
-        assert!(settings.capture.enabled);
-        settings.capture.enabled = false;
+        assert!(!settings.capture.enabled);
+        settings.capture.enabled = true;
         settings.apply_one_time_migrations_with(|_| true);
-        assert!(!settings.capture.enabled, "only once");
+        assert!(settings.capture.enabled, "a person's choice stays");
     }
 
     #[test]
@@ -3090,9 +3091,9 @@ mod tests {
             ..AppSettings::default()
         })
         .unwrap();
-        file["transcription"]["recognition_hints"] = "Hex, rune\nKaffar".into();
+        file["transcription"]["recognition_hints"] = "WordInk, rune\nKaffar".into();
         file["transcription_recents"] = serde_json::json!([
-            {"model": "parakeet_v3", "language": "de", "recognition_hints": "Old; Hex"},
+            {"model": "parakeet_v3", "language": "de", "recognition_hints": "Old; WordInk"},
             {"model": "qwen3_asr06_b", "language": "en", "recognition_hints": "Rodolfo"},
         ]);
         fs::write(&dir.path, serde_json::to_vec(&file).unwrap()).unwrap();
@@ -3102,7 +3103,7 @@ mod tests {
             .iter()
             .map(|entry| entry.term.as_str())
             .collect();
-        assert_eq!(terms, ["Rune", "Hex", "Kaffar", "Rodolfo", "Old"]);
+        assert_eq!(terms, ["Rune", "WordInk", "Kaffar", "Rodolfo", "Old"]);
         assert_eq!(loaded.vocabulary[0].sounds_like, ["rune's"]);
         assert_eq!(loaded.sound_effect_volume, 0.25);
         let written = fs::read_to_string(&dir.path).unwrap();
@@ -3302,7 +3303,7 @@ mod tests {
             settings
                 .meetings
                 .resolved_output_folder()
-                .ends_with("Hex Meetings")
+                .ends_with("WordInk Meetings")
         );
         assert!(settings.text_replacements.is_empty());
     }

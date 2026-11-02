@@ -671,7 +671,7 @@ fn bundled_driver_path() -> Option<PathBuf> {
         candidates.push(home.join("Library/Caches/hex-mic/HexMicrophone.driver"));
     }
     candidates.push(PathBuf::from(
-        "/Applications/Hex.app/Contents/Library/HexMicrophone.driver",
+        "/Applications/WordInk.app/Contents/Library/HexMicrophone.driver",
     ));
     candidates
         .into_iter()
@@ -760,7 +760,7 @@ pub fn install_driver_async() {
             .spawn(|| {
                 let Some(src_bundle) = bundled_driver_path() else {
                     set_driver_action_state(DriverActionState::Failed(
-                        "Bundled HexMicrophone.driver was not found in Hex.app".into(),
+                        "Bundled HexMicrophone.driver was not found in WordInk.app".into(),
                     ));
                     return;
                 };

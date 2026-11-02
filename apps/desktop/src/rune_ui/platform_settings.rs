@@ -34,12 +34,12 @@ fn permission_copy(
         PermissionKind::Microphone => (
             "permission-microphone",
             tr("Microphone"),
-            tr("Hex cannot record dictation until microphone access is restored."),
+            tr("WordInk cannot record dictation until microphone access is restored."),
         ),
         PermissionKind::Accessibility => (
             "permission-accessibility",
             accessibility_name(accessibility_renamed),
-            tr("Hex cannot recognize the dictation shortcut or paste into other apps."),
+            tr("WordInk cannot recognize the dictation shortcut or paste into other apps."),
         ),
         PermissionKind::SystemAudio => (
             "permission-system-audio",
@@ -82,11 +82,11 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
                     p,
                     key,
                     name,
-                    Some(tr("Turns on when Hex restarts")),
+                    Some(tr("Turns on when WordInk restarts")),
                     button(
                         p,
                         &format!("{key}-restart"),
-                        tr("Restart Hex"),
+                        tr("Restart WordInk"),
                         ButtonKind::Secondary,
                         |ui: &mut Ui, _| {
                             ui.ask(PlatformRequest::Permission(PermissionAction::Restart))
@@ -97,7 +97,7 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
             let stale =
                 warning.kind == PermissionKind::Accessibility && ui.platform.stale(warning.kind);
             let description = if stale {
-                tr("An older Hex entry can keep this off")
+                tr("An older WordInk entry can keep this off")
             } else {
                 description
             };
@@ -255,7 +255,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
             Some(if permitted {
                 tr("Captures the other participants' audio")
             } else if stale {
-                tr("An older Hex entry can keep this off")
+                tr("An older WordInk entry can keep this off")
             } else {
                 tr("Required to hear the other participants.")
             }),
@@ -401,11 +401,11 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         tr("Keep meetings"),
         match chosen {
             None => Some(tr(
-                "Audio, transcripts, notes, and Hex's Markdown copy move to the Trash. Meetings from before this setting stay until you choose",
+                "Audio, transcripts, notes, and WordInk's Markdown copy move to the Trash. Meetings from before this setting stay until you choose",
             )),
             Some(MeetingRetention::Forever) => None,
             Some(_) => Some(tr(
-                "Audio, transcripts, notes, and Hex's Markdown copy move to the Trash",
+                "Audio, transcripts, notes, and WordInk's Markdown copy move to the Trash",
             )),
         },
         control,
@@ -465,7 +465,7 @@ fn calendar_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
             &icons::CALENDAR,
             tr("Calendar access is off"),
             Some(tr(
-                "Allow Hex under Privacy & Security › Calendars to get meeting reminders",
+                "Allow WordInk under Privacy & Security › Calendars to get meeting reminders",
             )),
             button(
                 p,

@@ -798,7 +798,7 @@ impl AppNapOptOut {
         use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
         let activity = NSProcessInfo::processInfo().beginActivityWithOptions_reason(
             NSActivityOptions::UserInitiatedAllowingIdleSystemSleep,
-            &NSString::from_str("Hex listens for its dictation shortcut"),
+            &NSString::from_str("WordInk listens for its dictation shortcut"),
         );
         Self(activity)
     }

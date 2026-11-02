@@ -107,7 +107,7 @@ const fn read_only(key: &'static str, kind: Kind, about: &'static str, why: &'st
 }
 
 const UNIT: Kind = Kind::Number { min: 0.0, max: 1.0 };
-const MODEL_CHANGE: &str = "change the transcription model with `hex model use`";
+const MODEL_CHANGE: &str = "change the transcription model with `wordink model use`";
 
 /// Choice keys whose values are numbers in settings.json.
 const NUMERIC_CHOICES: [&str; 2] = ["meetings.calendar.lead_minutes", "labs.unload_idle_minutes"];
@@ -149,7 +149,7 @@ const KEYS: &[Key] = &[
             "analog",
             "thock",
         ]),
-        "Which sounds play; classic, Hex's original tones, is the default",
+        "Which sounds play; classic, WordInk's original tones, is the default",
     ),
     optional(
         "microphone",
@@ -217,7 +217,7 @@ const KEYS: &[Key] = &[
     key(
         "show_dock_icon",
         Kind::Bool,
-        "Keep Hex in the Dock when Settings is closed (macOS)",
+        "Keep WordInk in the Dock when Settings is closed (macOS)",
     ),
     read_only(
         "transcription.model",
@@ -235,7 +235,7 @@ const KEYS: &[Key] = &[
         "transcription_recents",
         Kind::Json,
         "Recently used models, each with its language",
-        "Hex records these as you switch models",
+        "WordInk records these as you switch models",
     ),
     key(
         "vocabulary_boost",
@@ -325,7 +325,7 @@ const KEYS: &[Key] = &[
     key(
         "labs.subtitle_export",
         Kind::Bool,
-        "Labs: export meeting transcripts as SRT or VTT subtitles with hex meetings show --srt|--vtt",
+        "Labs: export meeting transcripts as SRT or VTT subtitles with wordink meetings show --srt|--vtt",
     ),
     key(
         "labs.second_dictation_shortcut",
@@ -370,7 +370,7 @@ const KEYS: &[Key] = &[
     key(
         "labs.history_stats",
         Kind::Bool,
-        "Labs: a summary of retained dictations at the top of History, and hex history stats",
+        "Labs: a summary of retained dictations at the top of History, and wordink history stats",
     ),
     key(
         "labs.recent_dictations",
@@ -385,7 +385,7 @@ const KEYS: &[Key] = &[
     optional(
         "meetings.output_folder",
         Kind::Path,
-        "Folder for meeting Markdown; none uses ~/Documents/Hex Meetings",
+        "Folder for meeting Markdown; none uses ~/Documents/WordInk Meetings",
     ),
     key(
         "meetings.summarize_with_apple_intelligence",
@@ -471,7 +471,7 @@ const KEYS: &[Key] = &[
     key(
         "enable_on_launch",
         Kind::Bool,
-        "Start listening when Hex opens (Windows and Linux)",
+        "Start listening when WordInk opens (Windows and Linux)",
     ),
     key(
         "paste_with_shift",
@@ -481,7 +481,7 @@ const KEYS: &[Key] = &[
     key(
         "gnome_keyboard_shortcuts",
         Kind::Bool,
-        "Hex's own GNOME custom keyboard shortcuts, for GNOME without a shortcuts portal (Linux)",
+        "WordInk's own GNOME custom keyboard shortcuts, for GNOME without a shortcuts portal (Linux)",
     ),
     key(
         "share_dictation_shortcut",
@@ -526,7 +526,7 @@ const CAPTURE_KEYS: &[Key] = &[
     key(
         "capture.transcriber",
         Kind::Choice(&["parakeet", "apple"]),
-        "What transcribes a capture's narration: Hex's loaded model or Apple's",
+        "What transcribes a capture's narration: WordInk's loaded model or Apple's",
     ),
     optional(
         "capture.folder",
@@ -557,7 +557,7 @@ const CAPTURE_KEYS: &[Key] = &[
     key(
         "capture.show_overlays_in_recordings",
         Kind::Bool,
-        "Let screen recordings, captures included, show Hex's capsules, ink, and HUD (for demos)",
+        "Let screen recordings, captures included, show WordInk's capsules, ink, and HUD (for demos)",
     ),
 ];
 #[cfg(hex_capture)]
@@ -602,7 +602,7 @@ pub fn unavailable(name: &str) -> Option<ControlError> {
     Some(ControlError::new(
         "unsupported",
         format!(
-            "`{name}` does nothing on this OS: it needs {capability}, which Hex has only elsewhere"
+            "`{name}` does nothing on this OS: it needs {capability}, which WordInk has only elsewhere"
         ),
     ))
 }
@@ -710,7 +710,7 @@ fn unknown(name: &str) -> ControlError {
         .unwrap_or_default();
     ControlError::new(
         "unknown-setting",
-        format!("unknown setting `{name}`.{near} Run `hex settings list` for every key."),
+        format!("unknown setting `{name}`.{near} Run `wordink settings list` for every key."),
     )
 }
 
@@ -825,7 +825,7 @@ pub fn apply(
                 {
                     return Err(invalid(
                         name,
-                        "mouse buttons need Labs › Mouse shortcuts: hex labs on mouse-shortcuts",
+                        "mouse buttons need Labs › Mouse shortcuts: wordink labs on mouse-shortcuts",
                     ));
                 }
                 if let Some(why) = special_key_refusal(&candidate, binding) {
@@ -836,7 +836,7 @@ pub fn apply(
                     return Err(ControlError::new(
                         "shortcut-in-use",
                         format!(
-                            "{} is already in use by another Hex shortcut",
+                            "{} is already in use by another WordInk shortcut",
                             format_hotkey(binding)
                         ),
                     ));
@@ -1161,7 +1161,7 @@ fn special_key_refusal(settings: &AppSettings, binding: &HotkeyBinding) -> Optio
         let key = binding.key.as_ref()?;
         return (binding.is_lone_navigation_key() && !settings.special_keys_allowed()).then(|| {
             format!(
-                "{} alone needs Labs › Special keys alone: hex labs on special-keys",
+                "{} alone needs Labs › Special keys alone: wordink labs on special-keys",
                 key.label.to_lowercase().replace(' ', "")
             )
         });
@@ -1173,7 +1173,7 @@ fn special_key_refusal(settings: &AppSettings, binding: &HotkeyBinding) -> Optio
     let name = key.label.to_lowercase().replace(' ', "");
     if cfg!(target_os = "linux") {
         return Some(format!(
-            "{name} needs Labs › Special keys alone: hex labs on special-keys"
+            "{name} needs Labs › Special keys alone: wordink labs on special-keys"
         ));
     }
     binding
@@ -1294,7 +1294,7 @@ mod tests {
                 .any(|key| path == key || path.starts_with(&format!("{key}.")));
             assert!(
                 covered,
-                "settings.json has `{path}`, which `hex settings` can't name"
+                "settings.json has `{path}`, which `wordink settings` can't name"
             );
         }
         for key in keys() {

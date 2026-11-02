@@ -14,7 +14,7 @@ const LIST_SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys";
 const ENTRY_SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding";
 const BASE: &str = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/";
 /// Every entry Hex may write, by path name.
-const ENTRIES: [&str; 3] = ["hex-dictation", "hex-paste-last", "hex-annotate"];
+const ENTRIES: [&str; 3] = ["wordink-dictation", "wordink-paste-last", "wordink-annotate"];
 
 /// One custom shortcut: its path name, its name in GNOME Settings, the `hex`
 /// arguments it runs, and its GTK accelerator.
@@ -97,22 +97,22 @@ fn entries(settings: &AppSettings) -> Vec<Entry> {
         }
     };
     add(
-        "hex-dictation",
-        "Hex: dictation",
+        "wordink-dictation",
+        "WordInk: dictation",
         "dictation toggle",
         Some(&settings.dictation_hotkey),
     );
     add(
-        "hex-paste-last",
-        "Hex: paste last dictation",
+        "wordink-paste-last",
+        "WordInk: paste last dictation",
         "paste-last",
         settings.paste_last_hotkey.as_ref(),
     );
     #[cfg(hex_capture)]
     if settings.capture.enabled {
         add(
-            "hex-annotate",
-            "Hex: annotate",
+            "wordink-annotate",
+            "WordInk: annotate",
             "annotate toggle",
             Some(&settings.capture.hotkey),
         );
@@ -232,7 +232,7 @@ mod tests {
         };
         let entries = entries(&settings);
         assert_eq!(entries[0].arguments, "dictation toggle");
-        assert!(entries.iter().all(|entry| entry.id != "hex-paste-last"));
+        assert!(entries.iter().all(|entry| entry.id != "wordink-paste-last"));
         assert_eq!(
             shell_word("/home/a/.local/bin/hex"),
             "/home/a/.local/bin/hex"

@@ -32,14 +32,11 @@ const SHORTCUTS: &str = "org.freedesktop.portal.GlobalShortcuts";
 const REQUEST: &str = "org.freedesktop.portal.Request";
 const SESSION: &str = "org.freedesktop.portal.Session";
 /// Hex's Linux app id: the portal names host apps by their desktop entry,
-/// `anomaly.hex.desktop`, and Hex's windows report it as their Wayland
+/// `io.github.duketopceo.wordink.desktop`, and Hex's windows report it as their Wayland
 /// app_id and X11 WM_CLASS. GNOME's shortcuts provider before 51 rejects ids
 /// that are not reverse-DNS (#579), so this matches the macOS bundle
 /// identifier.
-pub(crate) const APP_ID: &str = "anomaly.hex";
-/// The app id and entry name before #579.
-const LEGACY_APP_ID: &str = "hex";
-const LEGACY_ENTRY: &str = "hex.desktop";
+pub(crate) const APP_ID: &str = "io.github.duketopceo.wordink";
 const MANAGED_MARK: &str = "X-Hex-Managed=true";
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 /// A request can wait for the user to approve a desktop dialog.
@@ -155,7 +152,7 @@ pub(crate) struct PortalBus {
     /// The portal interface this bus serves and its version.
     interface: &'static str,
     pub(crate) version: u32,
-    /// The portal knows Hex as `anomaly.hex` (xdg-desktop-portal 1.20 and
+    /// The portal knows Hex as `io.github.duketopceo.wordink` (xdg-desktop-portal 1.20 and
     /// newer register host apps); older ones may not know Hex's app id.
     pub(crate) registered: bool,
 }
@@ -237,17 +234,17 @@ impl PortalBus {
             &(APP_ID, HashMap::<&str, Variant<'_>>::new()),
         ) {
             if !unknown(&error) {
-                // The portal finds the app id through anomaly.hex.desktop and the caller's
+                // The portal finds the app id through io.github.duketopceo.wordink.desktop and the caller's
                 // /proc entry, which setgid wrappers such as newgrp make unreadable.
                 let fix = match written {
                     Some(entry) => format!(
-                        "Hex wrote {}; restart xdg-desktop-portal (systemctl --user restart xdg-desktop-portal) so it reads it",
+                        "WordInk wrote {}; restart xdg-desktop-portal (systemctl --user restart xdg-desktop-portal) so it reads it",
                         entry.display()
                     ),
-                    None => "run Hex without setuid or setgid wrappers such as newgrp".into(),
+                    None => "run WordInk without setuid or setgid wrappers such as newgrp".into(),
                 };
                 return Err(eyre!(
-                    "the desktop portal could not identify Hex ({error}); {fix}"
+                    "the desktop portal could not identify WordInk ({error}); {fix}"
                 ));
             }
         } else {
@@ -427,7 +424,7 @@ pub(crate) fn tidy_desktop_entries() -> Result<()> {
 }
 
 /// The portal identifies a host app by a desktop entry named for its id,
-/// `anomaly.hex.desktop`, which installs ship: see [`DesktopEntries::ensure`].
+/// `io.github.duketopceo.wordink.desktop`, which installs ship: see [`DesktopEntries::ensure`].
 /// What Hex's launcher entry starts: the same stable path as Launch at
 /// login, so a version manager's upgrade doesn't strand it (#810).
 fn executable() -> Result<String> {
@@ -435,7 +432,7 @@ fn executable() -> Result<String> {
     executable
         .to_str()
         .map(str::to_owned)
-        .ok_or_else(|| eyre!("Hex's executable path is not UTF-8"))
+        .ok_or_else(|| eyre!("WordInk's executable path is not UTF-8"))
 }
 
 fn ensure_desktop_entry() -> Result<Option<PathBuf>> {
@@ -508,32 +505,12 @@ impl DesktopEntries {
         self.system.iter().any(|dir| dir.join(name).exists())
     }
 
-    /// Moves Hex's own managed `hex.desktop` (the name before #579) to
-    /// `anomaly.hex.desktop`, keeping its Exec lines, unless the user put an
-    /// entry of their own there; then removes a hidden fallback that would
+    /// Removes a hidden fallback that would
     /// shadow a package's entry of the same id, or names Hex's icon in an
     /// entry Hex wrote with the generic one (#652). Returns the entry it wrote.
     fn tidy(&self) -> Result<Option<PathBuf>> {
         let entry = self.entry();
         let current = read_entry(&entry)?;
-        let legacy = self.applications.join(LEGACY_ENTRY);
-        if let Entry::File(old) = read_entry(&legacy)?
-            && managed(&old)
-        {
-            let replace = match &current {
-                Entry::Missing => true,
-                Entry::File(current) => managed(current),
-                Entry::Other => false,
-            };
-            if replace {
-                write_entry(&self.applications, &entry, &moved_entry(&old))
-                    .wrap_err_with(|| format!("could not write {}", entry.display()))?;
-            }
-            std::fs::remove_file(&legacy)
-                .wrap_err_with(|| format!("could not remove {}", legacy.display()))?;
-            tracing::info!(entry = %entry.display(), "moved Hex's desktop entry to its app id");
-            return Ok(replace.then_some(entry));
-        }
         if let Entry::File(current) = &current
             && managed(current)
             && no_display(current)
@@ -541,14 +518,14 @@ impl DesktopEntries {
         {
             std::fs::remove_file(&entry)
                 .wrap_err_with(|| format!("could not remove {}", entry.display()))?;
-            tracing::info!(entry = %entry.display(), "removed Hex's fallback desktop entry");
+            tracing::info!(entry = %entry.display(), "removed WordInk's fallback desktop entry");
         } else if let Entry::File(current) = &current
             && managed(current)
             && with_icon(current) != *current
         {
             write_entry(&self.applications, &entry, &with_icon(current))
                 .wrap_err_with(|| format!("could not write {}", entry.display()))?;
-            tracing::info!(entry = %entry.display(), "named Hex's icon in its desktop entry");
+            tracing::info!(entry = %entry.display(), "named WordInk's icon in its desktop entry");
         }
         Ok(None)
     }
@@ -574,7 +551,7 @@ impl DesktopEntries {
         if !program.is_file() && self.shipped(&format!("{APP_ID}.desktop")) {
             std::fs::remove_file(&entry)
                 .wrap_err_with(|| format!("could not remove {}", entry.display()))?;
-            tracing::info!(entry = %entry.display(), "removed Hex's stranded desktop entry");
+            tracing::info!(entry = %entry.display(), "removed WordInk's stranded desktop entry");
             return Ok(());
         }
         let repointed = desktop_entry(executable, no_display(&current));
@@ -583,14 +560,13 @@ impl DesktopEntries {
         }
         write_entry(&self.applications, &entry, &repointed)
             .wrap_err_with(|| format!("could not write {}", entry.display()))?;
-        tracing::info!(entry = %entry.display(), "pointed Hex's desktop entry at this Hex");
+        tracing::info!(entry = %entry.display(), "pointed WordInk's desktop entry at this WordInk");
         Ok(())
     }
 
     /// After [`Self::tidy`], with no entry anywhere, writes a minimal one
     /// that runs `executable`, marked managed so an install may replace it,
-    /// and hidden from launchers when an older package's or the user's own
-    /// `hex.desktop` already shows Hex. Returns the entry it wrote.
+    /// Returns the entry it wrote.
     fn ensure(&self, executable: &str) -> Result<Option<PathBuf>> {
         let moved = self.tidy()?;
         self.repoint(executable)?;
@@ -603,11 +579,7 @@ impl DesktopEntries {
         {
             return Ok(None);
         }
-        let hidden = self.shipped(LEGACY_ENTRY)
-            || !matches!(
-                read_entry(&self.applications.join(LEGACY_ENTRY))?,
-                Entry::Missing
-            );
+        let hidden = false;
         write_entry(
             &self.applications,
             &entry,
@@ -648,7 +620,7 @@ fn write_entry(applications: &Path, entry: &Path, contents: &str) -> Result<()> 
     Ok(())
 }
 
-/// `entry` with every `Icon=` naming Hex's icon (`anomaly.hex` in hicolor).
+/// `entry` with every `Icon=` naming Hex's icon (`io.github.duketopceo.wordink` in hicolor).
 pub(crate) fn with_icon(entry: &str) -> String {
     let mut named = String::with_capacity(entry.len());
     for line in entry.lines() {
@@ -662,27 +634,10 @@ pub(crate) fn with_icon(entry: &str) -> String {
     named
 }
 
-/// An old managed entry under the new name, keeping its Exec lines, naming
-/// Hex's windows for X11 launchers, and showing Hex's icon.
-fn moved_entry(old: &str) -> String {
-    let mut entry = String::with_capacity(old.len() + 32);
-    for line in old
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("StartupWMClass="))
-    {
-        entry.push_str(line);
-        entry.push('\n');
-        if line.trim() == "[Desktop Entry]" {
-            entry.push_str(&format!("StartupWMClass={APP_ID}\n"));
-        }
-    }
-    with_icon(&entry)
-}
-
 /// `NoDisplay`, not `Hidden`: the portal refuses an app whose entry is Hidden.
 fn desktop_entry(executable: &str, hidden: bool) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Hex\nComment=Local voice dictation\nExec={}\nIcon={APP_ID}\nTerminal=false\nCategories=Utility;Accessibility;\nStartupWMClass={APP_ID}\n{}{MANAGED_MARK}\n",
+        "[Desktop Entry]\nType=Application\nName=WordInk\nComment=Local voice dictation\nExec={}\nIcon={APP_ID}\nTerminal=false\nCategories=Utility;Accessibility;\nStartupWMClass={APP_ID}\n{}{MANAGED_MARK}\n",
         exec_argument(executable),
         if hidden { "NoDisplay=true\n" } else { "" }
     )
@@ -766,7 +721,7 @@ impl Portal {
         let stop = AtomicBool::new(false);
         let session = self.bus.create_session(&stop)?;
         self.bind_session(session, &[], &stop)?;
-        tracing::info!("cleared Hex's shortcuts from GNOME Settings");
+        tracing::info!("cleared WordInk's shortcuts from GNOME Settings");
         Ok(())
     }
 
@@ -793,11 +748,10 @@ impl Portal {
                     "allActionsForComponent",
                     &(vec![component],),
                 )
-                .wrap_err("could not list Hex's old KDE shortcuts")
+                .wrap_err("could not list WordInk's old KDE shortcuts")
         };
-        let legacy = list(LEGACY_APP_ID)?;
         let current = list(APP_ID)?;
-        for (component, action) in superseded_kde_actions(&legacy, &current, keep) {
+        for (component, action) in superseded_kde_actions(&current, keep) {
             let removed: bool = self
                 .bus
                 .call_service(
@@ -807,9 +761,9 @@ impl Portal {
                     "unregister",
                     &(component, action),
                 )
-                .wrap_err_with(|| format!("could not remove Hex's old KDE shortcut {action}"))?;
+                .wrap_err_with(|| format!("could not remove WordInk's old KDE shortcut {action}"))?;
             if removed {
-                tracing::info!(component, action, "removed an old Hex shortcut from KDE");
+                tracing::info!(component, action, "removed an old WordInk shortcut from KDE");
             }
         }
         Ok(())
@@ -865,19 +819,14 @@ impl Portal {
 }
 
 /// The KDE actions to remove before binding: every action of the pre-#579
-/// `hex` component, then every action under `anomaly.hex` that `keep` doesn't
+/// `hex` component, then every action under `io.github.duketopceo.wordink` that `keep` doesn't
 /// name, the [`STALE_KDE_ACTIONS`] included. Each action is kglobalaccel's
 /// `[component, action, …]` id.
 fn superseded_kde_actions<'a>(
-    legacy: &'a [Vec<String>],
     current: &'a [Vec<String>],
     keep: &[&str],
 ) -> Vec<(&'static str, &'a str)> {
-    let mut actions = legacy
-        .iter()
-        .filter_map(|action| action.get(1))
-        .map(|action| (LEGACY_APP_ID, action.as_str()))
-        .collect::<Vec<_>>();
+    let mut actions: Vec<(&'static str, &'a str)> = Vec::new();
     let mut current = current
         .iter()
         .filter_map(|action| action.get(1))
@@ -892,9 +841,9 @@ fn superseded_kde_actions<'a>(
 }
 
 /// What the log says when the session has no shortcuts portal at startup.
-pub(crate) const MISSING_SHORTCUTS_PORTAL: &str = "no GlobalShortcuts portal; dictation follows the hex commands. \
+pub(crate) const MISSING_SHORTCUTS_PORTAL: &str = "no GlobalShortcuts portal; dictation follows the wordink commands. \
 If this desktop has one, xdg-desktop-portal may have started before the desktop session and picked the wrong \
-backend: restart it (systemctl --user restart xdg-desktop-portal) and Hex binds its shortcuts at its next check";
+backend: restart it (systemctl --user restart xdg-desktop-portal) and WordInk binds its shortcuts at its next check";
 
 /// Looks for the shortcuts portal again from time to time, after 15 s and
 /// then doubling up to every 2 minutes. A portal started before the
@@ -932,7 +881,7 @@ impl PortalProbe {
         {
             match self.running.take().map(std::thread::JoinHandle::join) {
                 Some(Ok(Ok(Some(portal)))) => {
-                    tracing::info!("the GlobalShortcuts portal appeared; binding Hex's shortcuts");
+                    tracing::info!("the GlobalShortcuts portal appeared; binding WordInk's shortcuts");
                     return Ok(Some(portal));
                 }
                 Some(Ok(Err(error))) if !self.warned => {
@@ -959,47 +908,6 @@ impl PortalProbe {
     }
 }
 
-const GNOME_SHORTCUTS: &str = "org.gnome.settings-daemon.global-shortcuts";
-
-/// Before #579 Hex registered with the portal as `hex`. GNOME Settings keeps
-/// that set listed beside `anomaly.hex`, and nothing can bind or clear it
-/// through the portal again (GNOME 49 and later refuse the id), so Hex removes
-/// it from GNOME's own settings once (#575). Only on GNOME, only that entry.
-pub(crate) fn forget_legacy_gnome_shortcuts() -> Result<()> {
-    use crate::linux::gsettings::{gsettings, string_list, string_list_text};
-    if !gnome() {
-        return Ok(());
-    }
-    // No gsettings or no GNOME schema: nothing to clear.
-    let Ok(listed) = gsettings(&["get", GNOME_SHORTCUTS, "applications"]) else {
-        return Ok(());
-    };
-    let applications = string_list(&listed);
-    if !applications.iter().any(|app| app == LEGACY_APP_ID) {
-        return Ok(());
-    }
-    gsettings(&[
-        "reset",
-        &format!(
-            "{GNOME_SHORTCUTS}.application:/org/gnome/settings-daemon/global-shortcuts/{LEGACY_APP_ID}/"
-        ),
-        "shortcuts",
-    ])?;
-    let kept = applications
-        .iter()
-        .filter(|app| *app != LEGACY_APP_ID)
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    gsettings(&[
-        "set",
-        GNOME_SHORTCUTS,
-        "applications",
-        &string_list_text(&kept),
-    ])?;
-    tracing::info!("removed Hex's pre-#579 shortcuts from GNOME Settings");
-    Ok(())
-}
-
 /// Whether the session's desktop is GNOME.
 pub(crate) fn gnome() -> bool {
     desktop_is("GNOME")
@@ -1008,7 +916,7 @@ pub(crate) fn gnome() -> bool {
 /// Whether the desktop assigns portal shortcuts their keys in its own
 /// configuration and describes no trigger in the portal's answer. Hyprland's
 /// portal returns an empty description for every shortcut, bound or not
-/// (`bind = …, global, anomaly.hex:…` in its config), so an empty one there
+/// (`bind = …, global, io.github.duketopceo.wordink:…` in its config), so an empty one there
 /// is no refusal.
 pub(crate) fn desktop_assigns_triggers() -> bool {
     desktop_is("Hyprland")
@@ -1082,17 +990,9 @@ mod tests {
         assert!(desktop_entry("/opt/hex", false).contains("\nExec=\"/opt/hex\"\n"));
         assert!(!desktop_entry("/opt/hex", false).contains("NoDisplay"));
         assert!(desktop_entry("/opt/hex", true).contains("\nNoDisplay=true\n"));
-        assert!(desktop_entry("/opt/hex", false).contains("\nStartupWMClass=anomaly.hex\n"));
+        assert!(desktop_entry("/opt/hex", false).contains("\nStartupWMClass=io.github.duketopceo.wordink\n"));
     }
 
-    #[test]
-    fn a_moved_entry_keeps_its_commands_and_names_the_window_class() {
-        let old = "[Desktop Entry]\nName=Hex\nExec=\"/home/a/.local/bin/hex\"\nStartupWMClass=hex\nX-Hex-Managed=true\n\n[Desktop Action quit]\nExec=\"/home/a/.local/bin/hex\" quit\n";
-        assert_eq!(
-            moved_entry(old),
-            "[Desktop Entry]\nStartupWMClass=anomaly.hex\nName=Hex\nExec=\"/home/a/.local/bin/hex\"\nX-Hex-Managed=true\n\n[Desktop Action quit]\nExec=\"/home/a/.local/bin/hex\" quit\n"
-        );
-    }
 
     fn entries(name: &str) -> (PathBuf, DesktopEntries) {
         let unique = std::time::SystemTime::now()
@@ -1109,7 +1009,7 @@ mod tests {
     }
 
     const OLD: &str =
-        "[Desktop Entry]\nName=Hex\nExec=\"/home/a/.local/bin/hex\"\nX-Hex-Managed=true\n";
+        "[Desktop Entry]\nName=WordInk\nExec=\"/home/a/.local/bin/hex\"\nX-Hex-Managed=true\n";
 
     #[test]
     fn entries_hex_wrote_name_its_icon() {
@@ -1121,8 +1021,8 @@ mod tests {
         .unwrap();
         entries.tidy().unwrap();
         let named = std::fs::read_to_string(entries.entry()).unwrap();
-        assert!(named.contains("\nIcon=anomaly.hex\n"), "{named}");
-        assert!(desktop_entry("/opt/hex", false).contains("\nIcon=anomaly.hex\n"));
+        assert!(named.contains("\nIcon=io.github.duketopceo.wordink\n"), "{named}");
+        assert!(desktop_entry("/opt/hex", false).contains("\nIcon=io.github.duketopceo.wordink\n"));
         // Someone else's entry keeps its icon.
         std::fs::write(entries.entry(), "[Desktop Entry]\nIcon=mine\n").unwrap();
         entries.tidy().unwrap();
@@ -1131,38 +1031,6 @@ mod tests {
                 .unwrap()
                 .contains("Icon=mine")
         );
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn an_old_managed_entry_moves_to_the_app_id() {
-        let (root, entries) = entries("move");
-        std::fs::write(entries.applications.join("hex.desktop"), OLD).unwrap();
-        assert_eq!(entries.ensure("/opt/hex").unwrap(), Some(entries.entry()));
-        assert!(!entries.applications.join("hex.desktop").exists());
-        let moved = std::fs::read_to_string(entries.entry()).unwrap();
-        assert!(moved.contains("Exec=\"/home/a/.local/bin/hex\"\n"));
-        assert!(moved.contains("StartupWMClass=anomaly.hex\n"));
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn entries_hex_did_not_write_stay() {
-        let (root, entries) = entries("unmanaged");
-        let user = entries.applications.join("hex.desktop");
-        std::fs::write(&user, "[Desktop Entry]\nName=Mine\n").unwrap();
-        std::os::unix::fs::symlink(&user, entries.entry()).unwrap();
-        entries.ensure("/opt/hex").unwrap();
-        assert!(user.exists());
-        assert!(entries.entry().is_symlink());
-        // A symlinked old entry is the user's too, even with Hex's mark.
-        std::fs::remove_file(entries.entry()).unwrap();
-        let target = root.join("managed.desktop");
-        std::fs::write(&target, OLD).unwrap();
-        std::fs::remove_file(&user).unwrap();
-        std::os::unix::fs::symlink(&target, &user).unwrap();
-        entries.tidy().unwrap();
-        assert!(user.is_symlink());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1197,7 +1065,7 @@ mod tests {
         );
         // A package ships Hex's entry now: the stranded fallback goes.
         std::fs::write(
-            entries.system[0].join("anomaly.hex.desktop"),
+            entries.system[0].join("io.github.duketopceo.wordink.desktop"),
             "[Desktop Entry]\n",
         )
         .unwrap();
@@ -1234,7 +1102,7 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
         let (root, provided) = entries("provided");
         std::fs::write(
-            provided.system[0].join("anomaly.hex.desktop"),
+            provided.system[0].join("io.github.duketopceo.wordink.desktop"),
             "[Desktop Entry]\n",
         )
         .unwrap();
@@ -1244,30 +1112,19 @@ mod tests {
     }
 
     #[test]
-    fn a_fallback_hides_beside_the_users_old_entry_and_yields_to_a_package() {
+    fn a_fallback_is_written_once_and_never_hidden_by_a_hex_entry() {
         let (root, entries) = entries("fallback");
         // The user's own directory listed in XDG_DATA_DIRS is not a package.
         assert_eq!(entries.system.len(), 1);
-        std::fs::write(
-            entries.applications.join("hex.desktop"),
-            "[Desktop Entry]\n",
-        )
-        .unwrap();
         assert_eq!(entries.ensure("/opt/hex").unwrap(), Some(entries.entry()));
+        // An installed Hex's own `hex.desktop` is none of WordInk's business.
         assert!(
-            std::fs::read_to_string(entries.entry())
+            !std::fs::read_to_string(entries.entry())
                 .unwrap()
                 .contains("NoDisplay=true")
         );
         assert_eq!(entries.ensure("/opt/hex").unwrap(), None);
         assert!(entries.entry().exists());
-        std::fs::write(
-            entries.system[0].join("anomaly.hex.desktop"),
-            "[Desktop Entry]\n",
-        )
-        .unwrap();
-        entries.tidy().unwrap();
-        assert!(!entries.entry().exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1294,11 +1151,10 @@ mod tests {
             vec![
                 component.to_string(),
                 action.to_string(),
-                "Hex".to_string(),
+                "WordInk".to_string(),
                 action.to_string(),
             ]
         };
-        let legacy = vec![id("hex", "dictation")];
         let current = vec![
             id(APP_ID, "dictation-ALT-space"),
             id(APP_ID, "dictation-CTRL-ALT-space"),
@@ -1306,14 +1162,12 @@ mod tests {
             id(APP_ID, "cancel"),
         ];
         let removed = superseded_kde_actions(
-            &legacy,
             &current,
             &["dictation-CTRL-ALT-space", "paste-last-ALT-SHIFT-v"],
         );
         assert_eq!(
             removed,
             vec![
-                ("hex", "dictation"),
                 (APP_ID, "cancel"),
                 (APP_ID, "cancel-dictation"),
                 (APP_ID, "dictation-ALT-space"),

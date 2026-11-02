@@ -66,7 +66,7 @@ if [[ "${1:-}" == --inside ]]; then
     done
     swaymsg -t get_tree -r | grep '"name": "Hex"' >/dev/null
     swaymsg -t get_tree -r | grep "\"pid\": $service," >/dev/null
-    swaymsg -t get_tree -r | grep '"app_id": "anomaly.hex"' >/dev/null
+    swaymsg -t get_tree -r | grep '"app_id": "io.github.duketopceo.wordink"' >/dev/null
   }
   open_window
   # Keep the window connected while the paste helper creates a virtual keyboard.
@@ -93,7 +93,7 @@ if [[ "${1:-}" == --inside ]]; then
   target=
 
   # Closing the window keeps Hex; a later launch opens it again.
-  swaymsg '[app_id="anomaly.hex"] kill' >/dev/null
+  swaymsg '[app_id="io.github.duketopceo.wordink"] kill' >/dev/null
   for ((attempt = 0; attempt < 100; attempt++)); do
     if ! swaymsg -t get_tree -r | grep '"name": "Hex"' >/dev/null; then break; fi
     sleep 0.05

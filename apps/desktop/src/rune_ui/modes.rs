@@ -1413,8 +1413,8 @@ pub(super) fn fixture(ui: &mut Ui) {
             output: "OpenCode".into(),
         },
         TextReplacement {
-            matched_phrase: "hex app".into(),
-            output: "Hex".into(),
+            matched_phrase: "wordink app".into(),
+            output: "WordInk".into(),
         },
     ];
     chat.transformations = vec!["smart-punctuation".into()];

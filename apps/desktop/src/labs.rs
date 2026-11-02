@@ -27,7 +27,7 @@ use color_eyre::eyre::eyre;
 use crate::app_settings::{AppSettings, LabsSettings};
 
 /// Where people send feedback on Labs features.
-pub const FEEDBACK_URL: &str = "https://github.com/anomalyco/hex/issues/new";
+pub const FEEDBACK_URL: &str = "https://github.com/duketopceo/WordInk/issues/new";
 
 /// Who a Labs feature is for.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -338,7 +338,7 @@ impl Feature {
                 "Remove filler words such as um and uh from dictations, without an AI model"
             }
             Self::SubtitleExport => {
-                "Export meeting transcripts as SRT or VTT subtitles with hex meetings show"
+                "Export meeting transcripts as SRT or VTT subtitles with wordink meetings show"
             }
             Self::SecondDictationShortcut => {
                 "Another shortcut that dictates like the main one (second_dictation_hotkey), such as a key on an external keyboard"
@@ -369,7 +369,7 @@ impl Feature {
                 "Use Menu, Pause, or Scroll Lock alone as a shortcut, such as Caps Lock remapped to Menu"
             }
             Self::HistoryStats => {
-                "Show a summary of your retained dictations at the top of History, with hex history stats"
+                "Show a summary of your retained dictations at the top of History, with wordink history stats"
             }
             Self::RecentDictations => {
                 "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"
@@ -797,7 +797,7 @@ fn resolve(name: &str, reaches: impl Fn(Feature) -> bool + Copy) -> Result<Featu
         .filter(|feature| feature.on_this_os() && reaches(*feature))
         .ok_or_else(|| {
             eyre!(
-                "unknown Labs feature {name:?}; this Hex has: {}",
+                "unknown Labs feature {name:?}; this WordInk has: {}",
                 Feature::available_where(reaches)
                     .map(Feature::name)
                     .collect::<Vec<_>>()
@@ -817,7 +817,7 @@ fn list(settings: &AppSettings) -> String {
             || (feature == Feature::VoiceFilter
                 && crate::audio::hex_microphone::driver_bundle_installed());
         out.push_str(&format!(
-            "{:<width$}  {:<3}  {:<8}  {} (hex settings {})\n",
+            "{:<width$}  {:<3}  {:<8}  {} (wordink settings {})\n",
             feature.name(),
             if on { "on" } else { "off" },
             feature.audience().name(),
@@ -830,7 +830,7 @@ fn list(settings: &AppSettings) -> String {
 
 /// `hex experiments …`, from before Labs.
 pub fn run_retired_experiments() -> Result<()> {
-    println!("Experiments are now Labs: hex labs, hex labs on|off <feature>");
+    println!("Experiments are now Labs: wordink labs, wordink labs on|off <feature>");
     Ok(())
 }
 

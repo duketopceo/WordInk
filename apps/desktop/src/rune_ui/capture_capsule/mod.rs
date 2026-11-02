@@ -724,7 +724,7 @@ impl CaptureCapsule {
             Align, DisplayTarget, OverlayInput, OverlayLevel, OverlayOptions, OverlayPlacement,
             OverlaySpec, ScreenEdge,
         };
-        let spec = OverlaySpec::new("Hex capture", (PANEL_W, PANEL_H), view)
+        let spec = OverlaySpec::new("WordInk capture", (PANEL_W, PANEL_H), view)
             .options(OverlayOptions {
                 placement: Some(OverlayPlacement::Edge {
                     edge: ScreenEdge::Top,

@@ -341,7 +341,7 @@ fn require_history_stats(on: bool) -> Result<()> {
         Ok(())
     } else {
         Err(eyre!(
-            "Dictation stats are a Labs feature and are off. Turn them on with `hex labs on history-stats` or in Settings › Labs."
+            "Dictation stats are a Labs feature and are off. Turn them on with `wordink labs on history-stats` or in Settings › Labs."
         ))
     }
 }
@@ -666,7 +666,7 @@ pub fn meetings(command: &MeetingsCommand) -> Result<()> {
         // `main` sends these to the running Hex.
         MeetingsCommand::Record { .. }
         | MeetingsCommand::Stop { .. }
-        | MeetingsCommand::CopyLast { .. } => Err(eyre!("this command needs the running Hex")),
+        | MeetingsCommand::CopyLast { .. } => Err(eyre!("this command needs the running WordInk")),
     }
 }
 
@@ -694,7 +694,7 @@ fn require_subtitle_export(on: bool) -> Result<()> {
         Ok(())
     } else {
         Err(eyre!(
-            "Subtitle export is a Labs feature and is off. Turn it on with `hex labs on subtitle-export` or in Settings › Labs."
+            "Subtitle export is a Labs feature and is off. Turn it on with `wordink labs on subtitle-export` or in Settings › Labs."
         ))
     }
 }

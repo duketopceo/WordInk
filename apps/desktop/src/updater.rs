@@ -38,7 +38,13 @@ pub use platform::finish_on_launch;
 
 const APP: &str = "hex";
 const ARTIFACT: &str = "desktop";
-const ORIGIN: &str = "https://anoma.ly/release";
+/// WordInk's GitHub Releases page: where "download" links point. A placeholder
+/// until U14 publishes releases there.
+pub(crate) const RELEASES_URL: &str = "https://github.com/duketopceo/WordInk/releases";
+/// The release-manifest origin. `None` until U14 publishes a manifest, which
+/// keeps update checks off: nothing contacts Anomaly's release service.
+/// `HEX_RELEASE_BASE_URL` (HTTPS) still points a build at a fixture service.
+const ORIGIN: Option<&str> = None;
 const STARTUP_DELAY: Duration = Duration::from_secs(10);
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// Dev builds land on every push to dev, so the Dev channel checks often.
@@ -249,6 +255,8 @@ impl Updater {
         let method = platform::method();
         let disabled = if option_env!("HEX_TEST_BUILD") == Some("1") {
             Some(DesktopUpdateStatus::Unavailable)
+        } else if release_origin().is_none() {
+            Some(DesktopUpdateStatus::Unavailable)
         } else if crate::app_paths::is_local_build() {
             Some(DesktopUpdateStatus::SourceBuild)
         } else if managed_by_policy() {
@@ -442,7 +450,7 @@ impl Updater {
             return;
         };
         if let Err(error) = crate::desktop::opencode_catalog::open_url(&url) {
-            tracing::warn!(%error, "could not open the Hex download");
+            tracing::warn!(%error, "could not open the WordInk download");
         }
     }
 
@@ -642,7 +650,7 @@ fn check(
         } => Ok(match command {
             Some(command) => State::Command { command },
             None => State::Download {
-                url: notes_url.unwrap_or_else(|| "https://anoma.ly/hex".into()),
+                url: notes_url.unwrap_or_else(|| RELEASES_URL.into()),
             },
         }),
         Decision::Install {
@@ -670,7 +678,7 @@ fn check(
                             .and_then(|target| protocol::resolve_url(&manifest_url, &target.url))
                             .or(manifest.release.notes_url)
                     })
-                    .unwrap_or_else(|| "https://anoma.ly/hex".into());
+                    .unwrap_or_else(|| RELEASES_URL.into());
                 return Ok(State::Download { url });
             }
             let url = protocol::resolve_url(&manifest_url, &target.url)
@@ -685,7 +693,7 @@ fn check(
             verify_linux_signature(&manifest, &manifest_url, &user_agent, &target, &updates)?;
             let file = transport::download(&url, &user_agent, &target, &updates)?;
             let staged = platform::stage(&file, &version)
-                .wrap_err_with(|| format!("could not stage Hex {version}"))?;
+                .wrap_err_with(|| format!("could not stage WordInk {version}"))?;
             *lock(&shared.staged) = Some(StagedUpdate {
                 staged,
                 sha256: target.sha256,
@@ -752,17 +760,18 @@ fn replaces_staged(decision: &Decision, staged_sha256: &str) -> bool {
     )
 }
 
-/// `HEX_RELEASE_BASE_URL` (HTTPS only) points a build at another service
-/// origin, for local tests against a fixture service. Nothing defaults to the
-/// service's dev stage, which only tests the service itself.
-fn manifest_url(channel: &str) -> String {
-    let origin = std::env::var("HEX_RELEASE_BASE_URL")
+/// `HEX_RELEASE_BASE_URL` (HTTPS only) points a build at a service origin,
+/// for local tests against a fixture service; otherwise [`ORIGIN`].
+fn release_origin() -> Option<String> {
+    std::env::var("HEX_RELEASE_BASE_URL")
         .ok()
-        .filter(|origin| origin.starts_with("https://"));
-    format!(
-        "{}/{APP}/{ARTIFACT}/{channel}.json",
-        origin.as_deref().unwrap_or(ORIGIN).trim_end_matches('/')
-    )
+        .filter(|origin| origin.starts_with("https://"))
+        .or_else(|| ORIGIN.map(str::to_owned))
+}
+
+fn manifest_url(channel: &str) -> String {
+    let origin = release_origin().unwrap_or_default();
+    format!("{}/{APP}/{ARTIFACT}/{channel}.json", origin.trim_end_matches('/'))
 }
 
 /// This build's target SHA-256, when the platform can tell (the target is
@@ -1152,10 +1161,13 @@ mod tests {
     }
 
     #[test]
-    fn the_manifest_url_names_app_artifact_and_channel() {
+    fn no_release_service_is_contacted_until_one_is_configured() {
+        if std::env::var_os("HEX_RELEASE_BASE_URL").is_none() {
+            assert!(release_origin().is_none());
+        }
         assert_eq!(
-            manifest_url("stable"),
-            "https://anoma.ly/release/hex/desktop/stable.json"
+            notes::fetch("ua", Path::new("/nonexistent/scratch"), "0.0.0-dev-1", "0.0.0-dev-2"),
+            None
         );
     }
 }

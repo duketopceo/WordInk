@@ -295,7 +295,7 @@ pub fn run(
     })?;
     emit_state(&mut events, VoiceState::Listening, &device_label)?;
     println!(
-        "Hex is ready on {}. Hold {} to dictate, release to paste; Ctrl-C stops.",
+        "WordInk is ready on {}. Hold {} to dictate, release to paste; Ctrl-C stops.",
         device_label, hotkey_label
     );
 
@@ -400,7 +400,7 @@ pub fn run(
                         Some(host) => host.control(action, &timeline),
                         None => crate::control::ControlReply::error(
                             "feature-off",
-                            "Annotate is off; turn it on with `hex settings set capture.enabled on`",
+                            "Annotate is off; turn it on with `wordink settings set capture.enabled on`",
                         ),
                     });
                     continue;

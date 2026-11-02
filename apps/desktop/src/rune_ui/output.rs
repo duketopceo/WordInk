@@ -37,7 +37,7 @@ const RULE_STEPS: [&str; 8] = [
     "rule7-steps",
 ];
 /// The transformation API's docs, written for coding agents.
-const TRANSFORMS_DOCS: &str = "https://anoma.ly/hex/docs/transforms";
+const TRANSFORMS_DOCS: &str = "https://github.com/duketopceo/WordInk/tree/master/apps/desktop/docs";
 /// A step's number sits in a disc this wide, on the row text's edge.
 const STEP_BADGE: f32 = 20.0;
 
@@ -275,7 +275,7 @@ fn trust_card(ui: &Ui, p: Paint) -> Option<El> {
         ));
     }
     lines.push(
-        tr("Hex asks again whenever the config changes. Until you allow it, they paste your words unchanged")
+        tr("WordInk asks again whenever the config changes. Until you allow it, they paste your words unchanged")
             .into(),
     );
     let hash = permissions.hash.clone();
@@ -328,7 +328,7 @@ fn every_dictation(ui: &Ui, p: Paint, mode: &DictationMode) -> El {
         vec![
             note(
                 "no-steps",
-                tr("No steps yet. Hex pastes your words as it heard them"),
+                tr("No steps yet. WordInk pastes your words as it heard them"),
                 p.muted(),
             )
             .into(),
@@ -364,7 +364,7 @@ fn without_processing(ui: &Ui, p: Paint) -> El {
             &MIC,
             tr("Dictate without processing"),
             ShortcutTarget::RawDictation,
-            Some(tr("Pastes your words as Hex heard them")),
+            Some(tr("Pastes your words as WordInk heard them")),
         ),
     )
 }
@@ -448,7 +448,7 @@ fn try_card(ui: &Ui, p: Paint, mode: &DictationMode) -> El {
         .key("try-input");
     let trial = ui.output.trial.text.trim();
     let (result, ink) = if trial.is_empty() {
-        (tr("What Hex pastes").to_string(), p.faint())
+        (tr("What WordInk pastes").to_string(), p.faint())
     } else {
         (preview(mode, trial), p.text())
     };
@@ -539,7 +539,7 @@ fn app_row(ui: &Ui, p: Paint, index: usize, mode: &DictationMode, steps: &[Step]
         places.join(", ")
     };
     let summary = if steps.is_empty() {
-        tr("Pastes your words as Hex heard them").to_string()
+        tr("Pastes your words as WordInk heard them").to_string()
     } else {
         tr_fill(
             "Only: {}",
@@ -641,11 +641,11 @@ fn allow_config(ui: &mut Ui, hash: &str) {
 /// agent can do it.
 fn agent_prompt() -> String {
     let path = crate::app_settings::path().map_or_else(
-        |_| "Hex's settings.json".into(),
+        |_| "WordInk's settings.json".into(),
         |path| path.display().to_string(),
     );
     format!(
-        "I use Hex for dictation. Change what it does to my words before it pastes them.\n\
+        "I use WordInk for dictation. Change what it does to my words before it pastes them.\n\
          \n\
          The steps live in {path} under `dictation_processing`:\n\
          - `default_mode` runs on every dictation, in this order: `replacements` (a \
@@ -658,26 +658,26 @@ fn agent_prompt() -> String {
          \n\
          `post_processing` rewrites the text with a model through OpenCode: \
          {{\"enabled\": true, \"prompt\": \"<how to rewrite>\", \"model\": \
-         \"<provider/model>\", \"deadline_seconds\": 30}}. Leave `model` out and Hex \
+         \"<provider/model>\", \"deadline_seconds\": 30}}. Leave `model` out and WordInk \
          picks a fast one you have connected; set it only if I ask for a particular \
          model (`opencode2 models` lists them). \
-         If the rewrite fails or runs past the deadline, Hex pastes the text without it.\n\
+         If the rewrite fails or runs past the deadline, WordInk pastes the text without it.\n\
          \n\
          Built-in transformations: \"lowercase\", \"no-trailing-punctuation\", \
          \"spongebob-case\". Others are functions in ~/.config/hex/hex.config.ts \
-         (run `hex commands init` for its typings; the API, including fetch and \
+         (run `wordink commands init` for its typings; the API, including fetch and \
          node:child_process, is documented at {TRANSFORMS_DOCS}).\n\
          \n\
-         Names Hex should know (people, products, projects) go in the shared vocabulary, \
+         Names WordInk should know (people, products, projects) go in the shared vocabulary, \
          not in replacements: `hex vocabulary add <term> --sounds-like a,b` (and `list`, \
          `remove`). Every app uses it, and the AI rewrite spells its terms right. Use \
          replacements for fixed swaps and deletions, such as a word to an emoji or \
          dropping \"um\".\n\
          \n\
-         Read the current value with `hex settings get dictation_processing`, then \
-         change it with `hex settings set dictation_processing.default_mode '<json>'` \
-         (or `dictation_processing.modes`), which Hex applies at once. Don't edit the \
-         file while Hex runs.\n\
+         Read the current value with `wordink settings get dictation_processing`, then \
+         change it with `wordink settings set dictation_processing.default_mode '<json>'` \
+         (or `dictation_processing.modes`), which WordInk applies at once. Don't edit the \
+         file while WordInk runs.\n\
          \n\
          What I want: "
     )
@@ -699,7 +699,7 @@ pub(super) fn fixture(ui: &mut Ui) {
     let global = &mut ui.settings.dictation_processing.default_mode;
     global.replacements = vec![
         pair("open code", "OpenCode"),
-        pair("hex app", "Hex"),
+        pair("wordink app", "WordInk"),
         pair("um", ""),
     ];
     global.transformations = vec![
@@ -717,7 +717,7 @@ pub(super) fn fixture(ui: &mut Ui) {
     modes[0].transformations = vec!["smart-punctuation".into()];
     modes[1].applications = vec!["WezTerm".into(), "Zed".into()];
     modes[1].replacements = vec![pair("dash dash", "--")];
-    ui.output.trial = TextEdit::new("Um, open code shipped the hex app today.".to_string());
+    ui.output.trial = TextEdit::new("Um, open code shipped the wordink app today.".to_string());
 }
 
 /// The fixture with a config asking to fetch and run programs.

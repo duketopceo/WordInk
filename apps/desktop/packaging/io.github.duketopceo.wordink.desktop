@@ -1,15 +1,15 @@
 [Desktop Entry]
 Type=Application
-Name=Hex
+Name=WordInk
 Comment=Local voice dictation
 Exec=@HEX_BIN@
-Icon=anomaly.hex
+Icon=io.github.duketopceo.wordink
 Terminal=false
 Categories=Utility;Accessibility;
 StartupNotify=true
-StartupWMClass=anomaly.hex
+StartupWMClass=io.github.duketopceo.wordink
 Actions=quit;
 
 [Desktop Action quit]
-Name=Quit Hex
+Name=Quit WordInk
 Exec=@HEX_BIN@ quit

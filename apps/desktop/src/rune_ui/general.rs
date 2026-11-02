@@ -128,7 +128,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             let description = match error {
                 Some(error) => (error, p.danger()),
                 None => (
-                    tr("Hex can't listen until the speech model has downloaded").to_string(),
+                    tr("WordInk can't listen until the speech model has downloaded").to_string(),
                     p.muted(),
                 ),
             };
@@ -306,7 +306,7 @@ fn configure_shortcuts_row(ui: &Ui, p: Paint) -> Option<El> {
                 "configure-shortcuts",
                 &KEYBOARD,
                 tr("Desktop shortcuts"),
-                Some(tr("Change the keys your desktop gave Hex")),
+                Some(tr("Change the keys your desktop gave WordInk")),
                 button(
                     p,
                     "configure-shortcuts-control",
@@ -361,7 +361,7 @@ fn pause_browser_rows(ui: &Ui, p: Paint) -> Vec<El> {
             "pause-browser-audio",
             &SPEAKER,
             tr("Screen & System Audio Recording"),
-            Some(tr("Lets Hex hear whether a tab is playing")),
+            Some(tr("Lets WordInk hear whether a tab is playing")),
             permission_control(
                 p,
                 "pause-browser-allow",
@@ -455,7 +455,7 @@ fn microphone_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     let mac = ui.platform.caps.os == super::platform::Os::Macos;
     let lid_note = |built_in: &str| match default_name {
         Some(name) => tr_named(
-            "{built_in} is off while the lid is closed, so Hex listens to {input}",
+            "{built_in} is off while the lid is closed, so WordInk listens to {input}",
             &[("built_in", built_in), ("input", name)],
         ),
         None => tr_fill("{} is off while the lid is closed", built_in),
@@ -471,7 +471,7 @@ fn microphone_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         }),
         None if devices.default_is_hex_microphone => default_name.map(|name| {
             tr_fill(
-                "Hex Microphone is the system default, so Hex listens to {}",
+                "Hex Microphone is the system default, so WordInk listens to {}",
                 name,
             )
         }),
@@ -482,7 +482,7 @@ fn microphone_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             .zip(default_name)
             .map(|(bluetooth, input)| {
                 tr_named(
-                    "{bluetooth} is Bluetooth, so Hex listens to {input}",
+                    "{bluetooth} is Bluetooth, so WordInk listens to {input}",
                     &[("bluetooth", bluetooth), ("input", input)],
                 )
             }),

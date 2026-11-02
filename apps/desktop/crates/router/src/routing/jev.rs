@@ -28,7 +28,13 @@ pub const JEV_ROUTING: &str = "jevRouting";
 
 /// Pinned: thresholds tuned on one version can shift on the next.
 pub const MODEL: &str = "jev-1.13";
-const ENDPOINT: &str = "https://opencode.ai/inference/systemone/v1/systemone";
+/// The Jev endpoint. WordInk ships none: nothing contacts OpenCode's gateway
+/// unless the user sets `HEX_JEV_ENDPOINT` (HTTPS) to one.
+fn endpoint() -> Option<String> {
+    std::env::var("HEX_JEV_ENDPOINT")
+        .ok()
+        .filter(|endpoint| endpoint.starts_with("https://"))
+}
 /// Cloudflare answers 403 (error 1010) to requests without a user agent.
 const USER_AGENT: &str = concat!("scrawl/", env!("CARGO_PKG_VERSION"));
 /// Dollars per million input tokens (`jev-1.13`).
@@ -67,7 +73,7 @@ pub const RECENT_BUDGET: Duration = Duration::from_millis(1500);
 const HOME_TITLE: &str = "HOME";
 
 pub fn enabled() -> bool {
-    crate::env::get().config.jev_enabled()
+    endpoint().is_some() && crate::env::get().config.jev_enabled()
 }
 
 // MARK: Thresholds
@@ -1469,6 +1475,9 @@ fn with_retry(
 }
 
 fn post(key: &str, body: &str, timeout: Duration) -> Result<Reply> {
+    let Some(endpoint) = endpoint() else {
+        bail!("no Jev endpoint is configured (HEX_JEV_ENDPOINT)");
+    };
     let quote = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
     let config = format!(
         "header = \"Authorization: Bearer {}\"\ndata-binary = \"{}\"\n",
@@ -1490,7 +1499,7 @@ fn post(key: &str, body: &str, timeout: Duration) -> Result<Reply> {
             &format!("User-Agent: {USER_AGENT}"),
             "-w",
             "\n%{http_code} %header{retry-after}",
-            ENDPOINT,
+            &endpoint,
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

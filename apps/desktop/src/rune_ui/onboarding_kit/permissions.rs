@@ -96,7 +96,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> El {
     let head = heading(
         p,
         s.motion,
-        "Let Hex hear you and type for you",
+        "Let WordInk hear you and type for you",
         "macOS asks once. You can change these any time in System Settings.",
     );
 
@@ -148,7 +148,7 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
         ItemStatus::Denied | ItemStatus::Waiting if windows => {
             tr("Turn on “Let desktop apps access your microphone” in Windows Settings.")
         }
-        ItemStatus::Denied => tr("Switch on Hex in System Settings"),
+        ItemStatus::Denied => tr("Switch on WordInk in System Settings"),
         _ => tr("Hears you only while you hold the shortcut"),
     };
     let mut card = col()
@@ -174,9 +174,9 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
         ));
     if live.accessibility_row {
         let ax_desc = match live.accessibility {
-            ItemStatus::Stale => tr("An older Hex entry can keep this off"),
-            ItemStatus::Waiting => tr("Switch on Hex in System Settings"),
-            ItemStatus::Restart => tr("Turns on when Hex restarts"),
+            ItemStatus::Stale => tr("An older WordInk entry can keep this off"),
+            ItemStatus::Waiting => tr("Switch on WordInk in System Settings"),
+            ItemStatus::Restart => tr("Turns on when WordInk restarts"),
             _ => tr("Notices the shortcut and pastes your words in any app"),
         };
         card = card.child(separator(p, "sep0")).child(perm_row(
@@ -196,7 +196,7 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
         ));
     }
     let action = if live.restart {
-        Button::new(tr("Restart Hex"))
+        Button::new(tr("Restart WordInk"))
             .variant(ButtonVariant::Contrast)
             .on_press(super::live::restart_hex)
             .build_push(k)
@@ -208,18 +208,18 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
     };
     let (title, lead) = if windows {
         (
-            tr("Let Hex hear you"),
+            tr("Let WordInk hear you"),
             tr("Windows has the microphone turned off for desktop apps."),
         )
     } else {
         (
-            tr("Let Hex hear you and type for you"),
+            tr("Let WordInk hear you and type for you"),
             tr("macOS asks once. You can change these any time in System Settings."),
         )
     };
     let relaunch = live.relaunch_failed.then(|| {
         text(tr(
-            "Quit and reopen Hex to finish setup. macOS applies some permissions only after a restart.",
+            "Quit and reopen WordInk to finish setup. macOS applies some permissions only after a restart.",
         ))
         .key("relaunch-notice")
         .font(LEAD)
@@ -329,7 +329,7 @@ fn stage(p: Paint, e: f64, mic: PermState, ax: PermState, reduced: bool) -> El {
 fn setup_card(p: Paint, mic: PermState, ax: PermState, tray_open: bool, escaped: bool) -> El {
     let k = p.k;
     let ax_desc = if ax == PermState::Asking {
-        "Drag Hex into System Settings below"
+        "Drag WordInk into System Settings below"
     } else {
         "Notices the shortcut and pastes your words in any app"
     };
@@ -527,7 +527,7 @@ fn microphone_prompt(p: Paint, pressed: bool) -> El {
         .border(p.hair, k.c.border_weak)
         .child(badge)
         .child(
-            text("“Hex” would like to access the microphone.")
+            text("“WordInk” would like to access the microphone.")
                 .key("title")
                 .font(TextStyle {
                     weight: if k.dark { 560.0 } else { 600.0 },
@@ -539,7 +539,7 @@ fn microphone_prompt(p: Paint, pressed: bool) -> El {
                 .w(PROMPT_W - 36.0),
         )
         .child(
-            text("Hex listens only while you hold your shortcut.")
+            text("WordInk listens only while you hold your shortcut.")
                 .key("body")
                 .font(k.ty.small)
                 .color(p.muted())
@@ -640,7 +640,7 @@ fn settings_window(p: Paint, e: f64, reduced: bool) -> El {
         );
         if landed {
             list = list.child(
-                settings_app_row(p, "hex-landed", "Hex", hex_app_icon(p), e >= SWITCH_ON)
+                settings_app_row(p, "hex-landed", "WordInk", hex_app_icon(p), e >= SWITCH_ON)
                     .transition(Transition::opacity()),
             );
         } else {
@@ -706,7 +706,7 @@ fn escaping_guide_and_drag(p: Paint, e: f64, reduced: bool) -> El {
     let tile_w = LIST_W;
 
     let instruction = (esc_u > 0.35).then(|| {
-        text("↑  Drag Hex into the Accessibility list above")
+        text("↑  Drag WordInk into the Accessibility list above")
             .key("guide-instruction")
             .font(k.ty.small_medium)
             .color(p.text())
@@ -738,7 +738,7 @@ fn escaping_guide_and_drag(p: Paint, e: f64, reduced: bool) -> El {
             .offset_motion(Anim::INSTANT)
             .child(hex_app_icon(p))
             .child(
-                text("Hex")
+                text("WordInk")
                     .key("name")
                     .font(k.ty.small_medium)
                     .color(p.text()),
@@ -827,7 +827,7 @@ fn dragged_row(p: Paint, u: f32) -> El {
         .offset_motion(Anim::INSTANT)
         .child(hex_app_icon(p))
         .child(
-            text("Hex")
+            text("WordInk")
                 .key("name")
                 .font(k.ty.small_medium)
                 .color(p.text()),

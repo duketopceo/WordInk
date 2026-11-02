@@ -26,7 +26,7 @@ pub(crate) fn start(
 ) -> Option<rune::Tray> {
     let view = TrayView::default();
     let icon = rune::TrayIcon::rgba(ICON_SIZE, ICON_SIZE, ICON_RGBA.to_vec());
-    let spec = rune::TraySpec::new("hex", "Hex", icon)
+    let spec = rune::TraySpec::new("wordink", "WordInk", icon)
         .tooltip(view.tooltip())
         .menu(view.menu());
     let show = move |token| {
@@ -47,7 +47,7 @@ pub(crate) fn start(
         },
         _ => {}
     });
-    tray.inspect_err(|error| tracing::warn!(%error, "Hex has no tray icon"))
+    tray.inspect_err(|error| tracing::warn!(%error, "WordInk has no tray icon"))
         .ok()
 }
 

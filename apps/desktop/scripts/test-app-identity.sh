@@ -10,7 +10,7 @@ mkdir -p "$bundle/Contents"
 plist="$bundle/Contents/Info.plist"
 cp "$root/app/Info.plist" "$plist"
 
-[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = anomaly.hex ]
+[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = io.github.duketopceo.wordink ]
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist")" = hex ]
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$plist")" = Hex ]
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$plist")" = Hex ]
@@ -31,7 +31,7 @@ expect_rejection 'wrong bundle identifier'
 expect_rejection 'wrong bundle identifier'
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.kitlangton.hex2' "$plist"
 expect_rejection 'wrong bundle identifier'
-/usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier anomaly.hex' "$plist"
+/usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier io.github.duketopceo.wordink' "$plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable hex-watch' "$plist"
 expect_rejection 'wrong executable name'
 /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable hex' "$plist"

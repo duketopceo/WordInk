@@ -19,7 +19,7 @@ $Executable = (Resolve-Path $Executable).Path
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 $label = if ($Arch -eq 'x86_64') { 'x64' } else { 'arm64' }
-$script = Join-Path (Split-Path -Parent $PSScriptRoot) 'packaging\windows\hex.iss'
+$script = Join-Path (Split-Path -Parent $PSScriptRoot) 'packaging\windows\wordink.iss'
 
 function Find-Iscc {
     $candidates = @(

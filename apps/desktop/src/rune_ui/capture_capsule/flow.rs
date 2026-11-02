@@ -1599,16 +1599,16 @@ fn permission_lines(need: CaptureNeed, grant: Grant) -> Done {
         Grant::Off => Done {
             why: Some(why.into()),
             ask: Some("Allow".into()),
-            ..Done::plain(Lead::Warning, format!("Hex needs {name}"))
+            ..Done::plain(Lead::Warning, format!("WordInk needs {name}"))
         },
         Grant::Asked => Done {
-            why: Some("turn Hex on in System Settings".into()),
+            why: Some("turn WordInk on in System Settings".into()),
             ask: Some("Allow".into()),
-            ..Done::plain(Lead::Warning, format!("Hex needs {name}"))
+            ..Done::plain(Lead::Warning, format!("WordInk needs {name}"))
         },
         Grant::Restart => Done {
-            why: Some("turns on when Hex restarts".into()),
-            ask: Some("Restart Hex".into()),
+            why: Some("turns on when WordInk restarts".into()),
+            ask: Some("Restart WordInk".into()),
             ..Done::plain(Lead::Warning, format!("{name} is on"))
         },
         Grant::Ready => Done {
@@ -2121,7 +2121,7 @@ mod tests {
             assert!(shown.open.is_none());
             flow.tick(MENU_HINT_S + 0.1);
             assert_eq!(flow.pres(MENU_HINT_S + 0.1), Pres::Hidden);
-            assert_eq!(flow.keys(), None, "no key is Hex's once it's gone");
+            assert_eq!(flow.keys(), None, "no key is WordInk's once it's gone");
 
             let mut flow = Flow::new();
             flow.input(Input::Stage(Stage::Done), 0.0);
@@ -3659,7 +3659,7 @@ mod tests {
         assert_eq!(done(&flow, 12.0).text, "Couldn't send to SEER");
         assert_eq!(done(&flow, 12.0).why.as_deref(), Some("offline"));
         assert_eq!(
-            short_reason("Screen Recording permission is off for Hex"),
+            short_reason("Screen Recording permission is off for WordInk"),
             "Screen Recording permission is…"
         );
     }
@@ -3676,7 +3676,7 @@ mod tests {
         flow.input(Input::NeedsPermission(screen), 1.0);
         let shown = done(&flow, 1.0);
         assert_eq!(shown.lead, Lead::Warning);
-        assert_eq!(shown.text, "Hex needs Screen Recording");
+        assert_eq!(shown.text, "WordInk needs Screen Recording");
         assert_eq!(shown.why.as_deref(), Some("to see your screen"));
         assert_eq!(shown.ask.as_deref(), Some("Allow"));
         assert_eq!(flow.keys(), None);
@@ -3689,7 +3689,7 @@ mod tests {
         let waiting = done(&flow, 4.0);
         assert_eq!(
             waiting.why.as_deref(),
-            Some("turn Hex on in System Settings")
+            Some("turn WordInk on in System Settings")
         );
         // It waits a good while, and never folds under the pointer.
         flow.tick(60.0);
@@ -3698,7 +3698,7 @@ mod tests {
         flow.input(Input::Permission(screen, Grant::Restart), 61.0);
         let restart = done(&flow, 61.0);
         assert_eq!(restart.text, "Screen Recording is on");
-        assert_eq!(restart.ask.as_deref(), Some("Restart Hex"));
+        assert_eq!(restart.ask.as_deref(), Some("Restart WordInk"));
         assert_eq!(flow.click(Id::Ask, 62.0), vec![Action::Restart]);
 
         flow.input(Input::Permission(screen, Grant::Ready), 63.0);
@@ -3713,7 +3713,7 @@ mod tests {
 
         // Unanswered, it folds; ✕ closes it at once.
         flow.input(Input::NeedsPermission(CaptureNeed::Microphone), 70.0);
-        assert_eq!(done(&flow, 70.0).text, "Hex needs Microphone");
+        assert_eq!(done(&flow, 70.0).text, "WordInk needs Microphone");
         assert!(flow.tick(70.0 + PERMISSION_HOLD_S));
         assert_eq!(flow.pres(70.0 + PERMISSION_HOLD_S), Pres::Hidden);
         flow.input(Input::NeedsPermission(screen), 300.0);

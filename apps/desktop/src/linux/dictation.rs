@@ -392,7 +392,7 @@ pub(crate) fn run(
     })?;
     emit_state(&mut events, VoiceState::Listening, &device_label)?;
     println!(
-        "Hex dictation is ready on {device_label}. Hold {hotkey_label} to dictate; Ctrl-C stops."
+        "WordInk dictation is ready on {device_label}. Hold {hotkey_label} to dictate; Ctrl-C stops."
     );
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -497,7 +497,7 @@ pub(crate) fn run(
                         Some(host) => host.control(action, &timeline),
                         None => crate::control::ControlReply::error(
                             "feature-off",
-                            "Annotate is off; turn it on with `hex settings set capture.enabled on`",
+                            "Annotate is off; turn it on with `wordink settings set capture.enabled on`",
                         ),
                     };
                     let _ = answer.send(report);

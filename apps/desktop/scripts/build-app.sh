@@ -9,24 +9,24 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 # HEX_LOCAL_BUILD=1 marks a build made from a checkout for its owner's own
 # machine (Developer ID signed as usual): it shows "Local build · updates off"
 # with its commit and never checks for or offers updates.
-# HEX_RELEASE_UNSIGNED=1 builds the release app (Hex, anomaly.hex) ad-hoc
+# HEX_RELEASE_UNSIGNED=1 builds the release app (Hex, io.github.duketopceo.wordink) ad-hoc
 # signed: the Release workflow's build job, which holds no credentials. Its
 # sign-macos job signs it with the Developer ID (.github/release/sign-macos.sh).
 if [ "${HEX_RELEASE_UNSIGNED:-}" = 1 ]; then
   team_id=
   identity=-
   app_name=Hex
-  bundle_id=anomaly.hex
+  bundle_id=io.github.duketopceo.wordink
 elif [ "${HEX_TEST_BUILD:-}" = 1 ]; then
   team_id=
   identity=-
   app_name="Hex Test"
-  bundle_id=anomaly.hex.test
+  bundle_id=io.github.duketopceo.wordink.test
 else
   team_id=${HEX_TEAM_ID:?Set HEX_TEAM_ID to the Apple Developer signing team}
   identity=$(hex_codesign_identity "$team_id")
   app_name=Hex
-  bundle_id=anomaly.hex
+  bundle_id=io.github.duketopceo.wordink
 fi
 # Every build carries the `capture` experiment (dormant until enabled), with
 # Scrawl's `scrawl-helper` beside `hex`, where the engine looks for it.
@@ -71,7 +71,7 @@ SCRAWL_HELPER_PLIST="$root/packaging/macos/scrawl-helper-Info.plist" \
   cargo build --locked --release ${env_args[@]+"${env_args[@]}"} --manifest-path "$root/Cargo.toml"
 rm -rf "$bundle"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources" "$bundle/Contents/Library"
-cp "$root/target/release/hex" "$executable"
+cp "$root/target/release/wordink" "$executable"
 cp "$root/target/release/scrawl-helper" "$bundle/Contents/MacOS/scrawl-helper"
 cp "$root/app/Info.plist" "$bundle/Contents/Info.plist"
 cp "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.md" "$bundle/Contents/Resources/"

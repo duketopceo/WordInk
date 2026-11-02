@@ -545,7 +545,7 @@ pub(crate) fn add<S: 'static>(playground: Playground<S>) -> Playground<S> {
             Onboard::new(Flow::Shout)
         }))
         .story(story(
-            "Prototypes/Onboarding/Without Hex · With Hex",
+            "Prototypes/Onboarding/Without WordInk · With WordInk",
             || Onboard::new(Flow::Versus),
         ))
         .story(first_run())
@@ -1113,7 +1113,7 @@ fn side(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
             side_chip(
                 p,
                 "step-demo",
-                "2 · Without / With Hex",
+                "2 · Without / With WordInk",
                 matches!(
                     s.step,
                     Step::Parked | Step::YourTurn | Step::Hearing | Step::Heard | Step::Done
@@ -1137,7 +1137,7 @@ fn side(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
             side_chip(
                 p,
                 "step-ready",
-                "5 · Hex is ready",
+                "5 · WordInk is ready",
                 s.step == Step::Ready,
                 Onboard::jump_to_ready,
             ),
@@ -1169,7 +1169,7 @@ fn side(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
     }
 
     let note = if s.interactive_try() {
-        "On Your turn, hold ⌥ and speak into your Mac's mic — your running Hex pastes your real words into the card."
+        "On Your turn, hold ⌥ and speak into your Mac's mic — your running WordInk pastes your real words into the card."
     } else {
         "English: Parakeet Unified English, 731 MB, streams. French: Parakeet v3, 740 MB."
     };
@@ -1296,7 +1296,7 @@ mod tests {
         let mut s = Onboard::new(Flow::FirstRun);
         s.jump_to_try();
         assert_eq!(s.step, Step::Try);
-        s.practice.text = "Testing live dictation in Hex.".into();
+        s.practice.text = "Testing live dictation in WordInk.".into();
         let mut tx = Tx::default();
         s.on_practice_change(&mut tx);
         assert_eq!(s.step, Step::TryHeard);

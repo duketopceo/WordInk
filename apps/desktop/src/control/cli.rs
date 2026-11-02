@@ -459,7 +459,7 @@ pub fn run(command: ControlCli) -> u8 {
                     == crate::transcription::models::TranscriptionModelId::Custom(id)
                 {
                     color_eyre::eyre::bail!(
-                        "{} is the selected model; choose another with `hex model use` first",
+                        "{} is the selected model; choose another with `wordink model use` first",
                         id.as_str()
                     );
                 }
@@ -578,7 +578,7 @@ fn imported(model: &str) -> color_eyre::Result<crate::transcription::models::Cus
     crate::transcription::models::CustomModelId::parse(model)
         .filter(|id| custom_models::is_registered(*id))
         .ok_or_else(|| {
-            color_eyre::eyre::eyre!("no imported model is {model}; run `hex model list`")
+            color_eyre::eyre::eyre!("no imported model is {model}; run `wordink model list`")
         })
 }
 
@@ -644,7 +644,7 @@ fn offline_model(command: ModelCommand) -> u8 {
             );
             Ok(())
         }
-        _ => unreachable!("Hex carries out the other model commands"),
+        _ => unreachable!("WordInk carries out the other model commands"),
     })())
 }
 
@@ -654,7 +654,7 @@ fn offline_model(_: ModelCommand) -> u8 {
     print(
         ControlReply::error(
             "unsupported",
-            "this `hex model` command is for Linux and Windows; use `hex model list`",
+            "this `wordink model` command is for Linux and Windows; use `wordink model list`",
         ),
         Output::default(),
     )
@@ -936,7 +936,7 @@ fn apply_settings(file: &std::path::Path, output: Output) -> u8 {
                 return print(
                     ControlReply::error(
                         "busy",
-                        "Hex is starting but didn't answer; run `hex settings apply` again",
+                        "WordInk is starting but didn't answer; run `wordink settings apply` again",
                     ),
                     output,
                 );
@@ -1015,7 +1015,7 @@ fn call(request: ControlRequest) -> Result<ControlResponse, ControlReply> {
 }
 
 pub(crate) fn not_running() -> ControlReply {
-    ControlReply::error("not-running", "Hex is not running; run `hex start`")
+    ControlReply::error("not-running", "WordInk is not running; run `wordink start`")
 }
 
 /// Why no Hex answered `/control`: on Linux an older Hex an update left
@@ -1033,7 +1033,7 @@ fn absent() -> ControlReply {
 fn older_hex() -> ControlReply {
     ControlReply::error(
         "outdated",
-        "an older Hex is still running (Hex was updated) and doesn't take `hex` commands; run `hex restart`",
+        "an older WordInk is still running (WordInk was updated) and doesn't take `hex` commands; run `wordink restart`",
     )
 }
 
@@ -1046,7 +1046,7 @@ fn restart_older_hex() -> ControlReply {
     if !crate::linux::service::supervised() {
         return ControlReply::error(
             "failed",
-            "an older Hex is running outside its systemd unit; quit it from its window or tray, then run `hex start`",
+            "an older WordInk is running outside its systemd unit; quit it from its window or tray, then run `wordink start`",
         );
     }
     if let Err(error) = crate::linux::service::restart() {
@@ -1055,11 +1055,11 @@ fn restart_older_hex() -> ControlReply {
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(20) {
         if running() {
-            return ControlReply::done("Restarted Hex");
+            return ControlReply::done("Restarted WordInk");
         }
         std::thread::sleep(Duration::from_millis(200));
     }
-    ControlReply::done("Restarted Hex; it isn't answering yet (it may be loading its model)")
+    ControlReply::done("Restarted WordInk; it isn't answering yet (it may be loading its model)")
 }
 
 #[cfg(target_os = "macos")]
@@ -1068,7 +1068,7 @@ fn start(output: Output) -> u8 {
 
     if let Some(pid) = crate::local_api::running_pid() {
         return print(
-            ControlReply::unchanged(format!("Hex is already running (pid {pid})")),
+            ControlReply::unchanged(format!("WordInk is already running (pid {pid})")),
             output,
         );
     }
@@ -1084,7 +1084,7 @@ fn start(output: Output) -> u8 {
         Ok(status) if status.success() => {}
         Ok(_) | Err(_) => {
             return print(
-                ControlReply::error("failed", "couldn't open Hex.app; is it installed?"),
+                ControlReply::error("failed", "couldn't open WordInk.app; is it installed?"),
                 output,
             );
         }
@@ -1093,14 +1093,14 @@ fn start(output: Output) -> u8 {
     while started.elapsed() < Duration::from_secs(20) {
         if let Some(pid) = crate::local_api::running_pid() {
             return print(
-                ControlReply::done(format!("Started Hex (pid {pid})")),
+                ControlReply::done(format!("Started WordInk (pid {pid})")),
                 output,
             );
         }
         std::thread::sleep(Duration::from_millis(200));
     }
     print(
-        ControlReply::done("Opened Hex; it isn't answering yet (setup may be waiting)"),
+        ControlReply::done("Opened WordInk; it isn't answering yet (setup may be waiting)"),
         output,
     )
 }
@@ -1118,7 +1118,7 @@ fn start_reply() -> ControlReply {
     use std::time::{Duration, Instant};
 
     if running() {
-        return ControlReply::unchanged("Hex is already running");
+        return ControlReply::unchanged("WordInk is already running");
     }
     #[cfg(target_os = "linux")]
     if crate::linux::service::instance_answers() {
@@ -1144,16 +1144,16 @@ fn start_reply() -> ControlReply {
         command.creation_flags(0x0000_0008 | 0x0000_0200);
     }
     if let Err(error) = command.spawn() {
-        return ControlReply::error("failed", format!("couldn't start Hex: {error}"));
+        return ControlReply::error("failed", format!("couldn't start WordInk: {error}"));
     }
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(20) {
         if running() {
-            return ControlReply::done("Started Hex");
+            return ControlReply::done("Started WordInk");
         }
         std::thread::sleep(Duration::from_millis(200));
     }
-    ControlReply::done("Started Hex; it isn't answering yet (it may be loading its model)")
+    ControlReply::done("Started WordInk; it isn't answering yet (it may be loading its model)")
 }
 
 /// After a restart's quit on Linux and Windows: waits for the old Hex to
@@ -1164,14 +1164,14 @@ fn reopen_after_restart() -> ControlReply {
 
     #[cfg(target_os = "linux")]
     if crate::linux::service::supervised() {
-        return ControlReply::done("Restarting Hex");
+        return ControlReply::done("Restarting WordInk");
     }
     let started = Instant::now();
     while running() {
         if started.elapsed() > Duration::from_secs(30) {
             return ControlReply::error(
                 "failed",
-                "Hex is still finishing its work; run `hex start` once it quits",
+                "WordInk is still finishing its work; run `wordink start` once it quits",
             );
         }
         std::thread::sleep(Duration::from_millis(200));
@@ -1180,7 +1180,7 @@ fn reopen_after_restart() -> ControlReply {
 }
 
 /// `open` arguments for `hex start`: the caller's `HEX_*` environment, then
-/// the Hex.app this `hex` belongs to, or the installed app by bundle id.
+/// the WordInk.app this `hex` belongs to, or the installed app by bundle id.
 #[cfg(target_os = "macos")]
 fn open_arguments(
     bundle: Option<&std::path::Path>,
@@ -1193,9 +1193,9 @@ fn open_arguments(
         None => arguments.extend([
             "-b".into(),
             if test_build {
-                "anomaly.hex.test"
+                "io.github.duketopceo.wordink.test"
             } else {
-                "anomaly.hex"
+                "io.github.duketopceo.wordink"
             }
             .into(),
         ]),
@@ -1203,7 +1203,7 @@ fn open_arguments(
     arguments
 }
 
-/// The Hex.app this `hex` belongs to, when it runs from (or links into) one.
+/// The WordInk.app this `hex` belongs to, when it runs from (or links into) one.
 #[cfg(target_os = "macos")]
 fn installed_bundle() -> Option<std::path::PathBuf> {
     let executable = std::fs::canonicalize(std::env::current_exe().ok()?).ok()?;
@@ -1332,7 +1332,7 @@ mod tests {
         assert_eq!(exit_code(&reply), EXIT_REFUSED);
         assert!(matches!(
             &reply,
-            ControlReply::Error { code, message } if code == "outdated" && message.contains("hex restart")
+            ControlReply::Error { code, message } if code == "outdated" && message.contains("wordink restart")
         ));
     }
 
@@ -1359,18 +1359,18 @@ mod tests {
             "--env",
             "HEX_RETAIN_DICTATION_AUDIO=1",
         ];
-        let bundle = std::path::Path::new("/Applications/Hex.app");
+        let bundle = std::path::Path::new("/Applications/WordInk.app");
         assert_eq!(
             strings(open_arguments(Some(bundle), false, vars())),
-            [&env[..], &["/Applications/Hex.app"]].concat()
+            [&env[..], &["/Applications/WordInk.app"]].concat()
         );
         assert_eq!(
             strings(open_arguments(None, false, vars())),
-            [&env[..], &["-b", "anomaly.hex"]].concat()
+            [&env[..], &["-b", "io.github.duketopceo.wordink"]].concat()
         );
         assert_eq!(
             strings(open_arguments(None, true, [])),
-            ["-b", "anomaly.hex.test"]
+            ["-b", "io.github.duketopceo.wordink.test"]
         );
     }
 
@@ -1429,7 +1429,7 @@ mod tests {
         report.meeting.elapsed_seconds = Some(3723);
         report.features.meetings = true;
         let text = human_status(&report);
-        assert!(text.starts_with("Hex 2.3.1 (pid 42, 412 MB)\n"));
+        assert!(text.starts_with("WordInk 2.3.1 (pid 42, 412 MB)\n"));
         assert!(text.contains("Meeting      recording “Design sync” for 1:02:03\n"));
         assert!(text.ends_with("Labs         none\n"));
         report.labs = vec!["live-text".into(), "meetings".into()];

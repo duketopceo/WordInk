@@ -318,7 +318,7 @@ pub(crate) fn restart(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {
     open(ui);
     tx.settle();
     if ui.first_run.is_none() {
-        return Err("Hex could not open onboarding".into());
+        return Err("WordInk could not open onboarding".into());
     }
     Ok(())
 }
@@ -629,7 +629,7 @@ pub(super) fn practice_changed(ui: &mut Ui, tx: &mut Tx) {
 pub(super) fn hint_copy(live: &Live) -> Option<&'static str> {
     Some(match live.practice {
         Practice::TooShort => tr("Hold the shortcut a little longer while you speak."),
-        Practice::NothingHeard => tr("Hex didn't hear any words. Try again a little louder."),
+        Practice::NothingHeard => tr("WordInk didn't hear any words. Try again a little louder."),
         Practice::Failed => tr("That didn't work. Try again."),
         Practice::Transcribing => tr("Typing what you said…"),
         _ => return None,

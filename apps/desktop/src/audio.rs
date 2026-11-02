@@ -638,7 +638,7 @@ impl RecoveringAudioInput {
     #[cfg(test)]
     pub fn pending_for_test() -> (Self, Sender<InputOpenResult>) {
         let mut input = Self::closed(
-            Some("Hex nonexistent microphone for pending open test"),
+            Some("WordInk nonexistent microphone for pending open test"),
             0,
             None,
         );
@@ -960,7 +960,7 @@ fn resolve_input(
     if let Some(name) = device_override {
         if is_hex(name) {
             return Err(format!(
-                "Hex cannot capture from its own virtual microphone: {name}"
+                "WordInk cannot capture from its own virtual microphone: {name}"
             ));
         }
         return position(name)
@@ -2435,7 +2435,7 @@ mod tests {
     #[test]
     fn startup_recovery_opens_even_when_a_capture_is_pending() {
         let mut input = RecoveringAudioInput::closed(
-            Some("Hex nonexistent microphone for pending recovery test"),
+            Some("WordInk nonexistent microphone for pending recovery test"),
             3,
             None,
         );

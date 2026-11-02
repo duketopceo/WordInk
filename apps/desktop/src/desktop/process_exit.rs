@@ -84,11 +84,11 @@ fn finish_within(drain: &Drain, deadline: Duration) -> ! {
         .name("hex-exit-deadline".into())
         .spawn(move || {
             std::thread::sleep(deadline);
-            tracing::warn!("Hex stopped before its workers finished");
+            tracing::warn!("WordInk stopped before its workers finished");
             end_process();
         });
     drain.run();
-    tracing::info!("Hex stopped");
+    tracing::info!("WordInk stopped");
     end_process()
 }
 

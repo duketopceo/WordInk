@@ -506,11 +506,11 @@ pub(crate) fn profile_of(header: &GgufHeader, file_name: &str) -> Result<Profile
 
 fn profile(header: &GgufHeader, file_name: &str) -> Result<Profile> {
     let Some(architecture) = header.string("general.architecture") else {
-        bail!("it has no general.architecture, so Hex can't tell which model family it is");
+        bail!("it has no general.architecture, so WordInk can't tell which model family it is");
     };
     if !ARCHITECTURES.iter().any(|(name, _)| *name == architecture) {
         bail!(
-            "its architecture is {architecture}; Hex runs Parakeet, Whisper, Qwen3-ASR, \
+            "its architecture is {architecture}; WordInk runs Parakeet, Whisper, Qwen3-ASR, \
              Cohere Transcribe, and SenseVoice models"
         );
     }
@@ -526,7 +526,7 @@ fn profile(header: &GgufHeader, file_name: &str) -> Result<Profile> {
     let unsupported = header.unsupported_tensor_types();
     if !unsupported.is_empty() {
         bail!(
-            "it has {} tensors; Hex runs only F32, F16, and Q8_0 weights on Metal and Vulkan. \
+            "it has {} tensors; WordInk runs only F32, F16, and Q8_0 weights on Metal and Vulkan. \
              Quantize it to Q8_0 with transcribe-quantize",
             unsupported.join(", ")
         );
@@ -544,7 +544,7 @@ fn profile(header: &GgufHeader, file_name: &str) -> Result<Profile> {
         }
     }
     if languages.is_empty() {
-        bail!("its general.languages names no language Hex knows");
+        bail!("its general.languages names no language WordInk knows");
     }
     Ok(Profile {
         name: header
@@ -1112,6 +1112,6 @@ mod tests {
             &[],
             &[("a", 0, 4)],
         );
-        assert!(reason(no_languages).contains("no language Hex knows"));
+        assert!(reason(no_languages).contains("no language WordInk knows"));
     }
 }

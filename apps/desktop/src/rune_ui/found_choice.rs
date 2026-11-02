@@ -107,7 +107,7 @@ fn row(ui: &Ui, entry: &Entry<'_>, selected: bool, model: ItemStatus) -> ChoiceR
         ),
         (Entry::Recommended { on_disk: true }, ..) => tr("On this computer").to_owned(),
         (Entry::Found(found), ..) if found.catalog.is_some() => tr("On this computer").to_owned(),
-        (Entry::Found(_), ..) => tr("On this computer · not tested by Hex").to_owned(),
+        (Entry::Found(_), ..) => tr("On this computer · not tested by WordInk").to_owned(),
     };
     ChoiceRow {
         name: name.to_owned(),

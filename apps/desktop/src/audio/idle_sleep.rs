@@ -57,7 +57,7 @@ mod platform {
     impl PreventSleep {
         pub(super) fn start() -> std::io::Result<Self> {
             let assertion_type = CFString::from_static_str("NoIdleSleepAssertion");
-            let assertion_name = CFString::from_static_str("Hex intentional recording");
+            let assertion_name = CFString::from_static_str("WordInk intentional recording");
             let mut assertion_id = 0;
             // SAFETY: Both Core Foundation strings remain alive for the call and
             // assertion_id points to writable, correctly sized storage. IOKit
@@ -144,7 +144,7 @@ mod platform {
     }
 
     async fn inhibit(bus: &zbus::Connection, what: &str) -> std::io::Result<PreventSleep> {
-        let body = (what, "Hex", "Recording", "block");
+        let body = (what, "WordInk", "Recording", "block");
         let call = bus.call_method(
             Some("org.freedesktop.login1"),
             "/org/freedesktop/login1",
@@ -186,7 +186,7 @@ mod platform {
 
     impl PreventSleep {
         pub(super) fn start() -> std::io::Result<Self> {
-            let mut reason: Vec<u16> = "Hex is recording".encode_utf16().chain([0]).collect();
+            let mut reason: Vec<u16> = "WordInk is recording".encode_utf16().chain([0]).collect();
             let context = REASON_CONTEXT {
                 Version: POWER_REQUEST_CONTEXT_VERSION,
                 Flags: POWER_REQUEST_CONTEXT_SIMPLE_STRING,

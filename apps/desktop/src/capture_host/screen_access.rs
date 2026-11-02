@@ -99,7 +99,7 @@ fn read() -> ScreenAccess {
     } else if scrawl_capture::capture::screen_capture_usable(true) {
         ScreenAccess::Allowed
     } else {
-        tracing::info!("Screen Recording is granted but needs Hex to restart");
+        tracing::info!("Screen Recording is granted but needs WordInk to restart");
         ScreenAccess::NeedsRestart
     }
 }

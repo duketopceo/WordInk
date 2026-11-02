@@ -202,7 +202,7 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-labs-link", "Window/General/Labs link"),
     ("mac-production", "Window/General/Production build"),
     ("mac-activity", "Window/Activity/Activity"),
-    ("mac-onboarding", "Window/Onboarding/Setting up Hex"),
+    ("mac-onboarding", "Window/Onboarding/Setting up WordInk"),
     (
         "mac-onboarding-permissions",
         "Window/Onboarding/Permissions",
@@ -226,7 +226,7 @@ const PATHS: &[(&str, &str)] = &[
     ),
     ("mac-onboarding-ready", "Window/Onboarding/Hex is ready"),
     ("portal", "Linux & Windows/Settings · portal shortcuts"),
-    ("commands", "Linux & Windows/Settings · hex commands"),
+    ("commands", "Linux & Windows/Settings · wordink commands"),
     ("portal-mouse", "Linux & Windows/Settings · mouse button"),
     ("windows-settings", "Linux & Windows/Settings · Windows"),
     ("disabled", "Linux & Windows/Disabled"),
@@ -304,7 +304,7 @@ fn playground() -> Playground<Ui> {
     let playground = Playground::new()
         .enabled(true)
         .bar(false)
-        .sizes(&[("Hex window", WINDOW_SIZE)])
+        .sizes(&[("WordInk window", WINDOW_SIZE)])
         .group_order(GROUPS)
         .start_folded(true);
     let playground = super::onboarding_kit::stories(playground);

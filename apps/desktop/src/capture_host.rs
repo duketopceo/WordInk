@@ -1456,7 +1456,7 @@ impl CaptureHost {
         if !crate::app_settings::capture_on() {
             return None;
         }
-        tracing::info!("Annotate is on: `hex annotate` is available");
+        tracing::info!("Annotate is on: `wordink annotate` is available");
         let host = shared_engine(engine.as_ref()).and_then(|engine| {
             let mut host = Self::with(engine, None)?;
             host.environment = Some(environment.clone());
@@ -1834,7 +1834,7 @@ impl CaptureHost {
     /// Why no capture can start now, besides one already recording.
     fn refuse_start(&self) -> Option<ControlReply> {
         if self.finisher.is_none() {
-            return Some(ControlReply::error("busy", "Hex is stopping"));
+            return Some(ControlReply::error("busy", "WordInk is stopping"));
         }
         // Every unfinished capture but the recording one is stopped and
         // writing or about to be.
@@ -1871,11 +1871,11 @@ impl CaptureHost {
             permissions::report(need);
             return Ok(ControlReply::error(
                 "permission",
-                format!("{} is off for Hex", need.name()),
+                format!("{} is off for WordInk", need.name()),
             ));
         }
         let Some((jobs, _)) = &self.finisher else {
-            return Ok(ControlReply::error("busy", "Hex is stopping"));
+            return Ok(ControlReply::error("busy", "WordInk is stopping"));
         };
         self.ended.retain(|collector| !collector.is_finished());
         let captures_dir = self
@@ -2615,7 +2615,7 @@ pub enum CaptureControl {
 #[cfg(target_os = "macos")]
 pub fn send_to_listener(control: CaptureControl) -> Result<()> {
     use crate::recognition::RecognitionControl;
-    let runtime = crate::macos_rune::runtime().ok_or_else(|| eyre!("Hex is starting"))?;
+    let runtime = crate::macos_rune::runtime().ok_or_else(|| eyre!("WordInk is starting"))?;
     let (reply, _) = mpsc::sync_channel(1);
     runtime
         .recognition(match control {
@@ -2639,9 +2639,9 @@ pub fn send_to_listener(control: CaptureControl) -> Result<()> {
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .as_ref()
-        .ok_or_else(|| eyre!("Hex is not listening"))?
+        .ok_or_else(|| eyre!("WordInk is not listening"))?
         .try_send(control)
-        .map_err(|_| eyre!("Hex is busy; try again"))
+        .map_err(|_| eyre!("WordInk is busy; try again"))
 }
 
 /// Makes the calling listener the one capsule commands reach.

@@ -493,7 +493,7 @@ pub fn await_printed(receiver: &Receiver<PrintedTranscript>, wait: Duration) -> 
 pub fn cancel_removed() -> ControlError {
     ControlError::new(
         "removed",
-        "cancel was removed: dictations always finish and paste; `hex dictation stop` finishes one",
+        "cancel was removed: dictations always finish and paste; `wordink dictation stop` finishes one",
     )
 }
 
@@ -509,13 +509,13 @@ pub fn check_flags(
     if print && action != CaptureAction::Stop {
         return Err(ControlError::new(
             "invalid-value",
-            "--print works only with `hex dictation stop`",
+            "--print works only with `wordink dictation stop`",
         ));
     }
     if raw && !matches!(action, CaptureAction::Start | CaptureAction::Toggle) {
         return Err(ControlError::new(
             "invalid-value",
-            "--raw works only with `hex dictation start` and `hex dictation toggle`",
+            "--raw works only with `wordink dictation start` and `wordink dictation toggle`",
         ));
     }
     Ok(action)
@@ -539,8 +539,8 @@ pub fn version_mismatch(version: u64) -> ControlError {
     ControlError::new(
         "version-mismatch",
         format!(
-            "this hex speaks control version {version}, but the running Hex speaks \
-             {CONTROL_VERSION}; use the hex inside the running app or restart Hex"
+            "this wordink speaks control version {version}, but the running WordInk speaks \
+             {CONTROL_VERSION}; use the wordink inside the running app or restart WordInk"
         ),
     )
 }
@@ -738,7 +738,7 @@ pub fn model_source(
         .filter(|_| installed)
         .and_then(|path| describe(&path));
     match (model.id.is_custom(), here) {
-        (true, Some(origin)) => format!("found: {origin} (not tested by Hex)"),
+        (true, Some(origin)) => format!("found: {origin} (not tested by WordInk)"),
         (false, Some(origin)) => format!("found: {origin}"),
         (true, None) => "imported".into(),
         (false, None) if installed => "hex".into(),
@@ -804,7 +804,7 @@ pub fn model_infos(
                 model.architecture.as_str(),
                 "whisper" | "qwen3_asr"
             ),
-            source: format!("found: {} (not tested by Hex)", model.source()),
+            source: format!("found: {} (not tested by WordInk)", model.source()),
         });
     }
     infos
@@ -865,7 +865,7 @@ pub fn model_selection(
         return Err(ControlError::new(
             "model-unavailable",
             format!(
-                "`{model}` can't be used: turn on Labs › Parakeet Ultra: hex labs on parakeet-ultra"
+                "`{model}` can't be used: turn on Labs › Parakeet Ultra: wordink labs on parakeet-ultra"
             ),
         ));
     }
@@ -874,7 +874,7 @@ pub fn model_selection(
         .ok_or_else(|| {
             ControlError::new(
                 "unknown-model",
-                format!("unknown model `{model}`; run `hex model list` for the ids"),
+                format!("unknown model `{model}`; run `wordink model list` for the ids"),
             )
         })?;
     // The model's own remembered language, as the menu bar picks it; only
@@ -886,7 +886,7 @@ pub fn model_selection(
     let definition = crate::transcription::models::definition(id);
     crate::transcription::models::validate(&selection).map_err(|error| {
         let supported = if definition.languages.contains(&"*") {
-            "any language code Hex knows (en, de, fr, ja, …)".to_owned()
+            "any language code WordInk knows (en, de, fr, ja, …)".to_owned()
         } else {
             definition.languages.join(", ")
         };
@@ -913,7 +913,7 @@ pub fn check_quit(
         return Err(ControlError::new(
             "meeting-active",
             format!(
-                "a meeting is {}; stop it first (`hex meetings stop`) or pass --force",
+                "a meeting is {}; stop it first (`wordink meetings stop`) or pass --force",
                 meeting.state
             ),
         ));
@@ -1271,7 +1271,7 @@ mod tests {
                     id: "1.scrawl".into(),
                     sent_to: Some(ScrawlCaptureSession {
                         session: "ses_1".into(),
-                        title: "Hex".into(),
+                        title: "WordInk".into(),
                     }),
                     ..ScrawlCaptureSummary::default()
                 }],
@@ -1292,7 +1292,7 @@ mod tests {
             ControlReply::Transcript {
                 text: "Ship it.".into(),
             },
-            ControlReply::error("busy", "Hex is busy"),
+            ControlReply::error("busy", "WordInk is busy"),
         ] {
             let response = ControlResponse::from(reply);
             let json = serde_json::to_string(&response).unwrap();

@@ -488,7 +488,7 @@ pub fn listen(
                             None => ControlReply::error(
                                 "feature-off",
                                 "Annotate is off; turn it on in Settings › Annotate or \
-                                 run `hex settings set capture.enabled true`",
+                                 run `wordink settings set capture.enabled true`",
                             ),
                         };
                         let _ = reply.send(answer);
@@ -1493,7 +1493,7 @@ fn capture_refusal(other_recording: bool, suspended: bool) -> Option<ControlRepl
     } else if suspended {
         Some(ControlReply::error(
             "busy",
-            "Hex is recording a shortcut in Settings or reopening the microphone; try again",
+            "WordInk is recording a shortcut in Settings or reopening the microphone; try again",
         ))
     } else {
         None
@@ -1583,7 +1583,7 @@ fn control_dictation(
             if accepted {
                 // A warm start already queued its provisional tone.
                 make_control_capture_intentional(input, release_while_idle)?;
-                ControlReply::done("Recording; `hex dictation stop` or the shortcut finishes")
+                ControlReply::done("Recording; `wordink dictation stop` or the shortcut finishes")
             } else {
                 hotkeys.dictation.suspend();
                 ControlReply::error("busy", "the microphone is busy; try again")
@@ -1619,7 +1619,7 @@ fn control_dictation(
                 ),
                 finished => finish_reply(
                     Some(finished),
-                    "Finished recording; Hex pastes the text when it's ready",
+                    "Finished recording; WordInk pastes the text when it's ready",
                 ),
             }
         }
