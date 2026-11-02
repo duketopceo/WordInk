@@ -749,6 +749,30 @@ fn the_practice_game_follows_hex_s_own_dictation_on_every_os() {
     }
 }
 
+/// The default window is 823 px wide on a tiling desktop (R3): the practice
+/// game's cards and Done must sit fully inside it.
+#[test]
+fn the_practice_game_fits_an_823_px_window() {
+    const WIDTH: f32 = 823.0;
+    let mut rt = runtime("onboarding-try", true, (WIDTH, 760.0));
+    for _ in 0..240 {
+        rt.frame(1.0 / 60.0);
+    }
+    let inside = |key: &str| {
+        let [x, _, w, _] = element(&rt, key).rect;
+        assert!(x >= 0.0 && x + w <= WIDTH, "{key} spans {x}..{} of {WIDTH}", x + w);
+    };
+    inside("done");
+    let mut cards = 0;
+    for i in 0..3 {
+        if rt.elements().iter().any(|e| e.key.as_deref() == Some(&format!("card{i}"))) {
+            inside(&format!("card{i}"));
+            cards += 1;
+        }
+    }
+    assert!(cards > 0, "the game shows cards");
+}
+
 #[test]
 fn the_explainer_draws_a_keycap_per_key_and_lines_up_the_lanes() {
     use crate::app_settings::{HotkeyBinding, HotkeyModifiers};
