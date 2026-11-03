@@ -235,6 +235,10 @@ const PATHS: &[(&str, &str)] = &[
         "mac-onboarding-reopen",
         "Window/Onboarding/Your turn · reopen",
     ),
+    (
+        "mac-onboarding-setup",
+        "Window/Onboarding/Permissions · finish later",
+    ),
     ("mac-onboarding-ready", "Window/Onboarding/WordInk is ready"),
     ("portal", "Linux & Windows/Settings · portal shortcuts"),
     ("commands", "Linux & Windows/Settings · wordink commands"),
@@ -289,6 +293,19 @@ const PATHS: &[(&str, &str)] = &[
         "Linux & Windows/Onboarding · engine, downloading",
     ),
     ("onboarding-hotkey", "Linux & Windows/Onboarding · shortcut"),
+    ("onboarding-welcome", "Linux & Windows/Onboarding · welcome"),
+    (
+        "onboarding-first-demo",
+        "Linux & Windows/Onboarding · demo, with Skip",
+    ),
+    (
+        "onboarding-test-dictation",
+        "Linux & Windows/Onboarding · test dictation",
+    ),
+    (
+        "onboarding-set-up-dictation",
+        "Linux & Windows/Onboarding · set up dictation",
+    ),
     ("onboarding-ready", "Linux & Windows/Onboarding · ready"),
     (
         "windows-onboarding-microphone",

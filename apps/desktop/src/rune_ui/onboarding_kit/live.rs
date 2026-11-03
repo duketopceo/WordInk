@@ -73,6 +73,10 @@ pub(crate) struct Live {
     /// The scan for models on this computer hasn't answered yet.
     scanning: bool,
     pub(crate) practice: Practice,
+    /// This run has the engine and hotkey steps, so the story is the short
+    /// first run: welcome, one demo, permissions, then the test dictation in
+    /// a plain field, with "Finish later" on the permissions.
+    pub(crate) engine_steps: bool,
     /// The model and language this run downloads.
     choice: TranscriptionSelection,
     granted_at: Option<f64>,
@@ -207,6 +211,9 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     s.caps = ui.settings.dictation_hotkey.keycaps();
     s.had_model = had_model;
     s.granted = granted;
+    // One test dictation in a plain field; the practice game stays in the
+    // code for a later "Replay tour".
+    s.practice_field = engine_steps;
     s.home = match ui.platform.caps.os {
         Os::Macos => super::landing::Home::MenuBar,
         Os::Windows => super::landing::Home::Tray,
@@ -229,6 +236,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         pick_started: false,
         scanning: false,
         practice: Practice::Waiting,
+        engine_steps,
         choice,
         granted_at: None,
         checked: None,
@@ -237,19 +245,25 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     let now = clock(ui);
     s.now = now;
     match tour_step {
-        // With the engine steps, the story starts at the permissions: the
-        // model (or a key) is chosen on their page, after them.
-        TourStep::Welcome if engine_steps => s.jump_to_permissions(),
+        // With the engine steps, the story opens on the welcome page; the
+        // model (or a key) is chosen after the permissions.
+        TourStep::Welcome if engine_steps => s.step = Step::Pick,
         TourStep::Welcome => s.begin_live(now),
+        TourStep::Demo => s.jump_to_demo(),
         TourStep::Setup | TourStep::Engine | TourStep::Hotkey => s.jump_to_permissions(),
         TourStep::TryIt if had_model => s.jump_to_try(),
         TourStep::TryIt => s.jump_to_waiting(),
         TourStep::Done => s.jump_to_ready(),
     }
     ui.first_run = Some(s);
+    // A resumed run keeps its step for the next quit; a fresh one starts at
+    // Welcome.
+    if !ui.is_fixture() {
+        crate::desktop::onboarding::record_step(tour_step);
+    }
     // The tour waits at setup, where it asks for permissions, while the
     // story plays; with everything granted it goes on to the practice.
-    if tour_step == TourStep::Welcome {
+    if tour_step == TourStep::Welcome && !engine_steps {
         onboarding::input(ui, Input::Continue);
     }
 }
@@ -261,6 +275,8 @@ pub(in crate::rune_ui) enum Page {
     Download,
     /// The demo, finished: `"Twice as fast"` and Continue.
     Demo,
+    /// The short first run's demo while it plays, with Skip.
+    Playing,
     Permissions,
     /// `"Almost ready"`: the model still downloads.
     Waiting,
@@ -294,6 +310,7 @@ pub(in crate::rune_ui) fn fixture_resume(ui: &mut Ui, page: Page) {
     let reached = |s: &Onboard| match page {
         Page::Download => matches!(s.step, Step::Pick | Step::Started),
         Page::Demo => s.step == Step::Done,
+        Page::Playing => s.step == Step::Heard,
         Page::Permissions => s.step == Step::Permissions,
         Page::Waiting => s.step == Step::Waiting,
         Page::Try => s.step == Step::Try,
@@ -329,7 +346,11 @@ pub(crate) fn restart(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {
     }
     ui.select_pane(super::super::Pane::General, tx);
     ui.first_run = None;
-    ui.tour = Some(onboarding::Tour::replay(&ui.settings, &ui.platform));
+    ui.tour = Some(onboarding::Tour::replay(
+        &ui.settings,
+        &ui.platform,
+        &ui.picker,
+    ));
     open(ui);
     tx.settle();
     if ui.first_run.is_none() {
@@ -400,6 +421,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         checked.installed || tour_model == ItemStatus::Ready,
         checked.status,
     );
+    follow_story(ui);
     // Setup that is already ready never moves the tour past it by itself,
     // and the tour watches the practice dictation only once it has.
     if status.ready()
@@ -453,7 +475,9 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     live.models = models;
     live.pick_started = started;
     live.scanning = scanning;
-    let downloading_page = matches!(s.step, Step::Pick | Step::Started);
+    // The short first run has no model step: its welcome page is not the
+    // download page.
+    let downloading_page = !live.engine_steps && matches!(s.step, Step::Pick | Step::Started);
     match live.model_step {
         ModelStep::None if offered && downloading_page => live.model_step = ModelStep::Choosing,
         ModelStep::Choosing if !offered => live.model_step = ModelStep::None,
@@ -530,11 +554,62 @@ pub(super) fn on_ui(f: fn(&mut Onboard)) -> impl Fn(&mut Ui) + 'static {
 
 pub(super) fn press_continue(ui: &mut Ui) {
     if let Some(s) = ui.first_run.as_mut() {
-        s.move_on();
+        // The test dictation landed: on to the last page. Every other page
+        // moves on as the story does.
+        if s.step == Step::TryHeard {
+            s.press_continue();
+        } else {
+            s.move_on();
+        }
     }
 }
 
-/// "Start using Hex": closes the first run and the tour under it.
+/// The tour follows the story's pages: the demo ending (or skipped) ends its
+/// Demo step, and the test dictation (or Skip on it) ends TryIt.
+fn follow_story(ui: &mut Ui) {
+    let Some(story) = ui.first_run.as_ref().map(|s| s.step) else {
+        return;
+    };
+    let moved = match ui.tour.as_ref().map(|tour| tour.flow.step()) {
+        Some(TourStep::Demo) => story >= Step::Permissions,
+        Some(TourStep::TryIt) => story == Step::Ready,
+        _ => false,
+    };
+    if moved {
+        onboarding::input(ui, Input::Skip);
+    }
+}
+
+/// Continue on the welcome page: the one short demo plays.
+pub(in crate::rune_ui) fn begin_demo(ui: &mut Ui) {
+    onboarding::input(ui, Input::Continue);
+    if let Some(s) = ui.first_run.as_mut() {
+        s.jump_to_demo();
+    }
+}
+
+/// Skip on the demo: on to the permissions.
+pub(in crate::rune_ui) fn skip_demo(ui: &mut Ui) {
+    onboarding::input(ui, Input::Skip);
+    if let Some(s) = ui.first_run.as_mut() {
+        s.jump_to_permissions();
+    }
+}
+
+/// Skip on the test dictation: straight to the last page.
+pub(super) fn skip_try(ui: &mut Ui) {
+    onboarding::input(ui, Input::Skip);
+    if let Some(s) = ui.first_run.as_mut() {
+        s.jump_to_ready();
+    }
+}
+
+/// "Finish later" on the permissions and engine pages.
+pub(in crate::rune_ui) fn finish_later(ui: &mut Ui) {
+    onboarding::input(ui, Input::Defer);
+}
+
+/// "Start using WordInk": closes the first run and the tour under it.
 pub(super) fn finish(ui: &mut Ui) {
     let installed = onboarding::engine_installed(ui);
     if ui.live()
@@ -543,6 +618,9 @@ pub(super) fn finish(ui: &mut Ui) {
         && let Err(error) = crate::desktop::onboarding::record_completion()
     {
         tracing::warn!(%error, "could not record onboarding completion");
+    }
+    if !ui.is_fixture() {
+        crate::desktop::onboarding::clear_step();
     }
     ui.first_run = None;
     ui.tour = None;

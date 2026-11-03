@@ -255,6 +255,12 @@ impl Onboard {
             && !self.scripted_try
     }
 
+    /// The real first run with the engine and hotkey steps: welcome, one
+    /// demo, permissions, then the test dictation in a plain field.
+    pub(crate) fn engine_flow(&self) -> bool {
+        self.live.as_ref().is_some_and(|live| live.engine_steps)
+    }
+
     pub(crate) fn pick(&mut self, language: Language) {
         if self.step != Step::Pick {
             return;
@@ -793,6 +799,13 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
             s.step = Step::Done;
             Some(1.3)
         }
+        // The short first run always follows its one demo with the
+        // permissions page, which waits on the real state.
+        Step::Done if s.engine_flow() => {
+            s.step = Step::Permissions;
+            s.permissions_from = Some(now);
+            Some(PERMISSIONS_WAIT)
+        }
         Step::Done if !s.granted => {
             s.step = Step::Permissions;
             s.permissions_from = Some(now);
@@ -1293,6 +1306,21 @@ mod tests {
         s.now = 20.0;
         assert_eq!(s.example(0), (EXAMPLE_REPLIES[0], true));
         assert_eq!(s.example(1), (EXAMPLE_REPLIES[1], true));
+    }
+
+    #[test]
+    fn the_first_run_demo_plays_in_under_twenty_seconds() {
+        let mut s = Onboard::new(Flow::FirstRun);
+        s.speech = Speech::AfterDownload;
+        s.jump_to_demo();
+        assert_eq!(s.step, Step::Parked);
+        let mut now = s.auto_due_at.expect("the demo's first beat is due");
+        while s.step != Step::Done {
+            now += first_run_next(&mut s, now).expect("the demo plays on by itself");
+        }
+        // `now` is when Done's beat ends: the demo hands over to permissions.
+        assert!(now > 5.0, "the demo shows both sides, took {now} s");
+        assert!(now < 20.0, "the demo takes {now} s");
     }
 
     #[test]
