@@ -6,7 +6,7 @@
 anoma.ly/release/hex/                      the Anomaly release service (docs/releasing.md)
 ├── index.json, desktop/stable.json        what the site, installers, and apps read
 └── files/<sha256>/<name>                  hex-<v>-macos-arm64.{zip,dmg}, hex-<v>-windows-<arch>.exe,
-                                           hex-setup-<v>-windows-<arch>.exe,
+                                           wordink-setup-<v>-windows-<arch>.exe,
                                            hex-<v>-linux-<x64|arm64>{,.deb,.rpm}
 anoma.ly/hex                               the one site: platform-aware download (Worker hex-production-site)
 ├── download/<target>                      302 to anoma.ly/release/hex/desktop/stable/<target> once stable.json
@@ -22,14 +22,11 @@ dev.anoma.ly/hex                           the dev site (reads anoma.ly/release;
 hex.kitlangton.com, .dev                   Kit's old site (Kit's Cloudflare account); should 301 to
                                            anoma.ly/hex (Kit's change; nothing links to it)
 downloads.hex.kitlangton.dev, .com         Kit's old bucket, frozen at 2.3.1; releases up to 2.3.1
-                                           compiled it, so it stays up forever; the Worker in
-                                           packaging/legacy-downloads redirects it to
-                                           anoma.ly/hex/files (same bytes) once deployed
+                                           compiled it, so it stays up forever
 github.com/anomalyco/hex/releases/tag/v<version>       identical-byte mirror of every file (app-v through 2.3.1)
 ```
 
-`docs/releasing.md` describes the Worker config, the workflow that publishes
-these, the credentials, and the transition from Kit's bucket.
+The root `docs/releasing.md` describes the release workflow.
 `hex-production-files` was seeded with byte copies of everything the old bucket
 served. A Configuration Rule in the anoma.ly zone disables **Browser Integrity
 Check** for `/hex/files/` on anoma.ly and dev.anoma.ly: the zone check returned

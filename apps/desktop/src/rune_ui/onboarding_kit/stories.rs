@@ -88,12 +88,12 @@ pub(crate) struct Onboard {
     pub(crate) parked_from: Option<f64>,
     pub(crate) typing_from: Option<f64>,
     pub(crate) voice_from: Option<f64>,
-    /// When the resting HUD plate first showed on `"With Hex"` or
+    /// When the resting HUD plate first showed on `"With WordInk"` or
     /// `"Your turn"`: the HUD unfolds from here and keeps running through the
     /// take, so pressing the shortcut never restarts it.
     pub(crate) hud_from: Option<f64>,
     pub(crate) take_from: Option<f64>,
-    /// How many `"Without Hex"` bubbles have flown out of the field so far.
+    /// How many `"Without WordInk"` bubbles have flown out of the field so far.
     sent_seen: usize,
     pub(crate) partial: &'static str,
     pub(crate) take: &'static Take,
@@ -131,7 +131,7 @@ pub(crate) struct Onboard {
     pub(crate) game: Option<super::game::Session>,
     /// The interactive try as the plain practice field, not the game.
     pub(crate) practice_field: bool,
-    /// Where Hex lives once onboarding closes, under `"Hex is ready"`.
+    /// Where Hex lives once onboarding closes, under `"WordInk is ready"`.
     pub(crate) home: super::landing::Home,
 }
 
@@ -288,7 +288,7 @@ impl Onboard {
     }
 
     /// Toggles the inline language capsule button (`English` ↔ `French`) on
-    /// `"Setting up Hex"`.
+    /// `"Setting up WordInk"`.
     pub(crate) fn cycle_language(&mut self) {
         let next = match self.language.unwrap_or(self.wants) {
             Language::English => Language::Other,
@@ -892,7 +892,7 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
     s.now = now;
     tx.trace_channel("onboarding.step", "phase", s.step as u32 as f32);
     tx.trace_channel("onboarding.mic", "level", s.listening_peak().unwrap_or(0.0));
-    // A sent `"Without Hex"` reply lifts out of the field into its bubble.
+    // A sent `"Without WordInk"` reply lifts out of the field into its bubble.
     let sent = versus::sent_count(s);
     for i in s.sent_seen..sent {
         tx.launch("typed/line0", format!("sent-bubble-{i}"));

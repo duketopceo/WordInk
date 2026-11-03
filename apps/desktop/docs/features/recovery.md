@@ -577,8 +577,7 @@ entries, including file bytes, permissions, and symlink targets. After
 artifact-first/feed-last publication, the public DMG, ZIP, and latest-DMG link
 matched the prepared SHA-256 checksums. The ZIP's Ed25519 signature verified
 against the app's public key, and the public appcast led with build `20112`.
-See [release notes](../releases/2.1.12.md) and
-[release checks](../../scripts/release-app.sh).
+See [release notes](../releases/2.1.12.md).
 
 Proof limit: these are native layout-query, local app-startup, and distribution
 artifact checks, not physical shortcut/paste acceptance or an exercised Sparkle

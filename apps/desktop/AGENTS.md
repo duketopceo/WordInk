@@ -1,25 +1,16 @@
 <!-- tallow -->
 # Hex Agent Guide
 
-## Private Kit Tool
+## Workflow
 
-`dev` and `production` take changes only through pull requests (Dax's
-ruleset; `.github/` changes also need Dax). Branch from `dev`, open a PR to
-`dev`, and merge it yourself once it compiles (don't wait on CI); merge any open PR without
-asking. After merging, update the installed copy. See
-`~/code/control/AGENTS.md`. `production` holds what was released and moves
-only by a fast-forward from `dev` when Kit releases; never commit to it.
-There is no `main`.
+Branch from `master` and open a pull request to `master`. Releases follow the root
+`docs/releasing.md`.
 
 Any change to what the window draws regenerates the goldens in the same PR:
-run `HEX_UPDATE_GOLDENS=1 cargo test --locked --bin hex rune_ui`
+run `HEX_UPDATE_GOLDENS=1 cargo test --locked --bin wordink rune_ui`
 on Linux (the golden tests only run there; from a Mac, dispatch
 `check-linux.yml` on the branch and take its `golden-actual` artifact),
 look at every changed image, and commit them with the change.
-
-`dev` is canonical and contains the Rune front end on every OS; GPUI is
-removed. The `rune-ui` integration branch is merged and kept only for history:
-branch from and push to `dev`.
 
 ## Purpose
 
@@ -1422,8 +1413,7 @@ smoke tests.
 Microphone selection is System default (the OS default input, live) unless a
 saved microphone is connected; override everything with `--device`. The app
 bundle build requires Xcode 26 for Icon Composer compilation and a Developer ID
-signing identity. `scripts/release-app.sh prepare` builds the notarized and stapled
-DMG and ZIP the Release workflow publishes. Hex publishes every platform to
+signing identity. The Release workflow builds and publishes the notarized DMG and ZIP. Hex publishes every platform to
 the Anomaly release service (`anomalyco/release`, `https://anoma.ly/release`;
 its dev stage, `dev.anoma.ly/release`, only tests the service itself, and Hex
 never publishes to or reads from it) from the Release workflow with curl and its
@@ -1460,11 +1450,11 @@ The move to Anomaly's team (`5NZ4Q7NXJ4`) is planned in
 `docs/plans/macos-signing.md`; the manual `macOS signed build` workflow signs
 and notarizes an unpublished candidate once the Apple secrets are in the
 `release` environment.
-`scripts/release-app.sh prepare` leaves `hex-<version>-macos-arm64.dmg` and
+The release leaves `hex-<version>-macos-arm64.dmg` and
 `hex-<version>-macos-arm64.zip` (root `Hex.app`, the updater's archive); both
 contain the same signed, stapled app. Do not reuse a released version for
 changed code. Macs on 2.3.1 or earlier (Sparkle, `com.kitlangton.hex2`) get
-one informational appcast item, `packaging/macos/legacy-appcast.xml`, that
+one informational appcast item that
 links to the new app; they never auto-update into it.
 There is no Swift migration: never import Swift preferences or data, adopt its
 bundle identifier, publish Rust artifacts to its S3 feed, or automatically quit,
@@ -1509,7 +1499,7 @@ Linux, Check macOS, and Check Windows suites on the candidate commit; a stable
 run publishes nothing until all four pass.
 
 CI is minimal (Dax): a pull request runs only `hex-agent-policy` and Compile
-(`compile.yml`: `cargo clippy --bin hex` on Linux, macOS, and Windows x64,
+(`compile.yml`: `cargo clippy --bin wordink` on Linux, macOS, and Windows x64,
 for code changes). Merge as soon as it compiles locally, without waiting for
 CI; the CI failure pipeline fixes breakages on `dev` afterwards. A push to
 `dev` runs no checks: its Release dev build compiles every OS, and Test
@@ -1559,7 +1549,7 @@ required reviewer; its deployment policy admits `dev` and `production`. Rerunnin
 after an interruption is safe: the service stores files by hash and accepts
 the same version again.
 
-`hex-setup-<version>-windows-<x64|arm64>.exe` is a per-user Inno Setup
+`wordink-setup-<version>-windows-<x64|arm64>.exe` is a per-user Inno Setup
 installer (`packaging/windows/hex.iss`, built by
 `scripts/build-windows-installer.ps1`) that installs exactly the managed
 layout `install-windows.ps1` creates, so self-updates keep working:

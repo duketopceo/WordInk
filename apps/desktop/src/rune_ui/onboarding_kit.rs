@@ -20,7 +20,7 @@
 //!   `Muted felt`, `Soft warm`, `Silent typing`), shortcut keycap clicks,
 //!   motion cues, and Hex's `#292` `feedback` tones.
 //! - [`mic`] & [`mic_line`]: microphone level bars and selector capsule.
-//! - [`landing`]: shared typography, zero-bounce transitions, and `"Hex is ready"`.
+//! - [`landing`]: shared typography, zero-bounce transitions, and `"WordInk is ready"`.
 
 mod cards;
 mod dictated;

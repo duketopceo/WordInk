@@ -52,7 +52,7 @@ scripts/build-app.sh       // cargo build → Hex.app; signs Moonshine and ONNX 
                            // apple-events; not sandboxed)
                            // HEX_TEST_BUILD=1: ad-hoc "Hex Test.app" (anomaly.hex.test)
 scripts/macos-signing.sh   // identity must be "Developer ID Application: … (TEAM)"
-scripts/release-app.sh     // clean pushed tree → notarized, stapled app and DMG
+release workflow           // clean pushed tree → notarized, stapled app and DMG
                            // (scripts/notarize-app.sh) → dist/hex-<v>-macos-arm64.dmg
                            // and .zip (root Hex.app, the updater's archive)
 scripts/validate-app.sh    // bundle id anomaly.hex, team, Developer ID, entitlements,
@@ -139,7 +139,7 @@ Macs on 2.3.1 or earlier run Sparkle with `com.kitlangton.hex2`; their
 `SUFeedURL` redirects to `https://anoma.ly/hex/files/appcast.xml`. They never
 auto-update into `anomaly.hex`: at the first release on the service, the
 Legacy appcast workflow replaces that appcast with
-`packaging/macos/legacy-appcast.xml`, one informational item (no enclosure)
+a legacy appcast, one informational item (no enclosure)
 that links to https://anoma.ly/hex. Sparkle shows its notes and a download
 button and installs nothing. It needs no Sparkle EdDSA key: the item has no
 archive to sign and 2.3.1 does not set `SURequireSignedFeed`. Set the item's

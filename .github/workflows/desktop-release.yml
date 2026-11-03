@@ -1,15 +1,27 @@
 # Desktop release: a `desktop-v<version>` tag builds the app on the four
-# platforms, signs the Linux executables, and publishes one GitHub Release with
-# SHA256SUMS, an SBOM, build-provenance attestations and the update manifest
-# (stable.json) the in-app updater reads. See apps/desktop/README.md ("Releasing").
+# platforms, signs the Linux executables and the checksum list, and publishes
+# one GitHub Release with SHA256SUMS(.sig), an SBOM, build-provenance
+# attestations and the update manifest (stable.json) the in-app updater reads.
+# Tags are `desktop-vX.Y.Z` (final, channel stable, marked latest) and
+# `desktop-vX.Y.Z-rc.N` (release candidate, channel dev, prerelease, never
+# latest). See docs/releasing.md for the runbook.
 #
-# Trust boundaries (the same split Hex's release workflow uses):
-#   build       runs repository code (cargo, build.rs); no secrets, read-only.
-#   sign-linux  the only job that can read WORDINK_LINUX_SIGNING_KEY. It sits in
-#               the protected `release` environment, so the owner approves it,
-#               and it runs only packaging/linux/sign-linux.sh on the build
-#               output as data: it never builds, installs or runs it.
-#   publish     writes the release; holds no signing key.
+# Job graph:
+#   prepare -> gate -> build (x4), sbom -> package-linux -> sign-linux
+#           -> draft -> [smoke: U9 inserts its jobs here] -> publish
+#
+# Trust boundaries:
+#   prepare, gate   read-only; no secrets. gate only calls the GitHub API.
+#   build           runs repository code (cargo, build.rs); no secrets, read-only.
+#   package-linux   assembles the Linux tarballs from the build output; no
+#                   secrets. It runs before signing so the signed SHA256SUMS
+#                   covers the tarballs.
+#   sign-linux      the only job that can read WORDINK_LINUX_SIGNING_KEY. It
+#                   sits in the protected `release` environment, so the owner
+#                   approves it. Only its two `sign-linux.sh` steps hold the
+#                   key; everything built is treated as data and never run.
+#   draft           uploads the assets as a DRAFT release; holds no signing key.
+#   publish         only un-drafts the release; checks out and runs nothing.
 # macOS and Windows ship unsigned; their updater only links to the release.
 name: Desktop release
 on:
@@ -29,22 +41,73 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
+      channel: ${{ steps.version.outputs.channel }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            apps/desktop/CHANGELOG.md
+            apps/desktop/scripts/release-notes.sh
+          sparse-checkout-cone-mode: false
       - id: version
         env:
           TAG: ${{ github.ref_name }}
         run: |
           version=${TAG#desktop-v}
           # The version names a directory and is compared by the updater, so
-          # it must be X.Y.Z or X.Y.Z-prerelease.
-          printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
-            || { echo "::error::$TAG is not desktop-vX.Y.Z"; exit 1; }
+          # it is X.Y.Z (final) or X.Y.Z-rc.N (release candidate), nothing else.
+          printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
+            || { echo "::error::$TAG is not desktop-vX.Y.Z or desktop-vX.Y.Z-rc.N"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          case "$version" in *-*) echo "prerelease=true" ;; *) echo "prerelease=false" ;; esac >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *-rc.*) echo "prerelease=true"; echo "channel=dev" ;;
+            *) echo "prerelease=false"; echo "channel=stable" ;;
+          esac >> "$GITHUB_OUTPUT"
+      # The release notes are the CHANGELOG.md section for this version. A
+      # missing or empty section fails here, before anything is built or signed.
+      - name: Extract the release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/notes"
+          apps/desktop/scripts/release-notes.sh "$VERSION" > "$RUNNER_TEMP/notes/release-notes.md"
+          cat "$RUNNER_TEMP/notes/release-notes.md"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes/release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  # Nothing is built unless the tagged commit is on master, its `Desktop`
+  # workflow passed (dispatched here when path filtering skipped it), and, for
+  # a final tag, a published release candidate exists on the same commit.
+  gate:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 130
+    permissions:
+      contents: read
+      actions: write # dispatch the `Desktop` workflow when the commit has no run
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: apps/desktop/scripts
+          sparse-checkout-cone-mode: true
+      - name: Check the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: apps/desktop/scripts/release-gate.sh
 
   build:
     name: Build ${{ matrix.label }}
-    needs: prepare
+    needs: [prepare, gate]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -60,9 +123,10 @@ jobs:
         working-directory: apps/desktop
     env:
       # The binary reports this version (build.rs), which the updater checks
-      # a downloaded executable against, and belongs to the stable channel.
+      # a downloaded executable against. A release candidate belongs to the
+      # dev channel, a final release to stable.
       HEX_VERSION: ${{ needs.prepare.outputs.version }}
-      HEX_BUILD_CHANNEL: stable
+      HEX_BUILD_CHANNEL: ${{ needs.prepare.outputs.channel }}
       # Portable CPU kernels: ggml otherwise tunes to the build machine and the
       # release would crash on older CPUs. No system BLAS either, so the
       # executable needs no OpenBLAS runtime.
@@ -132,7 +196,7 @@ jobs:
           case "$RUNNER_OS" in
             Linux)
               # The bare executable: what the updater downloads and the
-              # signature covers. The tarball is made after signing.
+              # signature covers. package-linux makes the tarball from it.
               install -m 755 "$exe" "$dist/$name"
               ;;
             macOS)
@@ -160,7 +224,7 @@ jobs:
           retention-days: 7
 
   sbom:
-    needs: prepare
+    needs: [prepare, gate]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -180,14 +244,48 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # The only job with the signing key. The `release` environment requires the
-  # owner's approval before it starts.
-  sign-linux:
+  # Linux tarballs, assembled before signing and without secrets so that the
+  # signed SHA256SUMS can cover them.
+  package-linux:
     needs: [prepare, build]
     runs-on: ubuntu-24.04
-    environment: release
+    env:
+      WORDINK_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      # Only the signing script and the public key it checks against.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: build-linux-*
+          path: ${{ runner.temp }}/in
+          merge-multiple: true
+      - name: Make the tarballs
+        run: |
+          set -euo pipefail
+          for arch in x64 arm64; do
+            apps/desktop/packaging/linux/make-tarball.sh "$RUNNER_TEMP/in" "$arch"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: tarballs
+          path: ${{ runner.temp }}/in/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # The only job with the signing key. The `release` environment requires the
+  # owner's approval before it starts. Order matters: the binaries are signed,
+  # then the update manifest and SHA256SUMS are written over every file
+  # (signatures included), then SHA256SUMS is signed. Only the two
+  # sign-linux.sh steps are given the key.
+  sign-linux:
+    needs: [prepare, build, sbom, package-linux]
+    runs-on: ubuntu-24.04
+    environment: release
+    env:
+      WORDINK_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      # Only the signing scripts and the public key they check against.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
@@ -195,23 +293,52 @@ jobs:
           sparse-checkout-cone-mode: true
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          pattern: build-linux-*
-          path: ${{ runner.temp }}/in
+          pattern: "{build-*,sbom,tarballs}"
+          path: ${{ runner.temp }}/release
           merge-multiple: true
+      - name: Check the files this release defines
+        run: |
+          set -euo pipefail
+          v=$WORDINK_VERSION
+          cd "$RUNNER_TEMP/release"
+          expected=$(printf '%s\n' \
+            "wordink-$v-linux-x64" "wordink-$v-linux-x64.tar.gz" \
+            "wordink-$v-linux-arm64" "wordink-$v-linux-arm64.tar.gz" \
+            "wordink-$v-windows-x64.zip" "wordink-$v-macos-arm64.zip" \
+            "wordink-$v.sbom.cdx.json" | LC_ALL=C sort)
+          found=$(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
+          [ "$expected" = "$found" ] || { echo "::error::unexpected release files"; diff <(echo "$expected") <(echo "$found") || true; exit 1; }
       - name: Sign the Linux executables
         env:
           WORDINK_LINUX_SIGNING_KEY: ${{ secrets.WORDINK_LINUX_SIGNING_KEY }}
-          WORDINK_VERSION: ${{ needs.prepare.outputs.version }}
-        run: apps/desktop/packaging/linux/sign-linux.sh "$RUNNER_TEMP/in"
+        run: apps/desktop/packaging/linux/sign-linux.sh "$RUNNER_TEMP/release"
+      # A final release carries the stable update manifest. A release candidate
+      # publishes none for now: U4 adds the dev.json feed here.
+      - name: Write the update manifest
+        if: needs.prepare.outputs.prerelease == 'false'
+        env:
+          WORDINK_TAG: ${{ github.ref_name }}
+          WORDINK_REPO: ${{ github.repository }}
+        run: apps/desktop/packaging/linux/write-manifest.sh "$RUNNER_TEMP/release"
+      - name: List every file in SHA256SUMS
+        run: apps/desktop/packaging/linux/write-sums.sh "$RUNNER_TEMP/release"
+      - name: Sign SHA256SUMS
+        env:
+          WORDINK_LINUX_SIGNING_KEY: ${{ secrets.WORDINK_LINUX_SIGNING_KEY }}
+        run: apps/desktop/packaging/linux/sign-linux.sh --sums "$RUNNER_TEMP/release"
+      - name: Verify the signed release
+        run: apps/desktop/packaging/linux/verify-release.sh "$RUNNER_TEMP/release"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: signed-linux
-          path: ${{ runner.temp }}/in/*.sig
+          name: release-files
+          path: ${{ runner.temp }}/release/*
           if-no-files-found: error
           retention-days: 7
 
-  publish:
-    needs: [prepare, build, sbom, sign-linux]
+  # Uploads every file as a DRAFT release, checks the draft holds exactly the
+  # files in SHA256SUMS, and stops there. Nothing is public until `publish`.
+  draft:
+    needs: [prepare, sign-linux]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -226,49 +353,55 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          sparse-checkout: apps/desktop/packaging/linux
+          sparse-checkout-cone-mode: true
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          pattern: "{build-*,signed-linux,sbom}"
-          path: ${{ runner.temp }}/in
-          merge-multiple: true
-      - name: Assemble the release
-        run: |
-          set -euo pipefail
-          dist="$RUNNER_TEMP/release"
-          mkdir -p "$dist"
-          v=$WORDINK_VERSION
-          # Only the files this release defines, no more.
-          for name in \
-            "wordink-$v-linux-x64" "wordink-$v-linux-x64.sig" \
-            "wordink-$v-linux-arm64" "wordink-$v-linux-arm64.sig" \
-            "wordink-$v-windows-x64.zip" "wordink-$v-macos-arm64.zip" \
-            "wordink-$v.sbom.cdx.json"; do
-            [ -f "$RUNNER_TEMP/in/$name" ] || { echo "::error::$name is missing"; exit 1; }
-            cp "$RUNNER_TEMP/in/$name" "$dist/$name"
-          done
-          for arch in x64 arm64; do
-            apps/desktop/packaging/linux/make-tarball.sh "$dist" "$arch"
-          done
-          apps/desktop/packaging/linux/write-manifest.sh "$dist"
-          (cd "$dist" && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
+          name: release-files
+          path: ${{ runner.temp }}/release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes
+      # Re-check what the signing job produced before it leaves the runner.
+      - run: apps/desktop/packaging/linux/verify-release.sh "$RUNNER_TEMP/release"
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: ${{ runner.temp }}/release/*
-      - name: Publish the GitHub Release
+      - name: Create the draft release
         env:
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
         run: |
           set -euo pipefail
-          notes=$(mktemp)
-          cat > "$notes" <<NOTES
-          WordInk desktop $WORDINK_VERSION.
-
-          - Linux (x86_64, aarch64): ed25519-signed. Unpack the tarball and run \`./install.sh\`; the app then updates itself and verifies each update's signature.
-          - macOS (Apple silicon) and Windows (x64): **unsigned**. Download the zip; the in-app updater only links to the newest release and never installs one.
-          - \`SHA256SUMS\` lists every file, \`*.sbom.cdx.json\` is the CycloneDX SBOM, and each file has a build-provenance attestation (\`gh attestation verify <file> -R $WORDINK_REPO\`).
-          NOTES
-          flags=(--draft --verify-tag --title "WordInk desktop $WORDINK_VERSION" --notes-file "$notes")
-          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); else flags+=(--latest); fi
+          flags=(--draft --verify-tag --title "WordInk desktop $WORDINK_VERSION" --notes-file "$RUNNER_TEMP/notes/release-notes.md")
+          # A release candidate is a prerelease and never the latest release.
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease --latest=false); else flags+=(--latest); fi
           gh release create "$WORDINK_TAG" -R "$WORDINK_REPO" "${flags[@]}" "$RUNNER_TEMP"/release/*
-          # Published only once every asset, stable.json included, is in place.
-          gh release edit "$WORDINK_TAG" -R "$WORDINK_REPO" --draft=false
+          expected=$(find "$RUNNER_TEMP/release" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
+          uploaded=$(gh release view "$WORDINK_TAG" -R "$WORDINK_REPO" --json assets --jq '.assets[].name' | LC_ALL=C sort)
+          [ "$expected" = "$uploaded" ] || { echo "::error::the draft's assets differ from the release files"; diff <(echo "$expected") <(echo "$uploaded") || true; exit 1; }
+
+  # smoke (U9) goes here: read-only jobs with `needs: [prepare, draft]` that
+  # install the draft's assets with the one-line installers and start the app.
+  # Add each one to `publish`'s `needs` so a failed smoke keeps the release a draft.
+
+  # The only step that makes the release public. It checks out and runs nothing.
+  publish:
+    needs: [prepare, draft]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      WORDINK_TAG: ${{ github.ref_name }}
+      WORDINK_REPO: ${{ github.repository }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Publish the draft
+        run: |
+          set -euo pipefail
+          if [ "$PRERELEASE" = true ]; then
+            gh release edit "$WORDINK_TAG" -R "$WORDINK_REPO" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$WORDINK_TAG" -R "$WORDINK_REPO" --draft=false --prerelease=false --latest
+          fi

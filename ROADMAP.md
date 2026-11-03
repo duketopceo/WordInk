@@ -1,6 +1,6 @@
 # WordInk Roadmap
 
-WordInk is converging on **one desktop app** (`apps/desktop`, based on [Hex](https://github.com/anomalyco/hex), MIT) that anyone can install on Linux, Windows or macOS, press a hotkey, see a recording indicator, and get their words typed into the focused app. The current plan is `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`; earlier plans are in [`docs/archive/`](docs/archive/) and are superseded.
+WordInk now has **one desktop app** (`apps/desktop`, based on [Hex](https://github.com/anomalyco/hex), MIT) for Linux, Windows and macOS. The app foundation is merged on `master` (PR #111); its active implementation plan is `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. The default HUD will merge Hex's status pill with Voxtype's audio-reactive meter in one popup. Earlier plans are in [`docs/archive/`](docs/archive/) or superseded.
 
 This page lists themes, not tickets. "Done" means merged to `master`. "Planned" means not started or not merged yet.
 
@@ -14,14 +14,14 @@ This page lists themes, not tickets. "Done" means merged to `master`. "Planned" 
 
 ## Now
 
-- **Desktop app foundation.** Bring Hex into `apps/desktop` with its MIT notice, rebrand it, add a Groq cloud engine as the default, and a choice of recording-indicator styles. Planned; arrives in a pull request.
-- **Repo hygiene.** Remove the superseded `legacy/` app, archive old plans, keep personal and machine-specific details out of the repo, and make the docs describe the product as it is. In progress on `chore/repo-cleanup`.
-- **Open-source basics.** Third-party notices, security policy, contributing guide with DCO sign-off, code of conduct, issue templates, CodeQL and Dependabot for every package root. Planned.
+- **Desktop app foundation.** Hex's MIT app is in `apps/desktop` with WordInk branding, Groq cloud transcription, local models, settings and indicator styles (PR #111; settings fixes #119 and #121). The current gap is the combined default HUD and real-device acceptance; no desktop release is tagged yet.
+- **Repo hygiene.** The superseded `legacy/` app is removed, old plans are archived, and personal details were scrubbed (PR #110).
+- **Open-source basics.** Third-party notices, security policy, DCO contribution guide, code of conduct, issue templates and CodeQL are merged (PR #109).
 
 ## Next
 
 - **Parity with the interim daemon.** Text replacements, filler removal, media pause, more cloud providers, meeting mode, usage and history. Planned.
-- **Cross-OS install.** A single installer path per OS, signed Linux releases with a verified updater. Planned.
+- **Cross-OS install.** Complete and verify install/update paths, then publish signed Linux releases; macOS and Windows remain unsigned until paid signing is available.
 - **Retire `wordink-dictd` per OS** once the app matches it there, starting with Linux. Planned.
 - **Publish the web SDK and gateway to npm.** The release workflow exists; publishing is switched off until an npm scope is set up. Planned.
 
@@ -36,9 +36,9 @@ This page lists themes, not tickets. "Done" means merged to `master`. "Planned" 
 
 | Platform | Desktop app (`apps/desktop`) | `wordink-dictd` today | Notes |
 |---|---|---|---|
-| Linux, Wayland (any desktop) | Planned | Works; text insertion and binds are Hyprland-first (see `examples/omarchy-dictation`) | App targets any Wayland desktop; Linux builds will be signed |
-| Windows | Planned | Works (`examples/windows-dictation`) | Unsigned |
-| macOS, Apple silicon | Planned | Works; first-run verified on a real Mac (`examples/macos-dictation`) | Unsigned, not notarized |
+| Linux, Wayland (any desktop) | App code in `master`; device acceptance and release pending | Works; text insertion and binds are Hyprland-first (see `examples/omarchy-dictation`) | Omarchy smoke test remains; Linux release signing is planned |
+| Windows | App code in `master`; device acceptance and release pending | Works (`examples/windows-dictation`) | Real-hardware acceptance remains; unsigned |
+| macOS, Apple silicon | App code in `master`; device acceptance and release pending | Works; first-run verified on a real Mac (`examples/macos-dictation`) | Real-app acceptance remains; unsigned, not notarized |
 | iOS | Separate product (`apps/ios`) | n/a | Talks to a gateway you run; built from source |
 | Web | Separate product (`packages/*`) | n/a | `<wordink-mic>` and React; not on npm yet |
 
@@ -47,8 +47,8 @@ This page lists themes, not tickets. "Done" means merged to `master`. "Planned" 
 | Engine | Where | State |
 |---|---|---|
 | Groq Whisper | `wordink-dictd`, gateway, web relay | Done. Default |
-| Groq Whisper | Desktop app | Planned. Default |
-| Parakeet v3 (local, no key) | Desktop app | Planned. Local default |
+| Groq Whisper | Desktop app | Implemented in `apps/desktop`; default when a Groq key is set |
+| Parakeet v3 (local, no key) | Desktop app | In the app's model path; intended no-key default |
 | OpenAI transcription | Gateway, web relay | Done; live-API check still to do |
 | Deepgram | Gateway, web relay | Done; live-API check still to do |
 | More cloud providers | Desktop app | Planned |

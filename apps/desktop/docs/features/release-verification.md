@@ -348,7 +348,7 @@ Linux binary was published.
 
 macOS 27.0.1's loader rejects procedural-macro dylibs that Rust 1.95 links in
 release mode with an explicit deployment target ("mis-aligned LINKEDIT string
-pool"), so `release-app.sh prepare` failed with the default toolchain. The release
+pool"), so the macOS release build failed with the default toolchain. The release
 was built with `RUSTUP_TOOLCHAIN=1.99.0`, which links them correctly, after the
 release test suite also passed on 1.99.0 with `MACOSX_DEPLOYMENT_TARGET=15.0`.
 The app still declares and was built for macOS 15.0 (`minos 15.0`, SDK 27.0).

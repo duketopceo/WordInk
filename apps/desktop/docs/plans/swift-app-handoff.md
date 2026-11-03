@@ -83,7 +83,7 @@ and these behaviors are validated.
 
 ## Releases
 
-Prepare and publish Rust through `scripts/release-app.sh`, with identity checks
+Prepare and publish Rust through the Release workflow, with identity checks
 from `scripts/validate-app.sh`. Publish immutable artifacts before the R2 feed.
 The manual DMG contains `Hex.app`; the Sparkle ZIP keeps the old Rust `HEX.app`
 archive name. Sparkle 2.9.4 uses case-sensitive filenames or matching bundle IDs
