@@ -98,8 +98,14 @@ enum Command {
         #[arg(long)]
         embedded: bool,
     },
-    /// List microphone devices visible through WASAPI.
-    Devices,
+    /// List microphones with their cleaned-up names, or rename one.
+    Devices {
+        /// Also list devices the picker hides.
+        #[arg(long)]
+        all: bool,
+        #[command(subcommand)]
+        command: Option<crate::audio::devices_cli::DevicesCommand>,
+    },
     /// Compare live-stream and full-clip transcription of a WAV file.
     #[command(hide = true)]
     StreamBench {
@@ -168,6 +174,9 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
     // log, lock, or Hex of their own.
     if let Command::Control(command) = command {
         crate::control::cli::finish(crate::control::cli::run(command));
+    }
+    if let Command::Devices { all, command } = command {
+        std::process::exit(crate::audio::devices_cli::run(all, command));
     }
     if let Command::Keys { command } = &command {
         std::process::exit(crate::keys::run_cli(command));
@@ -240,18 +249,12 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
             }
             crate::local_api::run_service(&log_dir, event_path, embedded, shutdown)
         }
-        Command::Devices => {
-            for device in crate::audio::input_device_names()? {
-                println!("{device}");
-            }
-            Ok(())
-        }
         Command::StreamBench {
             wav,
             speed,
             selection,
         } => stream_bench(&wav, speed, &selection.resolve()?),
-        Command::Control(_) | Command::Keys { .. } | Command::Import { .. } => unreachable!("handled before logging"),
+        Command::Control(_) | Command::Devices { .. } | Command::Keys { .. } | Command::Import { .. } => unreachable!("handled before logging"),
     }
 }
 

@@ -29,6 +29,7 @@ enum Request {
     RestoreThen(Box<dyn FnOnce() + Send>),
 }
 
+#[derive(Clone)]
 pub(crate) struct AudioSuppressor {
     requests: Option<Sender<Request>>,
 }

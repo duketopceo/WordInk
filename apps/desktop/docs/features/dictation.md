@@ -562,6 +562,17 @@ Release when idle -> Press shortcut                   // dictate.cold-microphone
   -> Capture idle -> Microphone can close             // accepted jobs do not keep it open
 ```
 
+Bluetooth earbuds selected, music mode (Linux, `bluetooth_mic = headset`)  // dictate.bluetooth-headset
+  -> Press shortcut -> Pause media, switch the card to headset mode, indicator "Connecting earbuds mic…"
+     ├── Microphone appears within ~2 s (mSBC, then CVSD) -> Capture starts at its first chunk
+     └── None appears, or the switch is refused -> Restore profile, resume media, report the error
+  -> Words pasted (or cancel, error, exit) -> Restore the saved profile, then resume media
+  -> Crash while switched -> A marker file restores the profile at the next start
+  -> `bluetooth_mic = keep_quality` -> Dictate with the built-in microphone; earbuds stay in music mode
+Microphone names: ids are PipeWire node names read with `pactl`; ALSA is the fallback.
+`wordink devices` lists them, `wordink devices rename` or Settings › Rename… sets `device_names`.
+```
+
 Source: `DictationCapture` in [dictation.rs](../../src/dictation.rs); checks:
 `delayed_press_reconstructs_audio_from_the_original_boundary`,
 `delayed_release_removes_audio_captured_after_the_physical_release`,

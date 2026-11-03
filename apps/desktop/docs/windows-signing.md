@@ -21,7 +21,7 @@ sign-windows (release env, .github/release only)
 installers (windows-installers.yml)            // no secrets
 ├── build-windows-installer.ps1 x64 + arm64   // Inno embeds the signed bytes
 └── test-windows-installer.ps1 on native x64 and ARM64
-sign-windows-installers (release env)          // signs and checks both hex-setup-*.exe
+sign-windows-installers (release env)          // signs and checks both wordink-setup-*.exe
 publish                                       // stable requires the signatures
 ```
 

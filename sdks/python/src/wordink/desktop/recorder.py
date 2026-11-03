@@ -52,9 +52,11 @@ class SubprocessSource:
         self,
         command: tuple[str, ...] | None = None,
         *,
+        device: str | None = None,
         which: Callable[[str], str | None] = shutil.which,
     ) -> None:
         self._command = command
+        self._device = device
         self._which = which
         self._proc: asyncio.subprocess.Process | None = None
         self._reader: asyncio.Task[None] | None = None
@@ -81,6 +83,12 @@ class SubprocessSource:
         if self._proc is not None:
             raise RecorderError("already recording")
         command = self._command or detect_backend(self._which)
+        if self._device and not self._command:
+            # An explicit [record] command already carries its own device flags.
+            if command[0].startswith(("pw-record", "parecord")):
+                command = (*command, f"--device={self._device}")
+            elif command[0].startswith("arecord"):
+                command = (*command, "-D", self._device)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *command,
@@ -139,12 +147,13 @@ class Recorder:
         self,
         command: tuple[str, ...] | None = None,
         *,
+        device: str | None = None,
         min_seconds: float = 0.3,
         tail_seconds: float = 0.25,
         which: Callable[[str], str | None] = shutil.which,
         source: AudioSource | None = None,
     ) -> None:
-        self._source: AudioSource = source if source is not None else SubprocessSource(command, which=which)
+        self._source: AudioSource = source if source is not None else SubprocessSource(command, device=device, which=which)
         self.min_seconds = min_seconds
         self.tail_seconds = tail_seconds
         self._recording = False

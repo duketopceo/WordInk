@@ -104,6 +104,16 @@ impl LinuxIndicator {
         }
     }
 
+    /// Earbuds are switching to headset mode (or have finished): the HUD says
+    /// so until their microphone is ready.
+    pub(crate) fn earbuds_connecting(&self, connecting: bool) {
+        self.send(if connecting {
+            HudEvent::EarbudsConnecting
+        } else {
+            HudEvent::EarbudsReady
+        });
+    }
+
     /// Captured audio while recording, for the level the HUD shows.
     pub(crate) fn meter(&self, samples: &[f32]) {
         if let Some(sender) = self.sender() {

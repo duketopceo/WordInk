@@ -22,6 +22,7 @@ mod capture_host;
 mod control;
 mod desktop;
 mod dev_build;
+mod diagnostics;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod dictation;
 mod durable;
@@ -747,6 +748,10 @@ mod tests {
                 Ok(Some(Command::Control(ControlCli::Onboarding { .. })))
             ));
         }
+        assert!(matches!(
+            parse(&["hex", "diagnostics"]),
+            Ok(Some(Command::Control(ControlCli::Diagnostics)))
+        ));
         assert!(matches!(
             parse(&["hex", "history", "clear", "--yes"]),
             Ok(Some(Command::Control(ControlCli::History(

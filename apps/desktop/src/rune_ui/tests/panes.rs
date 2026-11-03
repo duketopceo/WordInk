@@ -2373,3 +2373,136 @@ fn speech_model_row_names_the_model_that_transcribes() {
     assert_eq!(label.as_deref(), Some("Parakeet v3"));
     assert!(!shown.contains("Local model:"), "{shown}");
 }
+
+// ---------------------------------------------------------------------------
+// Microphone names and the Bluetooth earbuds row.
+
+const BUDS: &str = "bluez_input.00:11:22:33:44:55";
+
+#[test]
+fn the_bluetooth_row_shows_only_while_a_bluetooth_microphone_is_listed() {
+    let mut rt = runtime("microphone-bluetooth", true, PANE_SIZE);
+    assert!(rt.find("bluetooth-mic").is_some(), "earbuds are listed");
+    assert!(
+        rt.find("avoid-bluetooth-microphone").is_none(),
+        "Linux has this row instead of the toggle"
+    );
+    let shown = texts(&rt);
+    assert!(
+        shown.contains(&"Use the earbuds' mic (headset mode)".to_owned()),
+        "{shown:?}"
+    );
+    assert!(shown.contains(
+        &"Earbuds switch to headset mode while you dictate, then back to music mode".to_owned()
+    ));
+
+    pick(&mut rt, "bluetooth-mic", 1);
+    assert_eq!(
+        rt.state.settings.bluetooth_mic,
+        crate::app_settings::BluetoothMic::KeepQuality
+    );
+    refresh(&mut rt);
+    assert!(texts(&rt).contains(
+        &"Earbuds stay in music mode; WordInk dictates with another microphone".to_owned()
+    ));
+
+    // No Bluetooth microphone: no row.
+    if let Ok(devices) = &mut rt.state.microphones {
+        devices
+            .devices
+            .retain(|device| device.kind != crate::audio::sources::DeviceKind::Bluetooth);
+    }
+    refresh(&mut rt);
+    assert!(rt.find("bluetooth-mic").is_none());
+}
+
+#[test]
+fn rename_gives_the_microphone_in_use_a_name_shown_everywhere() {
+    let mut rt = runtime("microphone-bluetooth", true, PANE_SIZE);
+    let field = |rt: &Runtime<Ui>| element(rt, "microphone-control").label;
+    assert_eq!(field(&rt).as_deref(), Some("Test Buds"));
+
+    // The menu ends with Rename…, which opens the field on the microphone in use.
+    tap(&mut rt, "microphone-control");
+    let choices = crate::rune_ui::settings::microphone_choices(&rt.state);
+    assert_eq!(choices.last().map(|c| c.label.as_str()), Some("Rename…"));
+    tap(
+        &mut rt,
+        &format!("microphone-menu-item{}", choices.len() - 1),
+    );
+    assert_eq!(rt.state.mic_renaming.as_deref(), Some(BUDS));
+    assert_eq!(
+        rt.state.mic_rename.text, "Test Buds",
+        "starts from the current name"
+    );
+
+    rt.state.mic_rename = TextEdit::new("Desk buds");
+    refresh(&mut rt);
+    tap(&mut rt, "microphone-rename-save");
+    assert!(rt.state.mic_renaming.is_none());
+    assert_eq!(rt.state.settings.device_names[BUDS], "Desk buds");
+    assert_eq!(field(&rt).as_deref(), Some("Desk buds"));
+
+    // The picker lists it by that name too.
+    let names: Vec<String> = crate::rune_ui::settings::microphone_choices(&rt.state)
+        .into_iter()
+        .map(|choice| choice.label)
+        .collect();
+    assert!(names.contains(&"Desk buds".to_owned()), "{names:?}");
+    assert!(!names.contains(&"Test Buds".to_owned()));
+
+    // A device that is gone is named as the user called it.
+    rt.state.settings.microphone = Some("gone".into());
+    rt.state
+        .settings
+        .device_names
+        .insert("gone".into(), "Old mic".into());
+    refresh(&mut rt);
+    assert!(
+        texts(&rt).contains(&"Old mic isn't connected; using the system input".to_owned()),
+        "{:?}",
+        texts(&rt)
+    );
+
+    // A blank name goes back to the default one.
+    rt.state.settings.microphone = Some(BUDS.into());
+    refresh(&mut rt);
+    crate::rune_ui::settings::start_microphone_rename(&mut rt.state);
+    rt.state.mic_rename = TextEdit::new("   ");
+    crate::rune_ui::settings::finish_microphone_rename(&mut rt.state);
+    assert!(!rt.state.settings.device_names.contains_key(BUDS));
+    refresh(&mut rt);
+    assert_eq!(field(&rt).as_deref(), Some("Test Buds"));
+}
+
+#[test]
+fn rename_can_be_cancelled_and_the_picker_can_show_every_device() {
+    let mut rt = runtime("microphone-rename", true, PANE_SIZE);
+    assert!(rt.find("microphone-rename-field").is_some());
+    tap(&mut rt, "microphone-rename-cancel");
+    assert!(rt.state.mic_renaming.is_none());
+    assert!(rt.state.settings.device_names.is_empty());
+    assert!(rt.find("microphone-rename-field").is_none());
+
+    // Hidden devices are offered only on request.
+    if let Ok(devices) = &mut rt.state.microphones {
+        devices.devices.push(crate::audio::InputDevice {
+            id: "easyeffects_source".into(),
+            label: "Effects".into(),
+            kind: crate::audio::sources::DeviceKind::Virtual,
+            hidden: true,
+            music_mode: false,
+        });
+    }
+    let labels = |rt: &Runtime<Ui>| -> Vec<String> {
+        crate::rune_ui::settings::microphone_choices(&rt.state)
+            .into_iter()
+            .map(|choice| choice.label)
+            .collect()
+    };
+    assert!(!labels(&rt).contains(&"Effects".to_owned()));
+    assert!(labels(&rt).contains(&"Show all devices".to_owned()));
+    rt.state.show_all_microphones = true;
+    assert!(labels(&rt).contains(&"Effects".to_owned()));
+    assert!(labels(&rt).contains(&"Show fewer devices".to_owned()));
+}

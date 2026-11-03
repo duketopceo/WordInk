@@ -6,7 +6,7 @@
 //! 2. Jay (CEO) pings: `"The investors are in the room. Are we ready to ship?"`
 //!    Typing by hand fumbles `"Yse, we're dead"` and accidentally hits Return,
 //!    freezes in horror, then fires off `"oh god *reayd"` — another typo!
-//! 3. Switching to `"With Hex"` gently recedes the keyboard while opening Hex's
+//! 3. Switching to `"With WordInk"` gently recedes the keyboard while opening Hex's
 //!    real `Dot scope` phosphor HUD (`rune_hud.wgsl`), lighting `⌥`, and
 //!    delivering `"Every test is green and prod is warm. Ship it right now."`
 //!    in **1.5 seconds**.
@@ -304,7 +304,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         |id| key_glow(s, id, voice_u),
     );
 
-    // Real `Dot scope` phosphor HUD (`rune_hud.wgsl`) during `With Hex`: it
+    // Real `Dot scope` phosphor HUD (`rune_hud.wgsl`) during `With WordInk`: it
     // unfolds as it rises a little off the keyboard, where `⌥` lights.
     let rise = s.motion.roll(10.0);
     let hud_el = if voice_phase {
@@ -389,7 +389,7 @@ fn key_glow(s: &Onboard, id: &str, voice_u: f32) -> f32 {
     }
 }
 
-/// How many `"Without Hex"` bubbles Jay's card shows now.
+/// How many `"Without WordInk"` bubbles Jay's card shows now.
 pub(super) fn sent_count(s: &Onboard) -> usize {
     match jay_reply(s) {
         Reply::Lines { sent_bubbles, .. } => sent_bubbles.len(),

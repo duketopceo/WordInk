@@ -12,10 +12,12 @@ pub(crate) mod icons;
 #[path = "linux/input.rs"]
 pub(crate) mod linux_input;
 pub(crate) use linux_input as input;
+pub(crate) mod headset;
 pub(crate) mod input_route;
 pub(crate) mod login_item;
 pub(crate) mod paste;
 pub(crate) mod portal;
+pub(crate) mod pulse;
 pub(crate) mod remote_desktop;
 pub(crate) mod rune_hud;
 pub(crate) mod service;
@@ -77,8 +79,14 @@ enum Command {
         #[arg(long)]
         device: Option<String>,
     },
-    /// List microphone devices visible through ALSA.
-    Devices,
+    /// List microphones with their cleaned-up names, or rename one.
+    Devices {
+        /// Also list monitors, null devices, and effect nodes.
+        #[arg(long)]
+        all: bool,
+        #[command(subcommand)]
+        command: Option<crate::audio::devices_cli::DevicesCommand>,
+    },
     /// Manage the API keys cloud engines use (`set` reads stdin).
     Keys {
         #[command(subcommand)]
@@ -117,6 +125,9 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
     };
     // Keys and file transcription need no log, lock, or running Hex.
     let command = match command {
+        Command::Devices { all, command } => {
+            std::process::exit(crate::audio::devices_cli::run(all, command))
+        }
         Command::Keys { command } => std::process::exit(crate::keys::run_cli(&command)),
         Command::Import { command } => std::process::exit(crate::voxtype_import::run_cli(&command)),
         Command::TranscribeFile { path } => {
@@ -176,13 +187,8 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 std::sync::mpsc::channel().1,
             )
         }
-        Command::Devices => {
-            for device in crate::audio::input_device_names()? {
-                println!("{device}");
-            }
-            Ok(())
-        }
         Command::Control(_)
+        | Command::Devices { .. }
         | Command::Stop
         | Command::Keys { .. }
         | Command::Import { .. }

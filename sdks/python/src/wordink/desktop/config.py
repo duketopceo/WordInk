@@ -22,7 +22,7 @@ _SCHEMA: dict[str, set[str]] = {
     "hotkey": {"hold", "toggle"},
     "transcribe": {"model", "language"},
     "cleanup": {"model", "tone", "timeout", "min_words"},
-    "record": {"command", "min_seconds", "max_seconds", "tail_seconds"},
+    "record": {"command", "device", "min_seconds", "max_seconds", "tail_seconds"},
     "insert": {"order", "terminals", "deny", "paste_delay", "notify"},
 }
 INSERT_TOOLS = ("wtype", "ydotool")
@@ -42,6 +42,7 @@ class DictateConfig:
     cleanup_timeout: float = 3.0
     min_words: int = MIN_WORDS_FOR_LLM
     record_command: tuple[str, ...] | None = None
+    record_device: str | None = None
     min_seconds: float = 0.3
     max_seconds: float = 60.0
     tail_seconds: float = 0.25
@@ -177,6 +178,8 @@ def load_config(
         if not isinstance(cmd, list) or not cmd or not all(isinstance(a, str) and a for a in cmd):
             raise WordInkError("dictate.toml [record] command must be a non-empty list of strings")
         kw["record_command"] = tuple(cmd)
+    if "device" in rc:
+        kw["record_device"] = _string("record", "device", rc["device"])
     for key in ("min_seconds", "max_seconds", "tail_seconds"):
         if key in rc:
             kw[key] = _number("record", key, rc[key], minimum=0.0 if key != "max_seconds" else 1.0)

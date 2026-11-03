@@ -1642,6 +1642,19 @@ pub struct UpdateSettings {
     pub channel: Option<UpdateChannel>,
 }
 
+/// What dictating with a Bluetooth microphone does to the earbuds (Linux;
+/// macOS and Windows switch Bluetooth audio modes themselves).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BluetoothMic {
+    /// Use the earbuds' microphone: they switch to headset mode while you
+    /// dictate and back to music mode afterwards.
+    #[default]
+    Headset,
+    /// Keep music quality: dictate with another microphone.
+    KeepQuality,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingAudioBehavior {
@@ -1916,6 +1929,13 @@ pub struct AppSettings {
     /// System default records from the built-in microphone, else another
     /// real input, rather than a Bluetooth default.
     pub avoid_bluetooth_microphone: bool,
+    /// Linux: whether a Bluetooth microphone is used in headset mode or
+    /// left in music mode for another microphone. Replaces
+    /// `avoid_bluetooth_microphone` there.
+    pub bluetooth_mic: BluetoothMic,
+    /// The names the user gave microphones, by device id. A device without
+    /// an entry shows its cleaned-up name.
+    pub device_names: std::collections::BTreeMap<String, String>,
     pub recording_audio_behavior: RecordingAudioBehavior,
     /// Fraction of the original output volume while ducking.
     pub recording_duck_volume: f32,
@@ -2083,6 +2103,8 @@ impl Default for AppSettings {
             sound_theme: crate::feedback::SoundSet::default(),
             microphone: None,
             avoid_bluetooth_microphone: true,
+            bluetooth_mic: BluetoothMic::default(),
+            device_names: Default::default(),
             recording_audio_behavior: RecordingAudioBehavior::DoNothing,
             recording_duck_volume: 0.2,
             pause_browser_media: false,
@@ -2407,6 +2429,7 @@ impl AppSettings {
             Ordering::Release,
         );
         crate::audio::set_avoid_bluetooth_microphone(self.avoid_bluetooth_microphone);
+        crate::audio::set_keep_bluetooth_quality(self.bluetooth_mic == BluetoothMic::KeepQuality);
         CUSTOM_TRANSFORMATIONS_ENABLED.store(
             transformations_used(&self.dictation_processing),
             Ordering::Release,
@@ -3294,6 +3317,26 @@ mod tests {
 
     /// Hex turned Annotate on for older settings files; WordInk never does,
     /// so a file without the migration keeps what the person chose.
+    #[test]
+    fn the_old_bluetooth_toggle_never_changes_the_earbuds_choice() {
+        // `avoid_bluetooth_microphone` defaulted to on; Linux ignores it, so
+        // an existing file still gets the headset flow.
+        let mut old = AppSettings {
+            migrations: vec![STREAMING_ENGLISH_MIGRATION.into()],
+            ..AppSettings::default()
+        };
+        assert!(old.avoid_bluetooth_microphone);
+        old.apply_one_time_migrations();
+        assert_eq!(old.bluetooth_mic, BluetoothMic::Headset);
+        // Only an explicit value changes it.
+        let loaded: AppSettings =
+            serde_json::from_str(r#"{"bluetooth_mic":"keep_quality"}"#).unwrap();
+        assert_eq!(loaded.bluetooth_mic, BluetoothMic::KeepQuality);
+        let unset: AppSettings =
+            serde_json::from_str(r#"{"avoid_bluetooth_microphone":true}"#).unwrap();
+        assert_eq!(unset.bluetooth_mic, BluetoothMic::Headset);
+    }
+
     #[cfg(hex_capture)]
     #[test]
     fn older_settings_never_turn_annotate_on() {
