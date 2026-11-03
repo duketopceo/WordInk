@@ -2535,7 +2535,7 @@ const SCENES: &[Scene] = &[
         *ui = fixture(DesktopShortcuts::Registered);
         ui.platform = platform::PlatformState::preview(platform::Capabilities::WINDOWS);
         ui.host = platform::PlatformHost::Fixture(Vec::new());
-        ui.settings.paste_with_shift = false;
+        ui.settings.terminal_paste = crate::app_settings::TerminalPaste::Auto;
     }),
     ("meetings", |ui| {
         *ui = mac_fixture();
@@ -2827,7 +2827,7 @@ fn mac_fixture() -> Ui {
     ui.platform = platform::PlatformState::preview(platform::Capabilities::MACOS);
     ui.host = platform::PlatformHost::Fixture(Vec::new());
     ui.settings.dictation_hotkey = AppSettings::default().dictation_hotkey;
-    ui.settings.paste_with_shift = false;
+    ui.settings.terminal_paste = crate::app_settings::TerminalPaste::Auto;
     ui.settings.meetings.enabled = true;
     ui.settings.meetings.providers = vec![
         crate::app_settings::MeetingProviderChoice {
@@ -2927,7 +2927,7 @@ fn fixture(shortcuts: DesktopShortcuts) -> Ui {
             model: TranscriptionModelId::ParakeetUnifiedEnglish,
             language: "en".into(),
         },
-        paste_with_shift: true,
+        terminal_paste: crate::app_settings::TerminalPaste::Always,
         ..AppSettings::default()
     };
     let mut ui = Ui::with(settings, Service::Fixture(Vec::new()));

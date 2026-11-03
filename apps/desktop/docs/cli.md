@@ -469,7 +469,7 @@ Writable keys: `release_microphone_while_idle`,
 `experimental.hex_microphone`, `experimental.hex_microphone_mode`,
 `experimental.hex_microphone_comfort_noise`,
 `experimental.hex_microphone_strength`, `enable_on_launch`,
-`paste_with_shift`, `ui_language`, `indicator_position`, `updates.channel`.
+`terminal_paste`, `ui_language`, `indicator_position`, `updates.channel`.
 
 `transcription.recognition_hints` is deprecated: recognition hints merged into
 the [vocabulary](features/vocabulary.md). `get` returns the vocabulary's terms,

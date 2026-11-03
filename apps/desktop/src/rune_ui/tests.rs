@@ -1,5 +1,6 @@
 use super::settings::{desktop_shortcut, recorded_binding, validate};
 use super::*;
+use crate::app_settings::TerminalPaste;
 use crate::transcription::models::TranscriptionSelection;
 use rune::render::Gpu;
 use rune::text::TextSystem;
@@ -257,11 +258,14 @@ fn desktops_without_a_portal_list_commands_instead_of_recording_rows() {
 #[test]
 fn toggles_save_through_the_host() {
     let mut rt = runtime("portal", true, TALL_SIZE);
-    assert!(rt.state.settings.paste_with_shift);
+    assert_eq!(rt.state.settings.terminal_paste, TerminalPaste::Always);
     open_advanced(&mut rt, Pane::General);
-    tap(&mut rt, "terminal-paste");
-    assert!(!rt.state.settings.paste_with_shift);
+    pick(&mut rt, "terminal-paste", 0);
+    assert_eq!(rt.state.settings.terminal_paste, TerminalPaste::Auto);
     assert_eq!(saved(&rt), 1);
+    pick(&mut rt, "terminal-paste", 2);
+    assert_eq!(rt.state.settings.terminal_paste, TerminalPaste::Never);
+    assert_eq!(saved(&rt), 2);
     assert!(sent(&rt).is_empty());
 }
 
@@ -583,10 +587,10 @@ fn service_settings_are_adopted_only_when_the_service_changes_them() {
     let mut ui = portal_fixture();
     let service = ui.settings.clone();
     ui.adopt(service.clone());
-    ui.update(|settings| settings.paste_with_shift = false);
+    ui.update(|settings| settings.terminal_paste = TerminalPaste::Auto);
     // The service has not reloaded yet: its stale copy must not win.
     ui.adopt(service.clone());
-    assert!(!ui.settings.paste_with_shift);
+    assert_eq!(ui.settings.terminal_paste, TerminalPaste::Auto);
     let mut changed = service;
     changed.enable_on_launch = false;
     ui.adopt(changed);
@@ -1834,11 +1838,11 @@ fn the_sidebar_moves_with_arrows_and_command_numbers() {
 #[test]
 fn toggle_rows_take_focus_and_flip_on_space() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
-    assert!(rt.state.settings.paste_with_shift);
+    let before = rt.state.settings.enable_on_launch;
     open_advanced(&mut rt, Pane::General);
-    tab_to(&mut rt, "terminal-paste");
+    tab_to(&mut rt, "enable-on-launch");
     key(&mut rt, Key::Text(" ".into()), Mods::default());
-    assert!(!rt.state.settings.paste_with_shift);
+    assert_ne!(rt.state.settings.enable_on_launch, before);
 }
 
 #[test]

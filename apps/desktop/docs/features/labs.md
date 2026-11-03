@@ -49,7 +49,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
 ├── Dictation stats no    labs.history_stats           History shows a summary of retained dictations; hex history stats prints it (#790)
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
-└── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
+└── Terminal paste  no    terminal_paste = always    (Windows) always paste with Ctrl+Shift+V (#477/#478; Linux keeps a General row)
 
 Settings › Labs                          // labs.page
 ├── "Try unfinished features. They may change or break." + Send feedback -> https://github.com/anomalyco/hex/issues/new
@@ -679,8 +679,9 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   the list; rewriting and search still use it, and the Vocabulary sheet says
   so.
 - Terminal paste (Windows): paste with Ctrl+Shift+V instead of Ctrl+V for
-  apps that ignore a synthetic Ctrl+V (issue 477 / PR 478). Its toggle is the
-  shared `paste_with_shift`; Linux keeps it as a General › Advanced row.
+  apps that ignore a synthetic Ctrl+V (issue 477 / PR 478). Its toggle is
+  `terminal_paste` = `always` (off is `auto`); Linux keeps a three-way General ›
+  Advanced row (Auto, Always, Never).
 
 Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 `contributed_options_are_labs_toggles_off_by_default`,

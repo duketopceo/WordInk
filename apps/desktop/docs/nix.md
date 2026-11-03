@@ -130,7 +130,7 @@ journalctl --user -u hex.service
     settings = {
       shortcut_mode = "toggle";
       sound_effect_volume = 0.4;
-      paste_with_shift = true;
+      terminal_paste = "always";
       "meetings.enabled" = true;
     };
   };

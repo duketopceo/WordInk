@@ -61,6 +61,8 @@ mod rune_hud;
 mod rune_ui;
 #[cfg(target_os = "macos")]
 mod suppression;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+mod terminal_paste;
 mod transcription;
 mod updater;
 mod voxtype_import;

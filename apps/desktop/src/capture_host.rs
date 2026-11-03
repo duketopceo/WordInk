@@ -3215,22 +3215,30 @@ fn summary(bundle: &Path) -> anyhow::Result<String> {
 fn with_linux_paster(
     use_it: impl FnOnce(&mut crate::linux::paste::LinuxPaster) -> Result<()>,
 ) -> anyhow::Result<()> {
-    static PASTER: Mutex<Option<crate::linux::paste::LinuxPaster>> = Mutex::new(None);
+    type Shared = (
+        crate::linux::paste::LinuxPaster,
+        Arc<std::sync::atomic::AtomicU8>,
+    );
+    static PASTER: Mutex<Option<Shared>> = Mutex::new(None);
     let mut paster = PASTER.lock().unwrap_or_else(|error| error.into_inner());
+    // Read at every capture paste, so a changed setting applies; a failed
+    // load keeps the last value.
+    let current = crate::app_settings::AppSettings::load()
+        .ok()
+        .map(|settings| settings.terminal_paste);
     if paster.is_none() {
-        let shift = crate::app_settings::AppSettings::load()
-            .map(|settings| settings.paste_with_shift)
-            .unwrap_or(false);
-        *paster = Some(
-            crate::linux::paste::LinuxPaster::new(
-                Arc::default(),
-                Arc::new(AtomicBool::new(shift)),
-                Default::default(),
-            )
-            .map_err(|error| anyhow::anyhow!("{error:#}"))?,
-        );
+        let terminal_paste = crate::terminal_paste::share(current.unwrap_or_default());
+        let made = crate::linux::paste::LinuxPaster::new(
+            Arc::default(),
+            terminal_paste.clone(),
+            Default::default(),
+        )
+        .map_err(|error| anyhow::anyhow!("{error:#}"))?;
+        *paster = Some((made, terminal_paste));
     }
-    use_it(paster.as_mut().expect("made above")).map_err(|error| anyhow::anyhow!("{error:#}"))
+    let (paster, terminal_paste) = paster.as_mut().expect("made above");
+    crate::terminal_paste::store_if_known(terminal_paste, current);
+    use_it(paster).map_err(|error| anyhow::anyhow!("{error:#}"))
 }
 
 /// Copies a written capture to the clipboard, as Scrawl does: its summary,
