@@ -1426,8 +1426,22 @@ impl Default for ExperimentalSettings {
     }
 }
 
+/// When a paste is sent as Ctrl-Shift-V, the shortcut terminals take (Linux
+/// and Windows).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalPaste {
+    /// Only when the focused window is a terminal.
+    #[default]
+    Auto,
+    /// Always.
+    Always,
+    /// Never: Ctrl-V.
+    Never,
+}
+
 /// The `labs` switches (`crate::labs`), every one off by default (`history_stats`: issue 790, `recent_dictations`: issue 877, macOS).
-/// Labs features that already had a home keep it: `meetings.enabled`, `paste_with_shift`,
+/// Labs features that already had a home keep it: `meetings.enabled`, `terminal_paste`,
 /// `experimental.hex_microphone`, `keyboard_model_switching.enabled`, `pause_browser_media`,
 /// and `share_dictation_shortcut`. An older `labs.enabled` master switch is read and ignored.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1999,7 +2013,13 @@ pub struct AppSettings {
     /// Start listening when Hex opens (Windows and Linux, where the
     /// listener can be off).
     pub enable_on_launch: bool,
-    /// Paste with Ctrl-Shift-V for terminals (Linux and Windows).
+    /// When the paste shortcut is Ctrl-Shift-V, for terminals (Linux and
+    /// Windows): in terminals only (Auto), everywhere, or nowhere.
+    pub terminal_paste: TerminalPaste,
+    /// The `paste_with_shift` of settings from before `terminal_paste`.
+    /// Read once: `true` becomes `TerminalPaste::Always`, and it is never
+    /// written back.
+    #[serde(skip_serializing)]
     pub paste_with_shift: bool,
     /// Hex keeps its own GNOME custom keyboard shortcuts, on GNOME without a
     /// shortcuts portal (Linux, #781).
@@ -2129,6 +2149,7 @@ impl Default for AppSettings {
             experimental: ExperimentalSettings::default(),
             labs: LabsSettings::default(),
             enable_on_launch: true,
+            terminal_paste: TerminalPaste::Auto,
             paste_with_shift: false,
             gnome_keyboard_shortcuts: false,
             share_dictation_shortcut: false,
@@ -2548,6 +2569,16 @@ impl AppSettings {
                 mode.applications.dedup();
             }
         }
+    }
+
+    /// `paste_with_shift: true` from before `terminal_paste` keeps pasting
+    /// with Ctrl-Shift-V everywhere. A file that also names a
+    /// `terminal_paste` other than Auto keeps that choice.
+    fn migrate_legacy_terminal_paste(&mut self) {
+        if self.paste_with_shift && self.terminal_paste == TerminalPaste::Auto {
+            self.terminal_paste = TerminalPaste::Always;
+        }
+        self.paste_with_shift = false;
     }
 
     fn migrate_legacy_replacements(&mut self) {
@@ -4356,6 +4387,50 @@ mod tests {
 
         settings.migrate_disabled_transcription_model();
         assert_eq!(settings.transcription, TranscriptionSelection::default());
+    }
+
+    #[test]
+    fn terminal_paste_migrates_the_old_paste_with_shift_bool() {
+        use TerminalPaste::{Always, Auto, Never};
+        let migrated = |json: &str| {
+            let mut settings: AppSettings = serde_json::from_str(json).unwrap();
+            settings.migrate_legacy_terminal_paste();
+            settings
+        };
+        assert_eq!(
+            migrated(r#"{"paste_with_shift":true}"#).terminal_paste,
+            Always
+        );
+        assert_eq!(
+            migrated(r#"{"paste_with_shift":false}"#).terminal_paste,
+            Auto
+        );
+        assert_eq!(migrated("{}").terminal_paste, Auto);
+        assert_eq!(AppSettings::default().terminal_paste, Auto);
+        // An explicit new value wins over a stale bool, except Auto.
+        assert_eq!(
+            migrated(r#"{"paste_with_shift":true,"terminal_paste":"never"}"#).terminal_paste,
+            Never
+        );
+        // The old key is not written back.
+        let migrated = migrated(r#"{"paste_with_shift":true}"#);
+        let json = serde_json::to_value(&migrated).unwrap();
+        assert_eq!(json["terminal_paste"], "always");
+        assert!(json.get("paste_with_shift").is_none());
+    }
+
+    #[test]
+    fn loading_rewrites_an_old_paste_with_shift_file() {
+        let dir = TestSettingsDir::new("terminal-paste-migration");
+        let path = dir.path.clone();
+        fs::write(&path, r#"{"paste_with_shift":true}"#).unwrap();
+        assert_eq!(
+            AppSettings::load_from(&path).unwrap().terminal_paste,
+            TerminalPaste::Always
+        );
+        let saved = fs::read_to_string(&path).unwrap();
+        assert!(saved.contains(r#""terminal_paste": "always""#));
+        assert!(!saved.contains("paste_with_shift"));
     }
 
     #[test]

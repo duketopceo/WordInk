@@ -82,8 +82,8 @@ pub struct WindowsDictationConfig {
     pub mode_runtime: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
     pub transformations: Arc<crate::personal_commands::TransformationClient>,
     pub fallback_to_default_device: bool,
-    /// Terminal paste: Ctrl+Shift+V instead of Ctrl+V.
-    pub paste_with_shift: bool,
+    /// When the paste shortcut is Ctrl+Shift+V.
+    pub terminal_paste: crate::app_settings::TerminalPaste,
     /// Where the listener reports a model change that failed to load.
     pub swap_failures: Option<mpsc::Sender<crate::transcription::local_transcriber::SwapFailed>>,
     /// What the tray asks of the listener.
@@ -139,7 +139,7 @@ impl WindowsDictationConfig {
             )),
             transformations: Arc::new(crate::personal_commands::TransformationClient::default()),
             fallback_to_default_device: true,
-            paste_with_shift: settings.paste_with_shift,
+            terminal_paste: settings.terminal_paste,
             swap_failures: None,
             commands: None,
         }
@@ -176,12 +176,12 @@ pub fn run(
         mode_runtime,
         transformations,
         fallback_to_default_device,
-        paste_with_shift,
+        terminal_paste,
         swap_failures,
         commands,
     } = config;
     // Read by the output worker at each paste, so a change applies in place.
-    let paste_with_shift = Arc::new(AtomicBool::new(paste_with_shift));
+    let paste_with_shift = crate::terminal_paste::share(terminal_paste);
     let _indicator_guard = IndicatorGuard(indicator.clone());
     crate::feedback::set_enabled(feedback_volume > 0);
     crate::feedback::set_volume(f32::from(feedback_volume) / 100.0);
@@ -314,7 +314,7 @@ pub fn run(
             && finishing.is_none()
         {
             let next_config = WindowsDictationConfig::from_settings(&next);
-            paste_with_shift.store(next_config.paste_with_shift, Ordering::Relaxed);
+            crate::terminal_paste::store(&paste_with_shift, next_config.terminal_paste);
             let next_shortcuts = Shortcuts {
                 hotkey: next_config.hotkey,
                 paste_last_hotkey: next_config.paste_last_hotkey,

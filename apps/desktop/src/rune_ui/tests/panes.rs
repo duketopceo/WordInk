@@ -1850,7 +1850,10 @@ fn labs_is_one_flat_list_of_toggles_off_by_default() {
     assert!(rt.find("terminal-paste").is_none());
     tap(&mut rt, "nav-labs");
     tap(&mut rt, "lab-terminal-paste");
-    assert!(rt.state.settings.paste_with_shift);
+    assert_eq!(
+        rt.state.settings.terminal_paste,
+        crate::app_settings::TerminalPaste::Always
+    );
     assert!(
         rt.find("lab-meetings").is_some(),
         "Meetings runs on Windows too"

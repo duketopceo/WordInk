@@ -236,7 +236,27 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
         .child(heading(p, motion, title, lead))
         .child(motion.staggered(k.elevate(card, &k.elevation.raised), 1.0, 8.0))
         .children(relaunch)
-        .child(row().key("action").h(ACTION_H).center().child(action))
+        .child(
+            row()
+                .key("action")
+                .h(ACTION_H)
+                .gap(10.0)
+                .center()
+                .child(action)
+                .children(finish_later(p, live)),
+        )
+}
+
+/// "Finish later" on the short first run's permissions: on to the app,
+/// which keeps a "Set up dictation" row.
+fn finish_later(p: Paint, live: &Live) -> Option<El> {
+    live.engine_steps.then(|| {
+        Button::new(tr("Finish later"))
+            .variant(ButtonVariant::Ghost)
+            .on_press(super::live::finish_later)
+            .build_push(p.k)
+            .key("finish-later")
+    })
 }
 
 fn live_pill(

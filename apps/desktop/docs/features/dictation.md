@@ -1037,9 +1037,14 @@ differently from a paste. Remove the typing path once Chrome 157 is the floor.
 **Windows paste (issue 477):** Windows puts the transcript on the clipboard,
 waits for Shift, Alt, and Win to come up, sends Ctrl+V, and restores the
 previous clipboard 500 ms later unless a newer paste or another app changed it.
-Labs › Terminal paste (`paste_with_shift`, off by default; on Linux it is a
-General › Advanced row) sends Ctrl+Shift+V instead, for apps that ignore
-a synthetic Ctrl+V (the herdr desktop app). Shift goes down after Ctrl and up
+Terminal paste (`terminal_paste`: `auto` by default, `always`, or `never`; on
+Linux a General › Advanced row, on Windows Labs › Terminal paste turns
+`always` on) sends Ctrl+Shift+V instead, for terminals and apps that ignore
+a synthetic Ctrl+V (the herdr desktop app). Auto sends it only when the
+focused window is a known terminal (Wayland app ID or X11 window class on
+Linux, executable name on Windows); a desktop that reports no focused window,
+such as GNOME or KDE on Wayland, gets Ctrl+V. The old `paste_with_shift: true`
+reads as `always`. Shift goes down after Ctrl and up
 before it; a Ctrl the user still holds is never pressed or released by Hex. A
 saved change applies to the next paste without restarting the listener.
 Source: `control_chord` in [windows/paste.rs](../../src/windows/paste.rs).

@@ -21,7 +21,8 @@ use super::platform::PlatformRequest;
 use super::settings::{self as s, Capture, Face};
 use super::{Menu, Pane, Request, ShortcutTarget, Ui};
 use crate::app_settings::{
-    BluetoothMic, IndicatorPosition, IndicatorStyle, RecordingAudioBehavior, UpdateChannel,
+    BluetoothMic, IndicatorPosition, IndicatorStyle, RecordingAudioBehavior, TerminalPaste,
+    UpdateChannel,
 };
 use crate::desktop::host::DesktopAction;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
@@ -35,6 +36,7 @@ use crate::transcription::models as transcription_models;
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     use super::platform_settings as os;
     let mut content = page("content")
+        .children(setup_dictation(ui, p))
         .children(os::permissions_section(ui, p))
         .children(os::error_section(ui, p));
     if ui.platform.caps.listener_control {
@@ -69,6 +71,48 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             ));
     }
     super::scroll_body("scroll", content)
+}
+
+/// "Set up dictation", while "Finish later" left setup unfinished: names the
+/// first missing piece (microphone, accessibility, or the engine). Pressing
+/// it, or the dictation shortcut, reopens the tour at that step.
+fn setup_dictation(ui: &Ui, p: Paint) -> Option<El> {
+    use crate::desktop::onboarding::SetupGap;
+    let why = match super::onboarding::setup_gap(ui)? {
+        SetupGap::Microphone => tr("Microphone access is off."),
+        SetupGap::Accessibility => {
+            return Some(setup_dictation_card(
+                p,
+                tr_fill(
+                    "{} access is off.",
+                    super::platform_settings::accessibility_name(ui.platform.accessibility_renamed),
+                ),
+            ));
+        }
+        SetupGap::Engine => tr("Choose how WordInk transcribes"),
+    };
+    Some(setup_dictation_card(p, why.to_owned()))
+}
+
+fn setup_dictation_card(p: Paint, why: String) -> El {
+    card(
+        p,
+        "setup-dictation",
+        vec![icon_described_row(
+            p,
+            "setup-dictation-row",
+            &WAVE,
+            tr("Set up dictation"),
+            Some((why, p.muted())),
+            button(
+                p,
+                "setup-dictation-open",
+                tr("Set up"),
+                ButtonKind::Primary,
+                |ui: &mut Ui, _| super::onboarding::reopen_setup(ui),
+            ),
+        )],
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1196,18 +1240,36 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         layer,
     ));
     if ui.platform.caps.terminal_paste {
+        let control = pick_select(
+            ui,
+            p,
+            "terminal-paste",
+            vec![tr("Auto"), tr("Always"), tr("Never")],
+            match settings.terminal_paste {
+                TerminalPaste::Auto => 0,
+                TerminalPaste::Always => 1,
+                TerminalPaste::Never => 2,
+            },
+            |ui, index| {
+                let mode = [
+                    TerminalPaste::Auto,
+                    TerminalPaste::Always,
+                    TerminalPaste::Never,
+                ][index];
+                if ui.settings.terminal_paste != mode {
+                    ui.update(|settings| settings.terminal_paste = mode);
+                }
+            },
+            layer,
+        );
         rows.push(
-            icon_toggle_row(
+            icon_row(
                 p,
                 "terminal-paste",
                 &TERMINAL,
                 tr("Terminal paste"),
-                tr("Paste with Ctrl+Shift+V so terminals accept it"),
-                settings.paste_with_shift,
-                |ui: &mut Ui| {
-                    let enabled = !ui.settings.paste_with_shift;
-                    ui.update(|settings| settings.paste_with_shift = enabled);
-                },
+                Some(tr("Auto pastes with Ctrl+Shift+V in terminals; desktops that hide the focused window use Ctrl+V")),
+                control,
             )
             .into(),
         );

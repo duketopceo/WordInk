@@ -278,7 +278,7 @@ impl Feature {
             Self::LiveText => "labs.live_text",
             Self::LiveChapters => "labs.live_chapters",
             Self::VocabularyBiasing => "labs.vocabulary_biasing",
-            Self::TerminalPaste => "paste_with_shift",
+            Self::TerminalPaste => "terminal_paste",
             Self::KeyboardModelSwitching => "keyboard_model_switching.enabled",
             Self::MouseShortcuts => "labs.mouse_shortcuts",
             Self::PauseBrowser => "pause_browser_media",
@@ -394,7 +394,9 @@ impl Feature {
             Self::LiveText => settings.labs.live_text,
             Self::LiveChapters => settings.labs.live_chapters,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing,
-            Self::TerminalPaste => settings.paste_with_shift,
+            Self::TerminalPaste => {
+                settings.terminal_paste == crate::app_settings::TerminalPaste::Always
+            }
             Self::KeyboardModelSwitching => settings.keyboard_model_switching.enabled,
             Self::MouseShortcuts => settings.labs.mouse_shortcuts,
             Self::PauseBrowser => settings.pause_browser_media,
@@ -428,7 +430,13 @@ impl Feature {
             Self::LiveText => settings.labs.live_text = on,
             Self::LiveChapters => settings.labs.live_chapters = on,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing = on,
-            Self::TerminalPaste => settings.paste_with_shift = on,
+            Self::TerminalPaste => {
+                settings.terminal_paste = if on {
+                    crate::app_settings::TerminalPaste::Always
+                } else {
+                    crate::app_settings::TerminalPaste::Auto
+                }
+            }
             Self::KeyboardModelSwitching => settings.keyboard_model_switching.enabled = on,
             Self::MouseShortcuts => settings.labs.mouse_shortcuts = on,
             Self::PauseBrowser => settings.pause_browser_media = on,

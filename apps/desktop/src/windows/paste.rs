@@ -1,6 +1,6 @@
 use std::mem::size_of;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicU8;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -80,9 +80,9 @@ impl ClipboardSnapshot {
 pub struct WindowsPaster {
     clipboard: arboard::Clipboard,
     clipboard_restore: Arc<Mutex<ClipboardRestore>>,
-    /// Terminal paste: send Ctrl+Shift+V instead of Ctrl+V. Shared so a
-    /// settings change applies to the next paste without a new paster.
-    paste_with_shift: Arc<AtomicBool>,
+    /// Terminal paste: when to send Ctrl+Shift+V instead of Ctrl+V. Shared
+    /// so a settings change applies to the next paste without a new paster.
+    paste_with_shift: Arc<AtomicU8>,
 }
 
 #[derive(Default)]
@@ -109,7 +109,7 @@ impl ClipboardRestore {
 }
 
 impl WindowsPaster {
-    pub fn new(paste_with_shift: Arc<AtomicBool>) -> Result<Self> {
+    pub fn new(paste_with_shift: Arc<AtomicU8>) -> Result<Self> {
         Ok(Self {
             clipboard: arboard::Clipboard::new()
                 .wrap_err("could not open the Windows clipboard")?,
@@ -146,12 +146,18 @@ impl WindowsPaster {
         let generation = restore.register(snapshot, original_sequence, transcript_sequence);
         drop(restore);
 
-        let remote_desktop =
-            is_remote_desktop(crate::windows::input::foreground_process_stem().as_deref());
+        let foreground = crate::windows::input::foreground_process_stem();
+        let remote_desktop = is_remote_desktop(foreground.as_deref());
+        // Windows Terminal takes either shortcut; conhost, PowerShell, and
+        // cmd take Ctrl+V or Ctrl+Shift+V, so a terminal always gets the shift.
+        let shift = crate::terminal_paste::paste_with_shift(
+            crate::terminal_paste::load(&self.paste_with_shift),
+            || foreground.clone(),
+        );
         if remote_desktop {
             thread::sleep(REMOTE_DESKTOP_PASTE_DELAY);
         }
-        if let Err(error) = send_paste_shortcut(self.paste_with_shift.load(Ordering::Relaxed)) {
+        if let Err(error) = send_paste_shortcut(shift) {
             restore_clipboard_generation(&self.clipboard_restore, generation);
             return Err(error);
         }

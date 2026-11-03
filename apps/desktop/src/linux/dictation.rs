@@ -322,7 +322,7 @@ pub(crate) fn run(
     // When the press that is waiting on the microphone began, for latency.
     let mut press_at: Option<Instant> = None;
     let mut headset_began: Option<Instant> = None;
-    let paste_with_shift = Arc::new(AtomicBool::new(settings.paste_with_shift));
+    let paste_with_shift = crate::terminal_paste::share(settings.terminal_paste);
     let worker_paste_with_shift = paste_with_shift.clone();
     let paste_keys = hotkey_status.keys();
     let (jobs, job_receiver) = mpsc::sync_channel::<OutputJob>(2);
@@ -509,7 +509,7 @@ pub(crate) fn run(
                     model.want(&next.transcription);
                 }
                 toggle = next.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
-                paste_with_shift.store(next.paste_with_shift, Ordering::Relaxed);
+                crate::terminal_paste::store(&paste_with_shift, next.terminal_paste);
                 if next.indicator_position != settings.indicator_position {
                     indicator = LinuxIndicator::new(next.indicator_position);
                 }

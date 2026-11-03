@@ -67,10 +67,21 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
         .center_y()
         .justify_center()
         .child(match s.download {
-            Some(d) if !s.had_model && !centred && s.step != Step::Ready => pill(p, d, s.closed),
+            // The short first run downloads nothing until its engine step.
+            Some(d)
+                if !s.had_model
+                    && !centred
+                    && s.step != Step::Ready
+                    && !(s.engine_flow() && s.step <= Step::Permissions) =>
+            {
+                pill(p, d, s.closed)
+            }
             _ => slot(),
         });
-    let top = top.children(back(p, s)).children(reopen(p, s));
+    let top = top
+        .children(back(p, s))
+        .children(skip_demo(p, s))
+        .children(reopen(p, s));
     // The real window has no title bar: the top of the page moves it.
     let top = if s.live.is_some() {
         super::super::title_bar(top)
@@ -78,6 +89,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
         top
     };
     let page = match s.step {
+        Step::Pick | Step::Started if s.engine_flow() => welcome_page(p, s),
         Step::Pick | Step::Started => download_page(p, s, false),
         Step::Waiting => download_page(p, s, true),
         Step::Parked | Step::YourTurn | Step::Hearing | Step::Heard | Step::Done => demo_page(p, s),
@@ -98,6 +110,58 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             .pb(TOP_BAR)
             .child(page),
     ]
+}
+
+/// Skip on the short first run's one demo, until its Continue shows.
+fn skip_demo(p: Paint, s: &Onboard) -> Option<El> {
+    (s.engine_flow() && (Step::Parked..Step::Done).contains(&s.step)).then(|| {
+        Button::new(tr("Skip"))
+            .variant(ButtonVariant::Ghost)
+            .on_press(live::skip_demo)
+            .build_push(p.k)
+            .key("skip-demo")
+            .absolute(20.0, 8.0)
+            .transition(arrives())
+    })
+}
+
+/// The short first run's first page: what WordInk does, then the demo.
+fn welcome_page(p: Paint, s: &Onboard) -> El {
+    col()
+        .key("welcome")
+        .gap(22.0)
+        .items_center()
+        .child(flow_box("download-hud", 1.24, s))
+        .child(heading(
+            p,
+            s,
+            "welcome-head",
+            tr("Welcome to WordInk"),
+            lead(
+                p,
+                tr("Hold a key and talk. WordInk types it wherever your cursor is."),
+            ),
+        ))
+        .child(action(
+            Button::new(tr("Continue"))
+                .variant(ButtonVariant::Contrast)
+                .label_with(|font, ink| {
+                    row()
+                        .gap(6.0)
+                        .center_y()
+                        .child(text(tr("Continue")).key("label").font(font).color(ink))
+                        .child(
+                            rune::icon(&glyphs::ARROW_RIGHT, 15.0)
+                                .key("arrow")
+                                .color(ink),
+                        )
+                })
+                .on_press(live::begin_demo)
+                .build_push(p.k)
+                .key("continue")
+                .default_button()
+                .transition(arrives()),
+        ))
 }
 
 /// Hex's shortcut didn't start after setup and Hex won't relaunch itself
@@ -175,7 +239,10 @@ fn models_page(p: Paint, s: &Onboard, live: &Live) -> El {
             s,
             "models-head",
             tr("Choose a speech model"),
-            lead(p, tr("WordInk found speech models already on this computer.")),
+            lead(
+                p,
+                tr("WordInk found speech models already on this computer."),
+            ),
         ))
         .child(s.motion.staggered(list, 1.0, 8.0))
         .child(action(continue_model_button(p)))
@@ -576,6 +643,12 @@ fn try_page(p: Paint, s: &Onboard) -> El {
                     .items_center()
                     .child(action(if s.step == Step::TryHeard {
                         continue_button(p, s)
+                    } else if s.engine_flow() {
+                        Button::new(tr("Skip"))
+                            .variant(ButtonVariant::Ghost)
+                            .on_press(live::skip_try)
+                            .build_push(p.k)
+                            .key("skip-try")
                     } else {
                         none()
                     }))

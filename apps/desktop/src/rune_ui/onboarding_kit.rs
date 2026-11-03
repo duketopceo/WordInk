@@ -1,6 +1,6 @@
-//! Pieces for the next onboarding, and the options built from them as
-//! playground stories (only with Labs; the shipping
-//! tour in [`onboarding`](super::onboarding) doesn't use them yet).
+//! The onboarding story: the shipping first run
+//! ([`live`], over the tour in [`onboarding`](super::onboarding)), and its
+//! pieces and options as playground stories (only with Labs).
 //!
 //! - [`gpu_stage`] & [`hud_stage`]: flat Rune UI + Hex's real `Dot scope`
 //!   phosphor dot-matrix HUD (`IndicatorModel` + `rune_hud::Painter` on

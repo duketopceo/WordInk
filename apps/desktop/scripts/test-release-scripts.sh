@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests the release workflow's scripts without GitHub or the real signing key:
 # release-notes.sh, write-sums.sh, sign-linux.sh (binaries and --sums),
-# verify-release.sh and release-gate.sh (against a fake `gh`). Needs OpenSSL 3
+# write-manifest.sh, verify-release.sh and release-gate.sh (against a fake `gh`). Needs OpenSSL 3
 # and jq.
 set -euo pipefail
 
@@ -75,6 +75,22 @@ expect_fail "verify: a binary signature is not a sums signature (domains differ)
 openssl genpkey -algorithm ed25519 -out "$work/other.pem" 2> /dev/null
 cp -R "$dist" "$work/wrongkey"
 WORDINK_LINUX_SIGNING_KEY=$(cat "$work/other.pem") expect_fail "sign: a key that does not match the public key" "$linux/sign-linux.sh" --sums "$work/wrongkey"
+
+# --- write-manifest.sh ------------------------------------------------------
+export WORDINK_TAG="desktop-v$v" WORDINK_REPO=r/w
+manifests="$work/manifests"
+mkdir "$manifests"
+cp "$dist"/wordink-* "$manifests/"
+expect_ok "manifest: stable" "$linux/write-manifest.sh" "$manifests"
+expect_ok "manifest: dev" "$linux/write-manifest.sh" "$manifests" dev
+if [ "$(jq -r .channel "$manifests/stable.json")" = stable ]; then ok "manifest: stable channel"; else bad "manifest: stable channel"; fi
+if [ "$(jq -r .channel "$manifests/dev.json")" = dev ]; then ok "manifest: dev.json says \"channel\":\"dev\""; else bad "manifest: dev.json says dev"; fi
+if [ "$(jq -S 'del(.channel, .sequence, .published_at)' "$manifests/stable.json")" = "$(jq -S 'del(.channel, .sequence, .published_at)' "$manifests/dev.json")" ]; then ok "manifest: dev names the same release as stable"; else bad "manifest: dev names the same release as stable"; fi
+if [ "$(jq -r .release.version "$manifests/dev.json")" = "$v" ]; then ok "manifest: dev names this version"; else bad "manifest: dev names this version"; fi
+expect_fail "manifest: unknown channel" "$linux/write-manifest.sh" "$manifests" beta
+rm "$manifests/wordink-$v-linux-arm64.sig"
+expect_fail "manifest: stable refuses a Linux target without its signature" "$linux/write-manifest.sh" "$manifests"
+expect_fail "manifest: dev refuses a Linux target without its signature" "$linux/write-manifest.sh" "$manifests" dev
 
 # --- release-gate.sh against a fake gh -------------------------------------
 mkdir "$work/bin"

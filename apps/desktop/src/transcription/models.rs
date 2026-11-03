@@ -2193,6 +2193,58 @@ mod tests {
     }
 
     #[test]
+    fn a_download_cut_short_is_not_installed_until_its_checksum_verifies() {
+        let model = fixture_model();
+        let ModelRuntime::Gguf(artifact) = model.runtime else {
+            unreachable!("the fixture is a GGUF model");
+        };
+        let directory = std::env::temp_dir().join(format!(
+            "hex-interrupted-download-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        let destination = directory.join("fixture.gguf");
+        let partial = destination.with_extension("gguf.partial");
+        TEST_MODELS_DIR.with(|models| *models.borrow_mut() = Some(directory.clone()));
+
+        // Cut off mid-file: only the partial exists, so nothing is installed
+        // or verified, and the next run keeps its bytes to resume from.
+        fs::write(&partial, b"hel").unwrap();
+        assert!(!is_installed(&model, "en"));
+        assert!(!is_verified(&model));
+
+        // Every byte arrived but they are wrong: the checksum refuses to
+        // promote them, so the model still is not installed.
+        fs::write(&partial, b"world").unwrap();
+        let refused = verify_and_promote_partial(
+            &partial,
+            &destination,
+            &directory,
+            artifact,
+            "the fixture",
+            &AtomicBool::new(false),
+            &AtomicU64::new(0),
+            &AtomicU8::new(0),
+        );
+        assert!(refused.is_err());
+        assert!(!is_installed(&model, "en") && !is_verified(&model));
+
+        // A complete partial with the right checksum is promoted by the next
+        // run without fetching anything, and only then counts.
+        fs::write(&partial, b"hello").unwrap();
+        let downloaded =
+            download_with_progress(&model, &AtomicBool::new(false), &AtomicU64::new(0));
+        let installed = is_installed(&model, "en");
+        let verified = is_verified(&model);
+        TEST_MODELS_DIR.with(|models| *models.borrow_mut() = None);
+        let promoted = !partial.exists();
+        fs::remove_dir_all(&directory).unwrap();
+        assert_eq!(downloaded.unwrap(), destination);
+        assert!(installed && verified && promoted);
+    }
+
+    #[test]
     fn canceled_downloads_stop_before_io() {
         let canceled = AtomicBool::new(true);
         assert!(check_canceled(&canceled).is_err());
