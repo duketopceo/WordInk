@@ -1,6 +1,6 @@
 # AGENTS.md: WordInk
 
-WordInk is open-source dictation. The direction is **one desktop app**, `apps/desktop`, based on Hex (MIT) and merged on `master` at version 1.0.0 (release candidate published, final tag pending). It uses Groq by default and local Parakeet with no key, and targets Linux on any Wayland desktop, Windows, and macOS on Apple silicon. The active plan is `docs/plans/2026-11-02-1907-feat-wordink-1-0-release-plan.md`; finished plans carry `status: done` and `docs/archive/` holds superseded ones. Phases and status are in `ROADMAP.md`.
+WordInk is open-source dictation. The direction is **one desktop app**, `apps/desktop`, based on Hex (MIT) and released as 1.0.0 (`desktop-v1.0.0`, 2026-11-03). It uses Groq by default and local Parakeet with no key, and targets Linux on any Wayland desktop, Windows, and macOS on Apple silicon. The 1.0 release plan (`docs/plans/2026-11-02-1907-feat-wordink-1-0-release-plan.md`) is done; finished plans carry `status: done` and `docs/archive/` holds superseded ones. Phases and status are in `ROADMAP.md`.
 
 Until the app reaches parity on each OS, the Python `wordink-dictd` (`sdks/python`) is the working desktop client. Products are separate and stay separate: the web SDK (`packages/core`, `web`, `react`, `local`), the gateway (`packages/server`). The iOS app is paused (preserved on branch `archive/ios-2026-11-03`). Repo name `WordInk`, npm scope `@wordink`.
 

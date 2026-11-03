@@ -6,7 +6,9 @@ topic: desktop-1-0-release
 artifact_contract: ce-unified-plan/v1
 product_contract_source: ce-plan-bootstrap
 execution: code
-status: active
+status: done
+prs: [127, 128, 130, 131, 136, 111, 126, 123, 125, 132, 134, 138, 139, 142, 143, 146, 147]
+released: desktop-v1.0.0 (2026-11-03)
 ---
 
 # WordInk desktop 1.0.0 release - Plan

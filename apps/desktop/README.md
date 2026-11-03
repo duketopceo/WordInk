@@ -2,7 +2,7 @@
 
 WordInk is voice dictation for Linux, macOS and Windows. Hold a key, speak, and
 it pastes into whatever app you're in. It is built on
-[Hex](https://github.com/kitlangton/Hex) (MIT).
+[Hex](https://github.com/anomalyco/hex) (MIT).
 
 ## How it works
 
@@ -45,7 +45,7 @@ Installs per user (no admin) and starts at login. WordInk for Windows is not cod
 - macOS: `curl -fsSL https://github.com/duketopceo/WordInk/releases/latest/download/install-macos.sh | sh -s -- uninstall`
 - Windows: `& ([scriptblock]::Create((irm https://github.com/duketopceo/WordInk/releases/latest/download/install.ps1))) -Uninstall`
 
-**Release candidates** install the same way with `WORDINK_INSTALL_BASE=https://github.com/duketopceo/WordInk/releases/download/desktop-v1.0.0-rc.N` set before the command.
+To install a specific release instead of the latest, set `WORDINK_INSTALL_BASE=https://github.com/duketopceo/WordInk/releases/download/desktop-vX.Y.Z` before the command.
 
 More docs are in [`docs/`](docs/README.md).
 
