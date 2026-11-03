@@ -103,6 +103,8 @@ url_scheme=hex
 /usr/libexec/PlistBuddy -c "Set :CFBundleURLTypes:0:CFBundleURLSchemes:0 $url_scheme" "$bundle/Contents/Info.plist"
 # The helper mirrors a cabled iPhone as a camera; macOS asks on the app's behalf.
 plutil -replace NSCameraUsageDescription -string "WordInk mirrors and records a cabled iPhone's screen for a capture." "$bundle/Contents/Info.plist"
+# No user-visible string may still name the upstream app.
+"$root/scripts/check-info-plist-strings.sh" "$bundle/Contents/Info.plist"
 rm -rf "$icon_output"
 mkdir -p "$icon_output"
 xcrun actool "$root/app/AppIcon.icon" \
