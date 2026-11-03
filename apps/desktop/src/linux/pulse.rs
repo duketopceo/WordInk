@@ -39,15 +39,22 @@ pub(crate) fn listing() -> Option<Listing> {
     let cards = pactl(&["-f", "json", "list", "cards"])
         .and_then(|json| sources::parse_cards(&json).ok())
         .unwrap_or_default();
-    let devices = sources::devices(&sources, &cards);
-    let default = pactl(&["get-default-source"])
-        .map(|name| sources::id_of_source_name(name.trim()))
-        .filter(|id| {
-            devices
-                .iter()
-                .any(|device| device.id == *id && !device.id.ends_with(".monitor"))
-        });
-    Some(Listing { devices, default })
+    let default_name = pactl(&["get-default-source"]).map(|name| name.trim().to_owned());
+    let devices = sources::devices(&sources, &cards, default_name.as_deref());
+    Some(Listing {
+        default: default_of(&devices, default_name.as_deref()),
+        devices,
+    })
+}
+
+/// The id of the sound server's default source when it is listed, whatever
+/// it is (a monitor or virtual node the user picked included).
+fn default_of(devices: &[Device], default_name: Option<&str>) -> Option<String> {
+    let id = sources::id_of_source_name(default_name?);
+    devices
+        .iter()
+        .any(|device| device.id == id && !device.hidden)
+        .then_some(id)
 }
 
 /// One of this process's capture streams, as the sound server lists it.
@@ -479,6 +486,82 @@ fn streams_of(json: &str, pid: &str) -> Vec<OwnStream> {
 
 #[cfg(test)]
 mod tests {
+    const VIRTUAL_MIC_SOURCES: &str = r#"[
+      {"name":"alsa_input.usb-Acme_Mic-00.mono-fallback","description":"Acme Mic Mono",
+       "properties":{"device.api":"alsa","device.bus":"usb","media.class":"Audio/Source"}},
+      {"name":"alsa_output.platform-sound.stereo.monitor","description":"Monitor of Built-in Speakers",
+       "properties":{"device.class":"monitor","media.class":"Audio/Source/Virtual"}},
+      {"name":"easyeffects_sink.monitor","description":"Monitor of Easy Effects Sink",
+       "properties":{"device.class":"monitor","media.class":"Audio/Source/Virtual","node.virtual":"true"}},
+      {"name":"omarchy_virtual_mic.monitor","description":"Monitor of Virtual-Mic",
+       "properties":{"device.class":"monitor","media.class":"Audio/Source/Virtual","node.virtual":"true"}},
+      {"name":"effect_output.dsp-mic","description":"Laptop Microphone",
+       "properties":{"media.class":"Audio/Source","node.virtual":"true"}}
+    ]"#;
+
+    fn listed(default: Option<&str>) -> (Vec<Device>, Option<String>) {
+        let sources = sources::parse_sources(VIRTUAL_MIC_SOURCES).unwrap();
+        let devices = sources::devices(&sources, &[], default);
+        let default = default_of(&devices, default);
+        (devices, default)
+    }
+
+    fn visible_ids(devices: &[Device]) -> Vec<&str> {
+        devices
+            .iter()
+            .filter(|device| !device.hidden)
+            .map(|device| device.id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_virtual_monitor_that_is_the_default_is_listed_and_marked_default() {
+        let (devices, default) = listed(Some("omarchy_virtual_mic.monitor"));
+        let chosen = devices
+            .iter()
+            .find(|device| device.id == "omarchy_virtual_mic.monitor")
+            .unwrap();
+        assert!(!chosen.hidden);
+        assert_eq!(chosen.label, "Virtual-Mic");
+        assert_eq!(default.as_deref(), Some("omarchy_virtual_mic.monitor"));
+    }
+
+    #[test]
+    fn ordinary_output_monitors_stay_hidden() {
+        let (devices, default) = listed(Some("omarchy_virtual_mic.monitor"));
+        let ids = visible_ids(&devices);
+        assert!(!ids.contains(&"alsa_output.platform-sound.stereo.monitor"));
+        assert!(!ids.contains(&"easyeffects_sink.monitor"));
+        let (_, default_usb) = listed(Some("alsa_input.usb-Acme_Mic-00.mono-fallback"));
+        assert!(default_usb.is_some());
+        assert_ne!(default.as_deref(), Some("easyeffects_sink.monitor"));
+    }
+
+    #[test]
+    fn a_filter_microphone_is_listed_with_its_description() {
+        let (devices, _) = listed(None);
+        let filter = devices
+            .iter()
+            .find(|device| device.id == "effect_output.dsp-mic")
+            .unwrap();
+        assert!(!filter.hidden);
+        assert_eq!(filter.label, "Laptop Microphone");
+    }
+
+    #[test]
+    fn the_default_marker_is_exactly_the_sound_servers_default() {
+        for name in [
+            "alsa_input.usb-Acme_Mic-00.mono-fallback",
+            "effect_output.dsp-mic",
+            "omarchy_virtual_mic.monitor",
+        ] {
+            assert_eq!(listed(Some(name)).1.as_deref(), Some(name));
+        }
+        // An unlisted default is never replaced by another device.
+        assert_eq!(listed(Some("gone_source")).1, None);
+        assert_eq!(listed(None).1, None);
+    }
+
     use super::*;
 
     const NODE: &str = "bluez_input.AA_BB_CC_DD_EE_FF.0";

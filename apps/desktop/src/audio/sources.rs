@@ -215,16 +215,50 @@ fn kind_of(source: &PulseSource, hidden: bool) -> DeviceKind {
     }
 }
 
+/// A filter node that exposes a processed microphone (an `effect_output.*`
+/// `Audio/Source`, such as a laptop's DSP chain), not a monitor of an output.
+fn is_filter_microphone(source: &PulseSource) -> bool {
+    source.name.starts_with("effect_output.")
+        && !source.name.ends_with(".monitor")
+        && source.property("device.class") != Some("monitor")
+        && source.property("media.class") == Some("Audio/Source")
+}
+
+/// The name a monitor source shows: its sink's description, not "Monitor of ...".
+fn description_of(source: &PulseSource) -> &str {
+    source
+        .description
+        .strip_prefix("Monitor of ")
+        .unwrap_or(&source.description)
+}
+
 /// Every microphone the sound server has, hidden ones flagged: one device
 /// per source, plus a Bluetooth headset in music mode, which has a card but
 /// no source until it switches to headset mode. Built-in first, then USB,
-/// Bluetooth, other; equal labels get a number.
-pub fn devices(sources: &[PulseSource], cards: &[PulseCard]) -> Vec<Device> {
+/// Bluetooth, other; equal labels get a number. The source named by
+/// `default_source` is never hidden (the user chose it, even when it is a
+/// monitor or virtual node), and filter microphones are shown.
+pub fn devices(
+    sources: &[PulseSource],
+    cards: &[PulseCard],
+    default_source: Option<&str>,
+) -> Vec<Device> {
     let mut found: Vec<Device> = Vec::new();
     let mut headsets_seen: Vec<String> = Vec::new();
     for source in sources {
-        let hidden = is_hidden(source);
-        let kind = kind_of(source, hidden);
+        let is_default = default_source.is_some_and(|name| name == source.name);
+        let hidden = is_hidden(source) && !is_default && !is_filter_microphone(source);
+        let kind = if is_default || is_filter_microphone(source) {
+            if is_bluetooth_source(source) {
+                DeviceKind::Bluetooth
+            } else if is_hidden(source) {
+                DeviceKind::Virtual
+            } else {
+                kind_of(source, false)
+            }
+        } else {
+            kind_of(source, hidden)
+        };
         if kind == DeviceKind::Bluetooth {
             // A headset's own microphone; its monitors are hidden anyway.
             let Some(address) = address_of_source(source) else {
@@ -259,7 +293,7 @@ pub fn devices(sources: &[PulseSource], cards: &[PulseCard]) -> Vec<Device> {
         }
         found.push(Device {
             id: source.name.clone(),
-            label: clean_name_for(kind, &source.description),
+            label: clean_name_for(kind, description_of(source)),
             kind,
             bluetooth: None,
             hidden,
@@ -450,6 +484,7 @@ mod tests {
         devices(
             &parse_sources(sources).unwrap(),
             &parse_cards(cards).unwrap(),
+            None,
         )
     }
 
@@ -551,6 +586,12 @@ mod tests {
                     "Test Buds",
                     DeviceKind::Bluetooth
                 ),
+                // A processed-microphone filter node is a real input.
+                (
+                    "effect_output.laptop-mic",
+                    "Laptop Microphone",
+                    DeviceKind::Virtual
+                ),
             ]
         );
         let hidden: Vec<_> = devices
@@ -561,7 +602,6 @@ mod tests {
         for expected in [
             "easyeffects_sink.monitor",
             "easyeffects_source",
-            "effect_output.laptop-mic",
             "auto_null.monitor",
         ] {
             assert!(
