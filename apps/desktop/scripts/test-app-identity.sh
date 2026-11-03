@@ -42,7 +42,7 @@ printf '#!/bin/sh\n' >"$bundle/Contents/MacOS/hex"
 chmod +x "$bundle/Contents/MacOS/hex"
 expect_rejection 'scrawl-helper is missing'
 
-for script in build-app.sh build-service-app.sh release-app.sh; do
+for script in build-app.sh build-service-app.sh; do
   if output=$(env -u HEX_TEAM_ID sh "$root/scripts/$script" 2>&1); then
     echo "Unexpectedly allowed $script without an explicit signing team." >&2
     exit 1

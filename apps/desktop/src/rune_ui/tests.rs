@@ -1936,7 +1936,7 @@ fn a_found_model_moves_on_without_a_download_and_back_returns_to_it() {
     assert!(rt.find("model-list").is_some());
     tap(&mut rt, "model1");
     // The service saves the pick and has the found file ready: the list
-    // stays, with no "Setting up Hex" download page.
+    // stays, with no "Setting up WordInk" download page.
     rt.state.settings.transcription = TranscriptionSelection {
         model: TranscriptionModelId::ParakeetV3,
         language: "en".into(),
