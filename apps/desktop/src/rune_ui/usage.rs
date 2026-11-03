@@ -13,7 +13,11 @@ use super::list_detail as ld;
 use super::{Menu, Ui};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::history::History;
-use crate::history::usage::{TYPING_WPM, UsageSummary, Window, cost_label, duration_label};
+use crate::history::stats::{AppCount, HistoryStats};
+use crate::history::usage::{
+    DictationStats, ModelLatency, TYPING_WPM, UsageSummary, Window, cost_label, duration_label,
+    hour_range_label, latency_label,
+};
 
 /// How often the open pane adds the records up again.
 const REFRESH: Duration = Duration::from_secs(2);
@@ -21,6 +25,7 @@ const REFRESH: Duration = Duration::from_secs(2);
 pub(super) struct UsagePane {
     pub(super) window: Window,
     pub(super) summary: UsageSummary,
+    pub(super) stats: DictationStats,
     loaded: Option<Instant>,
 }
 
@@ -29,6 +34,7 @@ impl Default for UsagePane {
         Self {
             window: Window::Week,
             summary: UsageSummary::default(),
+            stats: DictationStats::default(),
             loaded: None,
         }
     }
@@ -39,6 +45,7 @@ impl UsagePane {
         self.loaded = Some(Instant::now());
         if let Some(store) = store {
             self.summary = store.usage(self.window);
+            self.stats = store.dictation_stats(self.window);
         }
     }
 
@@ -51,9 +58,9 @@ impl UsagePane {
         if self.loaded.is_some_and(|at| at.elapsed() < REFRESH) {
             return false;
         }
-        let before = self.summary.clone();
+        let before = (self.summary.clone(), self.stats.clone());
         self.reload(store);
-        self.summary != before
+        (&self.summary, &self.stats) != (&before.0, &before.1)
     }
 
     /// A week of mixed local, Groq, OpenAI and OpenRouter dictation.
@@ -90,6 +97,7 @@ impl UsagePane {
                 cost_usd: by_model.iter().map(|r| r.cost_usd).sum(),
                 by_model,
             },
+            stats: fixture_stats(),
             loaded: Some(Instant::now()),
         }
     }
@@ -100,6 +108,52 @@ impl UsagePane {
             ..Self::default()
         }
     }
+}
+
+/// A week of dictation habits for the preview: mornings, mostly in a few
+/// apps, with a fast cloud engine and a slower local one.
+fn fixture_stats() -> DictationStats {
+    let app = |application: &str, dictations| AppCount {
+        application: application.into(),
+        dictations,
+    };
+    let latency = |provider: &str, model: &str, dictations, average_ms| ModelLatency {
+        provider: provider.into(),
+        model: model.into(),
+        dictations,
+        average_ms,
+    };
+    DictationStats {
+        history: HistoryStats {
+            dictations: 157,
+            words: 8_040,
+            audio_ms: 4_670_000,
+            words_per_minute: Some(103),
+            changed_by_output: 38,
+            streak_days: 6,
+            active_days: 7,
+            top_apps: vec![
+                app("Zed", 61),
+                app("Slack", 44),
+                app("Mail", 27),
+                app("Notes", 16),
+                app("Safari", 9),
+            ],
+        },
+        average_words: 51,
+        longest_words: 412,
+        busiest_hour: Some(9),
+        latency: vec![
+            latency("groq", "whisper-large-v3-turbo", 96, 380),
+            latency("openai", "gpt-4o-mini-transcribe", 12, 940),
+            latency("local", "parakeet_v3", 41, 1_450),
+        ],
+    }
+}
+
+/// `1 day` or `3 days`.
+fn counted(count: u64, one: &str, other: &str) -> String {
+    tr_fill(if count == 1 { one } else { other }, &count.to_string())
 }
 
 fn set_window(ui: &mut Ui, window: Window) {
@@ -209,6 +263,111 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
         .into(),
     ];
 
+    let mut habits: Vec<CardRow> = Vec::new();
+    let stats = &ui.usage.stats;
+    if let (Some(wpm), Some(ratio)) = (stats.history.words_per_minute, stats.speed_vs_typing()) {
+        habits.push(
+            described_row(
+                p,
+                "usage-speed",
+                tr("Speaking speed"),
+                Some((
+                    tr_named(
+                        "{times}× typing speed ({wpm} wpm)",
+                        &[
+                            ("times", &format!("{ratio:.1}")),
+                            ("wpm", &format!("{TYPING_WPM:.0}")),
+                        ],
+                    ),
+                    p.muted(),
+                )),
+                value(p, tr_fill("{} wpm", &wpm.to_string())),
+            )
+            .into(),
+        );
+    }
+    if stats.history.dictations > 0 {
+        let history = &stats.history;
+        let mut simple = |key: &str, label: &str, shown: String| {
+            habits.push(described_row(p, key, tr(label), None, value(p, shown)).into());
+        };
+        simple(
+            "usage-streak",
+            "Daily streak",
+            counted(u64::from(history.streak_days), "{} day", "{} days"),
+        );
+        simple(
+            "usage-active-days",
+            "Active days",
+            counted(u64::from(history.active_days), "{} day", "{} days"),
+        );
+        simple(
+            "usage-average-length",
+            "Average dictation",
+            counted(u64::from(stats.average_words), "{} word", "{} words"),
+        );
+        simple(
+            "usage-longest",
+            "Longest dictation",
+            counted(stats.longest_words, "{} word", "{} words"),
+        );
+        if let Some(hour) = stats.busiest_hour {
+            simple("usage-busiest", "Most active", hour_range_label(hour));
+        }
+        habits.push(
+            described_row(
+                p,
+                "usage-changed",
+                tr("Changed by Output"),
+                Some((
+                    tr("Replacements, modes or rewriting altered the text").to_owned(),
+                    p.muted(),
+                )),
+                value(
+                    p,
+                    format!("{}%", history.changed_percent().unwrap_or_default()),
+                ),
+            )
+            .into(),
+        );
+    }
+    let apps: Vec<CardRow> = stats
+        .history
+        .top_apps
+        .iter()
+        .enumerate()
+        .map(|(index, app)| {
+            described_row(
+                p,
+                &format!("usage-app{index}"),
+                &app.application,
+                None,
+                value(p, app.dictations.to_string()),
+            )
+            .into()
+        })
+        .collect();
+    let latency: Vec<CardRow> = stats
+        .latency
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let provider = crate::transcription::cloud::Provider::from_id(&row.provider)
+                .map_or_else(|| tr("Local model").to_owned(), |p| p.name().to_owned());
+            described_row(
+                p,
+                &format!("usage-latency{index}"),
+                &format!("{provider} · {}", row.model),
+                Some((
+                    counted(row.dictations, "{} dictation", "{} dictations"),
+                    p.muted(),
+                )),
+                value(p, latency_label(row.average_ms)),
+            )
+            .into()
+        })
+        .collect();
+
     let rows: Vec<CardRow> = summary
         .by_model
         .iter()
@@ -242,6 +401,26 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             &tr_fill("Totals · {}", current),
             totals,
         ))
+        .children((!habits.is_empty()).then(|| {
+            section(
+                p,
+                "usage-habits",
+                &tr_fill("Dictation habits · {}", current),
+                habits,
+            )
+        }))
+        .children(
+            (!apps.is_empty())
+                .then(|| section(p, "usage-apps", &tr_fill("Top apps · {}", current), apps)),
+        )
+        .children((!latency.is_empty()).then(|| {
+            section(
+                p,
+                "usage-latency",
+                &tr_fill("Average transcription time · {}", current),
+                latency,
+            )
+        }))
         .child(section(
             p,
             "usage-models",

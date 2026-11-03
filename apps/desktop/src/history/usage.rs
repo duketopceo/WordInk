@@ -3,6 +3,7 @@
 //! History itself, so the totals cover what retention keeps.
 
 use super::HistoryEntry;
+use super::stats::{self, HistoryStats};
 
 /// The typing speed time saved is measured against, in words per minute.
 pub const TYPING_WPM: f64 = 40.0;
@@ -122,6 +123,147 @@ pub fn summarize<'a>(
             .then_with(|| a.model.cmp(&b.model))
     });
     summary
+}
+
+/// How long one engine took to transcribe, on average.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ModelLatency {
+    pub provider: String,
+    pub model: String,
+    /// Dictations that recorded a transcription time.
+    pub dictations: u64,
+    /// Mean transcription time in milliseconds, rounded.
+    pub average_ms: u64,
+}
+
+/// The personal numbers of one window: the dictations themselves, not just
+/// their usage records.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DictationStats {
+    /// Dictations, words, speed, streak, active days, top apps, and the
+    /// share Output changed.
+    pub history: HistoryStats,
+    /// Mean words per dictation, rounded; zero without dictations.
+    pub average_words: u32,
+    pub longest_words: u64,
+    /// Local hour of day (0 to 23) with the most dictations; the earliest
+    /// wins a tie.
+    pub busiest_hour: Option<u32>,
+    /// Fastest engine first, then by provider and model.
+    pub latency: Vec<ModelLatency>,
+}
+
+impl DictationStats {
+    /// Speaking speed over the typing speed time saved is measured against.
+    pub fn speed_vs_typing(&self) -> Option<f64> {
+        self.history
+            .words_per_minute
+            .map(|wpm| f64::from(wpm) / TYPING_WPM)
+    }
+}
+
+/// Sums up the dictations of `entries` made at or after `since_ms`. `today`,
+/// `day_of` and `hour_of` turn timestamps into local days and hours (the
+/// app's own clock, or a fixed one in tests).
+pub fn dictation_stats<'a>(
+    entries: impl IntoIterator<Item = &'a HistoryEntry>,
+    since_ms: u64,
+    today: i64,
+    day_of: impl Fn(u64) -> i64,
+    hour_of: impl Fn(u64) -> u32,
+) -> DictationStats {
+    let entries: Vec<&HistoryEntry> = entries
+        .into_iter()
+        .filter(|entry| entry.timestamp_ms >= since_ms)
+        .collect();
+    let history = stats::summarize(entries.iter().copied(), today, day_of);
+    let mut stats = DictationStats::default();
+    let mut hours = [0_u64; 24];
+    let mut latency: Vec<(&str, &str, u64, u64)> = Vec::new();
+    for entry in &entries {
+        let words = entry.final_text.split_whitespace().count() as u64;
+        stats.longest_words = stats.longest_words.max(words);
+        hours[(hour_of(entry.timestamp_ms) as usize).min(23)] += 1;
+        if let Some(usage) = &entry.usage
+            && entry.inference_ms > 0
+        {
+            let key = (usage.provider.as_str(), usage.model.as_str());
+            match latency.iter_mut().find(|row| (row.0, row.1) == key) {
+                Some(row) => {
+                    row.2 += 1;
+                    row.3 += entry.inference_ms;
+                }
+                None => latency.push((key.0, key.1, 1, entry.inference_ms)),
+            }
+        }
+    }
+    if history.dictations > 0 {
+        stats.average_words = (history.words as f64 / history.dictations as f64).round() as u32;
+    }
+    let most = hours.iter().copied().max().unwrap_or(0);
+    stats.busiest_hour = (most > 0)
+        .then(|| hours.iter().position(|count| *count == most))
+        .flatten()
+        .map(|hour| hour as u32);
+    stats.latency = latency
+        .into_iter()
+        .map(|(provider, model, dictations, total)| ModelLatency {
+            provider: provider.to_owned(),
+            model: model.to_owned(),
+            dictations,
+            average_ms: (total as f64 / dictations as f64).round() as u64,
+        })
+        .collect();
+    stats.latency.sort_by(|a, b| {
+        a.average_ms
+            .cmp(&b.average_ms)
+            .then_with(|| a.provider.cmp(&b.provider))
+            .then_with(|| a.model.cmp(&b.model))
+    });
+    stats.history = history;
+    stats
+}
+
+/// The local hour of day (0 to 23) of a timestamp.
+pub fn local_hour(timestamp_ms: u64) -> u32 {
+    let iso = crate::meeting::query::iso_local(timestamp_ms);
+    iso.get(11..13)
+        .and_then(|hour| hour.parse::<u32>().ok())
+        .filter(|hour| *hour < 24)
+        .unwrap_or((timestamp_ms / 3_600_000 % 24) as u32)
+}
+
+/// `9 am`, `12 pm`: one hour on the clock.
+fn hour_label(hour: u32) -> String {
+    let hour = hour % 24;
+    let suffix = if hour < 12 { "am" } else { "pm" };
+    format!(
+        "{} {suffix}",
+        if hour.is_multiple_of(12) {
+            12
+        } else {
+            hour % 12
+        }
+    )
+}
+
+/// `9–10 am`, or `11 am–12 pm` across noon or midnight: the hour that
+/// starts at `hour`.
+pub fn hour_range_label(hour: u32) -> String {
+    let (start, end) = (hour_label(hour), hour_label(hour + 1));
+    match (start.split_once(' '), end.split_once(' ')) {
+        (Some((from, a)), Some((to, b))) if a == b => format!("{from}–{to} {a}"),
+        _ => format!("{start}–{end}"),
+    }
+}
+
+/// `850 ms`, or `1.2 s` from a second up.
+pub fn latency_label(milliseconds: u64) -> String {
+    if milliseconds < 1_000 {
+        format!("{milliseconds} ms")
+    } else {
+        format!("{:.1} s", milliseconds as f64 / 1_000.0)
+    }
 }
 
 /// Local midnight at or before `now_ms`.
@@ -314,5 +456,158 @@ mod tests {
     fn local_midnight_is_at_or_before_now_and_less_than_a_day_back() {
         let start = local_day_start(NOW);
         assert!(start <= NOW && NOW - start < DAY + 3_600_000);
+    }
+
+    fn dictation(
+        id: u64,
+        hour: u64,
+        text: &str,
+        app: Option<&str>,
+        engine: Option<(&str, &str)>,
+        audio_ms: u64,
+        inference_ms: u64,
+    ) -> HistoryEntry {
+        let mut entry = entry(id, 0, None);
+        // Fixed UTC time: day 20_000 at `hour`.
+        entry.timestamp_ms = 20_000 * DAY + hour * 3_600_000 + 5_000;
+        entry.raw_text = text.into();
+        entry.final_text = text.into();
+        entry.application = app.map(str::to_owned);
+        entry.audio_ms = audio_ms;
+        entry.inference_ms = inference_ms;
+        entry.usage = engine.map(|(provider, model)| UsageRecord {
+            provider: provider.into(),
+            model: model.into(),
+            audio_seconds: audio_ms as f64 / 1000.0,
+            words: 0,
+            cost_usd: 0.0,
+        });
+        entry
+    }
+
+    fn utc_day(ms: u64) -> i64 {
+        (ms / DAY) as i64
+    }
+
+    fn utc_hour(ms: u64) -> u32 {
+        (ms / 3_600_000 % 24) as u32
+    }
+
+    fn habits() -> Vec<HistoryEntry> {
+        let groq = Some(("groq", "whisper-large-v3-turbo"));
+        let local = Some(("local", "parakeet_v3"));
+        vec![
+            // 9 am, twice; 14 pm once.
+            dictation(1, 9, "one two three four", Some("Zed"), groq, 6_000, 400),
+            dictation(2, 9, "five six", Some("Zed"), groq, 3_000, 600),
+            dictation(
+                3,
+                14,
+                "seven eight nine ten eleven twelve",
+                Some("Slack"),
+                local,
+                12_000,
+                1_500,
+            ),
+            // Before usage was recorded: no engine, no latency.
+            dictation(4, 14, "hi", None, None, 0, 0),
+        ]
+    }
+
+    fn habit_stats(since_ms: u64) -> DictationStats {
+        dictation_stats(&habits(), since_ms, 20_000, utc_day, utc_hour)
+    }
+
+    #[test]
+    fn speed_and_the_typing_comparison_come_from_the_entries_with_audio() {
+        let stats = habit_stats(0);
+        // 12 words in 21 s of audio (the entry without audio is skipped).
+        assert_eq!(stats.history.words_per_minute, Some(34));
+        let ratio = stats.speed_vs_typing().unwrap();
+        assert!((ratio - 34.0 / 40.0).abs() < 1e-9);
+        assert_eq!(DictationStats::default().speed_vs_typing(), None);
+    }
+
+    #[test]
+    fn streak_and_active_days_cover_the_window() {
+        let mut entries = habits();
+        entries.push(dictation(5, 8, "x", None, None, 0, 0));
+        entries.last_mut().unwrap().timestamp_ms -= DAY;
+        entries.push(dictation(6, 8, "y", None, None, 0, 0));
+        entries.last_mut().unwrap().timestamp_ms -= 5 * DAY;
+        let stats = dictation_stats(&entries, 0, 20_000, utc_day, utc_hour);
+        assert_eq!(
+            (stats.history.streak_days, stats.history.active_days),
+            (2, 3)
+        );
+        // A window that starts today drops the older days.
+        let today = dictation_stats(&entries, 20_000 * DAY, 20_000, utc_day, utc_hour);
+        assert_eq!(
+            (today.history.streak_days, today.history.active_days),
+            (1, 1)
+        );
+    }
+
+    #[test]
+    fn average_and_longest_dictation_are_in_words() {
+        let stats = habit_stats(0);
+        // 4 + 2 + 6 + 1 words over 4 dictations is 3.25.
+        assert_eq!(stats.average_words, 3);
+        assert_eq!(stats.longest_words, 6);
+        let empty = habit_stats(u64::MAX);
+        assert_eq!(empty, DictationStats::default());
+    }
+
+    #[test]
+    fn top_apps_and_the_changed_share_come_through() {
+        let mut entries = habits();
+        entries[0].final_text = "One two three four.".into();
+        let stats = dictation_stats(&entries, 0, 20_000, utc_day, utc_hour);
+        let apps: Vec<_> = stats
+            .history
+            .top_apps
+            .iter()
+            .map(|app| (app.application.as_str(), app.dictations))
+            .collect();
+        assert_eq!(apps, [("Zed", 2), ("Slack", 1)]);
+        assert_eq!(stats.history.changed_percent(), Some(25));
+    }
+
+    #[test]
+    fn the_busiest_hour_is_the_most_dictated_and_ties_go_to_the_earliest() {
+        assert_eq!(habit_stats(0).busiest_hour, Some(9));
+        let mut entries = habits();
+        entries.push(dictation(5, 14, "z", None, None, 0, 0));
+        // Two at 9, three at 14.
+        let stats = dictation_stats(&entries, 0, 20_000, utc_day, utc_hour);
+        assert_eq!(stats.busiest_hour, Some(14));
+        assert_eq!(DictationStats::default().busiest_hour, None);
+        // One at 9 and one at 14 is a tie.
+        let even = dictation_stats(&habits()[1..3], 0, 20_000, utc_day, utc_hour);
+        assert_eq!(even.busiest_hour, Some(9));
+    }
+
+    #[test]
+    fn latency_is_the_mean_transcription_time_per_engine_fastest_first() {
+        let latency = habit_stats(0).latency;
+        let rows: Vec<_> = latency
+            .iter()
+            .map(|row| (row.provider.as_str(), row.dictations, row.average_ms))
+            .collect();
+        // Groq: (400 + 600) / 2. Local: 1500. The entry with no engine or
+        // time is left out.
+        assert_eq!(rows, [("groq", 2, 500), ("local", 1, 1_500)]);
+    }
+
+    #[test]
+    fn hours_and_latencies_read_for_a_person() {
+        assert_eq!(hour_range_label(9), "9–10 am");
+        assert_eq!(hour_range_label(11), "11 am–12 pm");
+        assert_eq!(hour_range_label(12), "12–1 pm");
+        assert_eq!(hour_range_label(23), "11 pm–12 am");
+        assert_eq!(hour_range_label(0), "12–1 am");
+        assert_eq!(latency_label(850), "850 ms");
+        assert_eq!(latency_label(1_240), "1.2 s");
+        assert!(local_hour(NOW) < 24);
     }
 }
