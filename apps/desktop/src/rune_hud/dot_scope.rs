@@ -21,7 +21,7 @@ pub const MAX_COLUMNS: usize = 96;
 pub const MAX_ROWS: usize = 15;
 pub const MAX_DOTS: usize = 1024;
 /// The plate height the HUD window is laid out around.
-pub const PLATE_HEIGHT: f32 = 26.0;
+pub const PLATE_HEIGHT: f32 = 32.0;
 
 /// Dot scope's live parameters. Every default is the prototype's value.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -142,9 +142,9 @@ impl Default for Tuning {
         Self {
             columns: 43.0,
             rows: 9.0,
-            spacing: 2.6,
-            width: 112.0,
-            processing_width: 76.0,
+            spacing: 3.25,
+            width: 140.0,
+            processing_width: 96.0,
             height: PLATE_HEIGHT,
             braid_speed: 1.0,
             helix_cycles: 1.6,
@@ -468,8 +468,8 @@ mod tests {
     #[test]
     fn defaults_are_the_prototypes() {
         let t = Tuning::default();
-        assert_eq!((t.columns, t.rows, t.spacing), (43.0, 9.0, 2.6));
-        assert_eq!((t.width, t.processing_width, t.height), (112.0, 76.0, 26.0));
+        assert_eq!((t.columns, t.rows, t.spacing), (43.0, 9.0, 3.25));
+        assert_eq!((t.width, t.processing_width, t.height), (140.0, 96.0, 32.0));
         assert_eq!((t.response, t.release, t.history_speed), (6.5, 0.15, 150.0));
         assert_eq!((t.phosphor, t.shimmer_pass), (0.6, 0.55));
         assert_eq!((t.transition, t.bounce), (0.3, 0.15));
