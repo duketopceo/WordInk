@@ -376,7 +376,7 @@ fn every_request_is_logged_with_its_ids_size_time_and_cost_but_no_secret_or_text
     // A key, a header, audio or the transcript is never in the file.
     let file = std::fs::read_to_string(&log).unwrap();
     for secret in ["or-secret-key-123", "Bearer", "UklGR", "She taught"] {
-        assert!(!file.contains(secret), "{secret} reached the request log");
+        assert!(!file.contains(secret), "a fixture secret reached the request log");
     }
 }
 
