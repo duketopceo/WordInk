@@ -851,6 +851,7 @@ impl RecoveringAudioInput {
     }
 
     /// The open microphone's cleaned-up name, before the user's own name.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn device_label(&self) -> &str {
         &self
             .input
@@ -1439,6 +1440,7 @@ impl InputDevices {
     }
 
     /// The name to show for `id`: the user's own, else the listed one.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn label(&self, aliases: &std::collections::BTreeMap<String, String>, id: &str) -> String {
         sources::label_for(aliases, id, self.listed_label(id))
     }
