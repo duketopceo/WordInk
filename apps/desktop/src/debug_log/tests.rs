@@ -204,7 +204,7 @@ fn copied_text_is_scrubbed_of_paths_keys_and_the_user() {
     let text = copy_text(&events, &redactions());
     assert_eq!(text.lines().count(), 2);
     for secret in ["/home/kit", KEY, " kit "] {
-        assert!(!text.contains(secret), "{secret} in {text}");
+        assert!(!text.contains(secret), "a fixture secret survived the copy");
     }
 }
 
