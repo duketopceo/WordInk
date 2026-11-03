@@ -116,9 +116,12 @@ function Invoke-WordInkUninstall($Paths, [bool]$Purge) {
     }
     Stop-WordInkProcess $Paths.Install
     Remove-WordInkIntegration $Paths
-    Remove-Item -LiteralPath $Paths.Install -Recurse -Force -ErrorAction Stop
+    # A folder that is already gone is not an error (Remove-Item -ErrorAction Stop throws on it).
+    if (Test-Path -LiteralPath $Paths.Install) { Remove-Item -LiteralPath $Paths.Install -Recurse -Force -ErrorAction Stop }
     if ($Purge) {
-        foreach ($d in $Paths.Data) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction Stop }
+        foreach ($d in $Paths.Data) {
+            if (Test-Path -LiteralPath $d) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction Stop }
+        }
         Write-Host 'WordInk and its settings, history and models were removed.'
     } else {
         Write-Host ('WordInk was removed. Your settings and history are kept in {0}; add -Purge to delete them.' -f $Paths.Data[0])

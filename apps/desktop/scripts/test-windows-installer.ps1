@@ -155,8 +155,16 @@ try {
     $r = Invoke-Installer "$base/good" @('-Uninstall', '-Purge')
     Check ((Test-Path $paths.Exe) -and (Test-Path $data)) 'declining the purge removes nothing'
     function Confirm-WordInkPurge([string]$Prompt) { $true }
+    # Only the roaming data dir exists: the config dir is absent and must not fail the purge.
     $r = Invoke-Installer "$base/good" @('-Uninstall', '-Purge')
-    Check ($r.Code -eq 0 -and -not (Test-Path $paths.Install) -and -not (Test-Path $data)) '-Uninstall -Purge removes the data directory too'
+    Check ($r.Code -eq 0 -and -not (Test-Path $paths.Install) -and -not (Test-Path $data)) '-Uninstall -Purge removes the data directory even when the config directory is absent'
+    # Both data dirs present, and uninstalling when nothing is installed.
+    $null = Invoke-Installer "$base/good"
+    foreach ($d in $paths.Data) { New-Item -ItemType Directory -Force $d | Out-Null; Set-Content (Join-Path $d 'settings.json') '{}' }
+    $r = Invoke-Installer "$base/good" @('-Uninstall', '-Purge')
+    Check ($r.Code -eq 0 -and -not (Test-Path $paths.Data[0]) -and -not (Test-Path $paths.Data[1])) '-Purge removes both data directories'
+    $r = Invoke-Installer "$base/good" @('-Uninstall')
+    Check ($r.Code -eq 0) 'uninstalling when nothing is installed succeeds'
 
     Write-Output 'install.ps1 passed.'
 } finally {
