@@ -301,7 +301,10 @@ mod tests {
         assert!(text.contains("command: paste helper exited 1"));
         assert!(text.contains("dictation: cloud request failed for <path> with <redacted>"));
         for secret in [TRANSCRIPT, HOME, "kit", KEY, "clip.wav", "merger"] {
-            assert!(!text.contains(secret), "{secret} leaked:\n{text}");
+            assert!(
+                !text.contains(secret),
+                "a fixture value leaked into the diagnostics"
+            );
         }
         assert!(text.contains("Recent errors:\n- "));
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -329,7 +332,10 @@ mod tests {
             "sk-abc",
             "abcdefghijkl",
         ] {
-            assert!(!scrubbed.contains(secret), "{secret} in {scrubbed}");
+            assert!(
+                !scrubbed.contains(secret),
+                "a fixture value survived scrubbing"
+            );
         }
         assert!(scrub("microphone busy", &redactions()) == "microphone busy");
         assert!(scrub(&"x ".repeat(300), &redactions()).chars().count() <= MAX_MESSAGE_CHARS + 3);
