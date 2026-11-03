@@ -524,6 +524,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Refresh", "Actualiser"),
     ("Replacement (e.g. OpenCode)", "Remplacement (ex. : OpenCode)"),
     ("Switch to {channel} {version}", "Passer à {channel} {version}"),
+    ("Switch to {channel} {version} (installs an older version)", "Passer à {channel} {version} (installe une version plus ancienne)"),
     ("Restart to update", "Redémarrer pour mettre à jour"),
     ("Retry", "Réessayer"),
     ("Retry setup", "Relancer la configuration"),

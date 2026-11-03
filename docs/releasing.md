@@ -10,7 +10,7 @@ Two kinds of tag exist:
 | Tag | What it is | Channel | GitHub Release |
 | --- | --- | --- | --- |
 | `desktop-vX.Y.Z-rc.N` | release candidate | built with `HEX_BUILD_CHANNEL=dev` | prerelease, never latest |
-| `desktop-vX.Y.Z` | final release | built with `HEX_BUILD_CHANNEL=stable` | latest, with `stable.json` |
+| `desktop-vX.Y.Z` | final release | built with `HEX_BUILD_CHANNEL=stable` | latest, with `stable.json` and `dev.json` |
 
 No other tag suffix is accepted.
 
@@ -85,7 +85,8 @@ For version `V` (`stable.json` only on final releases):
 | `wordink-V-linux-x64.tar.gz`, `wordink-V-linux-arm64.tar.gz` | tarball with the installer, desktop files and icons (made before signing, so it holds no `.sig`) |
 | `wordink-V-macos-arm64.zip`, `wordink-V-windows-x64.zip` | unsigned builds |
 | `wordink-V.sbom.cdx.json` | CycloneDX SBOM |
-| `stable.json` | update manifest the stable-channel updater reads |
+| `stable.json` | update manifest the stable-channel updater reads (final releases only) |
+| `dev.json` | update manifest the Dev-channel updater reads (every release) |
 | `SHA256SUMS` | sha256 of every other file above, in `sha256sum -c` format |
 | `SHA256SUMS.sig` | raw 64-byte ed25519 signature of `SHA256SUMS` |
 
@@ -119,6 +120,32 @@ The installers use the same message, so do not change the domain strings
 without changing every verifier. `apps/desktop/packaging/linux/verify-release.sh`
 runs this check (and every other) on a release directory, and
 `apps/desktop/scripts/test-release-scripts.sh` tests the scripts.
+
+## The Dev channel
+
+Choosing "Dev" under Settings > Updates follows release candidates. The
+updater reads
+`https://github.com/duketopceo/WordInk/releases/download/desktop-dev/dev.json`
+(stable keeps `releases/latest/download/stable.json`).
+
+- `desktop-dev` is a rolling prerelease that holds only `dev.json`. The
+  `publish` job creates it if it is missing, never marks it latest, and
+  replaces the asset (`--clobber`) after each release is made public.
+- A candidate (`-rc.N`) is built stamped `dev` and refreshes `dev.json` only.
+  A final tag refreshes both `stable.json` and `dev.json`, so Dev never lags
+  stable and a stable user who picks Dev is not moved to an older candidate.
+- A Dev-stamped install follows `dev.json` with no switch prompt. Any channel
+  switch whose target is older than the running build (for example Dev back
+  to Stable while stable trails the candidate) shows
+  "Switch to ... (installs an older version)" and installs nothing until the
+  user confirms.
+- `dev.json` is copied from the release's own asset, which `SHA256SUMS`
+  lists and signs. Like `stable.json`, the manifest file carries no signature
+  of its own: Linux updates are verified by the per-binary ed25519 signature,
+  and macOS and Windows only link to the release. `publish` is the only job
+  holding write access to the feed.
+- Test it by hand: `write-manifest.sh <dist> dev` writes `dev.json`
+  (`"channel":"dev"`); `apps/desktop/scripts/test-release-scripts.sh` covers it.
 
 ## Pulling a bad release
 

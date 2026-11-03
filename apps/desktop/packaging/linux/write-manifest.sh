@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# write-manifest.sh <dist>: writes <dist>/stable.json, the schema-1 update
+# write-manifest.sh <dist> [stable|dev]: writes <dist>/<channel>.json
+# (default stable), the schema-1 update
 # manifest WordInk's in-app updater reads (src/updater/protocol.rs), from the
 # release files in <dist>. Target URLs are absolute github.com release-asset
 # URLs, on the manifest's own host as the protocol requires.
@@ -8,12 +9,17 @@
 #   linux-x64-sig, linux-arm64-sig    its raw 64-byte ed25519 signature (sign-linux.sh)
 #   macos-arm64, windows-x64          the zips; unsigned, so the updater only links to them
 #
+# The dev manifest is identical but for `"channel":"dev"`; release candidates
+# publish only it, and a final release publishes both so Dev never lags stable.
+#
 # Environment: WORDINK_VERSION, WORDINK_TAG, WORDINK_REPO (owner/name).
 set -euo pipefail
 
 die() { echo "::error::$*" >&2; exit 1; }
 
-dist=${1:?Usage: write-manifest.sh <dist>}
+dist=${1:?Usage: write-manifest.sh <dist> [stable|dev]}
+channel=${2:-stable}
+case "$channel" in stable | dev) ;; *) die "Unknown channel '$channel' (stable or dev)." ;; esac
 : "${WORDINK_VERSION:?Set WORDINK_VERSION}"
 : "${WORDINK_TAG:?Set WORDINK_TAG}"
 : "${WORDINK_REPO:?Set WORDINK_REPO}"
@@ -43,14 +49,14 @@ for arch in x64 arm64; do
 done
 jq -e 'has("linux-x64") or has("linux-arm64")' <<< "$targets" > /dev/null || die "No Linux target in $dist."
 
-jq -n --arg version "$v" --argjson targets "$targets" \
+jq -n --arg version "$v" --arg channel "$channel" --argjson targets "$targets" \
   --arg notes "https://github.com/$WORDINK_REPO/releases/tag/$WORDINK_TAG" \
   --argjson sequence "$(date +%s)" --arg published "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{
-    schema: 1, app: "hex", artifact: "desktop", channel: "stable",
+    schema: 1, app: "hex", artifact: "desktop", channel: $channel,
     sequence: $sequence, published_at: $published,
     release: {
       version: $version, notes_url: $notes, rollout_percent: 100, required: false,
       revoked_versions: [], distributions: [{kind: "direct"}], targets: $targets
     }
-  }' > "$dist/stable.json"
-echo "Wrote $dist/stable.json for $v."
+  }' > "$dist/$channel.json"
+echo "Wrote $dist/$channel.json for $v."

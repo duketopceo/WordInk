@@ -46,10 +46,15 @@ pub(crate) const RELEASES_URL: &str = "https://github.com/duketopceo/WordInk/rel
 /// by absolute `github.com` URLs, the manifest's own host, which
 /// `protocol::resolve_url` requires; GitHub then redirects the download to
 /// `objects.githubusercontent.com`, and the transport follows HTTPS redirects.
-/// Only a stable channel is published here. `HEX_RELEASE_BASE_URL` (HTTPS)
-/// points a build at a fixture service that serves every channel.
+/// `HEX_RELEASE_BASE_URL` (HTTPS) points a build at a fixture service that
+/// serves every channel.
 const STABLE_MANIFEST_URL: &str =
     "https://github.com/duketopceo/WordInk/releases/latest/download/stable.json";
+/// The Dev channel's manifest (`dev.json`), an asset of the rolling
+/// `desktop-dev` prerelease. Release candidates and final releases both
+/// refresh it, so Dev never lags stable.
+const DEV_MANIFEST_URL: &str =
+    "https://github.com/duketopceo/WordInk/releases/download/desktop-dev/dev.json";
 const STARTUP_DELAY: Duration = Duration::from_secs(10);
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// Dev builds land on every push to dev, so the Dev channel checks often.
@@ -168,15 +173,75 @@ fn is_dev_version(version: &str) -> bool {
     version.contains("-dev")
 }
 
+/// Whether `target` is an older version than `running`. Only the switch
+/// confirmation asks; the protocol itself never orders versions. A version
+/// this cannot read is never called older.
+fn is_older(target: &str, running: &str) -> bool {
+    fn parse(version: &str) -> Option<([u64; 3], Vec<&str>)> {
+        let version = version.split('+').next()?;
+        let (core, pre) = match version.split_once('-') {
+            Some((core, pre)) => (core, Some(pre)),
+            None => (version, None),
+        };
+        let mut numbers = core.split('.').map(|part| part.parse::<u64>().ok());
+        let core = [numbers.next()??, numbers.next()??, numbers.next()??];
+        if numbers.next().is_some() {
+            return None;
+        }
+        let pre = pre
+            .map(|pre| pre.split(['.', '-']).collect())
+            .unwrap_or_default();
+        Some((core, pre))
+    }
+    fn identifier(left: &str, right: &str) -> std::cmp::Ordering {
+        match (left.parse::<u64>(), right.parse::<u64>()) {
+            (Ok(left), Ok(right)) => left.cmp(&right),
+            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+            (Err(_), Err(_)) => left.cmp(right),
+        }
+    }
+    let (Some((target_core, target_pre)), Some((running_core, running_pre))) =
+        (parse(target), parse(running))
+    else {
+        return false;
+    };
+    target_core
+        .cmp(&running_core)
+        .then_with(|| match (target_pre.is_empty(), running_pre.is_empty()) {
+            (true, true) => std::cmp::Ordering::Equal,
+            // A release outranks its own candidates.
+            (true, false) => std::cmp::Ordering::Greater,
+            (false, true) => std::cmp::Ordering::Less,
+            (false, false) => target_pre
+                .iter()
+                .zip(&running_pre)
+                .map(|(left, right)| identifier(left, right))
+                .find(|order| order.is_ne())
+                .unwrap_or_else(|| target_pre.len().cmp(&running_pre.len())),
+        })
+        .is_lt()
+}
+
 /// The control that confirms a channel switch, e.g. "Switch to Stable 2.3.1".
+/// A target older than this build says it will install an older version.
 pub fn switch_label(channel: &str, version: &str) -> String {
+    switch_label_for(channel, version, crate::VERSION)
+}
+
+fn switch_label_for(channel: &str, version: &str, running: &str) -> String {
     let channel = match channel {
         "dev" => UpdateChannel::Dev.label(),
         "stable" => UpdateChannel::Stable.label(),
         other => other,
     };
+    let template = if is_older(version, running) {
+        "Switch to {channel} {version} (installs an older version)"
+    } else {
+        "Switch to {channel} {version}"
+    };
     crate::desktop::i18n::tr_named(
-        "Switch to {channel} {version}",
+        template,
         &[
             ("channel", crate::desktop::i18n::tr(channel)),
             ("version", version),
@@ -639,7 +704,7 @@ fn check(
     let user_agent = transport::user_agent(&home, crate::VERSION);
     *lock(&shared.last) = Some((channel.clone(), std::time::Instant::now()));
     let manifest_url = manifest_url(&channel)
-        .ok_or_else(|| eyre!("WordInk publishes only the stable update channel"))?;
+        .ok_or_else(|| eyre!("WordInk publishes no {channel} update channel"))?;
     let timeout = if restarting {
         RESTART_MANIFEST_TIMEOUT
     } else {
@@ -807,7 +872,7 @@ fn release_origin() -> Option<String> {
 }
 
 /// The manifest of `channel`: the fixture service's, when one is set, else
-/// WordInk's GitHub Release, which publishes stable only.
+/// WordInk's GitHub Releases, which publish stable and dev.
 fn manifest_url(channel: &str) -> Option<String> {
     manifest_url_for(release_origin().as_deref(), channel)
 }
@@ -818,7 +883,11 @@ fn manifest_url_for(origin: Option<&str>, channel: &str) -> Option<String> {
             "{}/{APP}/{ARTIFACT}/{channel}.json",
             origin.trim_end_matches('/')
         )),
-        None => (channel == "stable").then(|| STABLE_MANIFEST_URL.to_owned()),
+        None => match channel {
+            "stable" => Some(STABLE_MANIFEST_URL.to_owned()),
+            "dev" => Some(DEV_MANIFEST_URL.to_owned()),
+            _ => None,
+        },
     }
 }
 
@@ -1081,6 +1150,89 @@ mod tests {
     }
 
     #[test]
+    fn a_dev_json_naming_a_newer_candidate_is_offered_without_a_switch_prompt() {
+        // A Dev-stamped install follows dev.json: the next candidate is a
+        // plain update, never a channel switch.
+        let running = install("1.0.0-rc.1", 'a', "dev");
+        let next = manifest("dev", "1.0.0-rc.2", 'b');
+        assert!(matches!(
+            protocol::decide(APP, ARTIFACT, "dev", &next, &running),
+            Decision::Install {
+                reason: protocol::Reason::Update,
+                ..
+            }
+        ));
+        // After the final, dev.json names the final: still an update for Dev.
+        let released = manifest("dev", "1.0.0", 'c');
+        assert!(matches!(
+            protocol::decide(APP, ARTIFACT, "dev", &released, &running),
+            Decision::Install {
+                reason: protocol::Reason::Update,
+                ..
+            }
+        ));
+        // The final's own build is already what dev.json names: no move.
+        let stable = install("1.0.0", 'c', "stable");
+        assert!(matches!(
+            protocol::decide(APP, ARTIFACT, "dev", &released, &stable),
+            Decision::None { .. }
+        ));
+        // A stable install on another build that picks Dev is asked first.
+        let stable = install("0.9.0", 'd', "stable");
+        assert!(matches!(
+            protocol::decide(APP, ARTIFACT, "dev", &released, &stable),
+            Decision::Install {
+                reason: protocol::Reason::Switch,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn versions_order_like_semver() {
+        for (older, newer) in [
+            ("1.0.0-rc.1", "1.0.0-rc.2"),
+            ("1.0.0-rc.2", "1.0.0-rc.10"),
+            ("1.0.0-rc.2", "1.0.0"),
+            ("0.9.9", "1.0.0-rc.1"),
+            ("0.0.0-dev-9", "0.0.0-dev-10"),
+            ("1.0.0", "1.0.1"),
+            ("1.0.0-rc", "1.0.0-rc.1"),
+        ] {
+            assert!(is_older(older, newer), "{older} < {newer}");
+            assert!(!is_older(newer, older), "{newer} !< {older}");
+        }
+        assert!(!is_older("1.0.0", "1.0.0"));
+        assert!(!is_older("1.0.0+build5", "1.0.0"));
+        assert!(!is_older("garbage", "1.0.0"));
+        assert!(!is_older("1.0.0", "1.0"));
+    }
+
+    #[test]
+    fn a_switch_to_an_older_version_says_so_in_both_directions() {
+        // Stable user on a final picks Dev while dev.json trails: older.
+        assert_eq!(
+            switch_label_for("dev", "1.0.0-rc.2", "1.0.0"),
+            "Switch to Dev 1.0.0-rc.2 (installs an older version)"
+        );
+        // Dev user on a candidate picks Stable while stable is older.
+        assert_eq!(
+            switch_label_for("stable", "0.9.0", "1.0.0-rc.1"),
+            "Switch to Stable 0.9.0 (installs an older version)"
+        );
+        // A newer or equal target keeps the plain wording; after a final,
+        // dev.json names the final, so Dev is not older than stable.
+        assert_eq!(
+            switch_label_for("dev", "1.0.0", "1.0.0"),
+            "Switch to Dev 1.0.0"
+        );
+        assert_eq!(
+            switch_label_for("stable", "1.0.0", "1.0.0-rc.2"),
+            "Switch to Stable 1.0.0"
+        );
+    }
+
+    #[test]
     fn a_switch_waits_for_the_user_to_confirm() {
         let updater = Updater::idle_checking();
         *lock(&updater.shared.state) = State::Switch {
@@ -1214,8 +1366,12 @@ mod tests {
             manifest_url_for(None, "stable").as_deref(),
             Some("https://github.com/duketopceo/WordInk/releases/latest/download/stable.json")
         );
+        assert_eq!(
+            manifest_url_for(None, "dev").as_deref(),
+            Some("https://github.com/duketopceo/WordInk/releases/download/desktop-dev/dev.json")
+        );
         // GitHub publishes no other channel; the fixture service serves any.
-        assert_eq!(manifest_url_for(None, "dev"), None);
+        assert_eq!(manifest_url_for(None, "beta"), None);
         assert_eq!(
             manifest_url_for(Some("https://fixture.test/"), "dev").as_deref(),
             Some("https://fixture.test/hex/desktop/dev.json")
