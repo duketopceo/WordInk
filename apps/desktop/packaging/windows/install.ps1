@@ -89,6 +89,24 @@ function Stop-WordInkProcess([string]$InstallDir) {
     }
 }
 
+# Removes the install folder. A WordInk started moments ago may not report its
+# path yet, and Windows can hold the image file briefly after the process
+# exits, so stop it again and retry for a few seconds before giving up.
+# A folder that is already gone is not an error.
+function Remove-WordInkFolder([string]$Dir) {
+    for ($i = 1; $i -le 20; $i++) {
+        if (-not (Test-Path -LiteralPath $Dir)) { return }
+        try {
+            Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop
+            return
+        } catch {
+            if ($i -eq 20) { throw }
+            Stop-WordInkProcess $Dir
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
+
 function Remove-WordInkIntegration($Paths) {
     Remove-Item -LiteralPath $Paths.Shortcut -Force -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path (Get-WordInkRunKey) -Name 'WordInk' -ErrorAction SilentlyContinue
@@ -116,8 +134,7 @@ function Invoke-WordInkUninstall($Paths, [bool]$Purge) {
     }
     Stop-WordInkProcess $Paths.Install
     Remove-WordInkIntegration $Paths
-    # A folder that is already gone is not an error (Remove-Item -ErrorAction Stop throws on it).
-    if (Test-Path -LiteralPath $Paths.Install) { Remove-Item -LiteralPath $Paths.Install -Recurse -Force -ErrorAction Stop }
+    Remove-WordInkFolder $Paths.Install
     if ($Purge) {
         foreach ($d in $Paths.Data) {
             if (Test-Path -LiteralPath $d) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction Stop }
