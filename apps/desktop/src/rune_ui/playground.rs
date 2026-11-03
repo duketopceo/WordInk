@@ -185,6 +185,7 @@ const PATHS: &[(&str, &str)] = &[
     ("history-failed", "Window/History/Failed dictations"),
     ("history-recovered", "Window/History/Recovered dictation"),
     ("usage", "Window/Usage/Usage"),
+    ("usage-engines", "Window/Usage/Engine timings"),
     ("usage-empty", "Window/Usage/Empty"),
     #[cfg(hex_capture)]
     ("mac-scrawl", "Window/Annotate/On"),

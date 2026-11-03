@@ -344,11 +344,15 @@ struct StatsOutput {
     retention: HistoryRetention,
     #[serde(flatten)]
     stats: HistoryStats,
+    /// Each engine's p50 and p95 transcription time, real-time factor,
+    /// error rate and cost per audio hour over the same range.
+    engines: Vec<crate::history::usage::EngineReport>,
 }
 
 /// The retained entries in the range, summed up.
 fn stats_output(
     entries: &[HistoryEntry],
+    requests: &[crate::transcription::cloud::request_log::RequestRecord],
     since: Option<&str>,
     until: Option<&str>,
     retention: HistoryRetention,
@@ -357,18 +361,34 @@ fn stats_output(
 ) -> Result<StatsOutput> {
     let range = TimeRange::parse(since, until, now)?;
     let cutoff = retention.max_age_ms().map(|age| now.saturating_sub(age));
-    let stats = crate::history::stats::summarize(
-        entries
-            .iter()
-            .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
-            .filter(|entry| range.contains(entry.timestamp_ms)),
+    let kept: Vec<&HistoryEntry> = entries
+        .iter()
+        .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
+        .filter(|entry| range.contains(entry.timestamp_ms))
+        .collect();
+    let in_range: Vec<_> = requests
+        .iter()
+        .filter(|request| range.contains(request.timestamp_ms))
+        .cloned()
+        .collect();
+    let engines = crate::history::usage::dictation_stats(
+        kept.iter().copied(),
+        &in_range,
+        0,
         day_of(now),
-        day_of,
-    );
+        &day_of,
+        crate::history::usage::local_hour,
+    )
+    .latency
+    .iter()
+    .map(crate::history::usage::EngineReport::from)
+    .collect();
+    let stats = crate::history::stats::summarize(kept.iter().copied(), day_of(now), &day_of);
     Ok(StatsOutput {
         version: 1,
         retention,
         stats,
+        engines,
     })
 }
 
@@ -390,8 +410,12 @@ fn history_stats(since: Option<&str>, until: Option<&str>, json: bool) -> Result
     let root = crate::app_paths::support_dir()?;
     let entries = crate::history::read_snapshot(&root.join("history.json"))
         .wrap_err("could not read history.json")?;
+    let requests = crate::transcription::cloud::request_log::read(
+        &root.join(crate::transcription::cloud::request_log::FILE),
+    );
     let output = stats_output(
         &entries,
+        &requests,
         since,
         until,
         retention(&root)?,
@@ -403,7 +427,14 @@ fn history_stats(since: Option<&str>, until: Option<&str>, json: bool) -> Result
         return write_json(&mut out, &output);
     }
     write!(out, "{}", stats_text(&output.stats))?;
+    for engine in &output.engines {
+        writeln!(out, "Engine: {}", engine_line(engine))?;
+    }
     Ok(())
+}
+
+fn engine_line(engine: &crate::history::usage::EngineReport) -> String {
+    crate::history::usage::latency_line(&engine.into())
 }
 
 fn stats_text(stats: &HistoryStats) -> String {

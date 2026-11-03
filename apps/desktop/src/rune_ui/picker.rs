@@ -119,6 +119,9 @@ pub(super) fn open(ui: &mut Ui) {
     ui.picker.clear_deletion();
     // Models already on this computer: headers only, on a worker.
     super::found::scan(ui);
+    // The transcription models the Cloud group lists come from OpenRouter's
+    // public catalogue, fetched at most once a day (no key, no audio).
+    cloud::refresh_catalogue_in_background();
     ui.picker.sort = Sort::default();
     ui.picker.supported_only = false;
 }
@@ -630,14 +633,26 @@ fn group_heading(p: Paint, key: &'static str, label: &str) -> El {
         .pt(4.0)
 }
 
-/// The cloud models the picker offers: each provider's fixed models, and
-/// for OpenRouter (a catalogue too long to list here) and the gateway, the
-/// one model dictation would use.
+/// The cloud models the picker offers: each provider's fixed models; for
+/// the gateway, the one model dictation would use; and for OpenRouter, every
+/// transcription model its catalogue lists, plus the audio chat model
+/// dictation would use when that is not one of them (the chat catalogue is
+/// too long to list here).
 fn cloud_models(ui: &Ui) -> Vec<(Provider, String)> {
     Provider::ALL
         .iter()
         .flat_map(|&provider| match provider {
-            Provider::OpenRouter | Provider::Gateway => vec![(
+            Provider::OpenRouter => {
+                let transcription = cloud::transcription_models();
+                let current = cloud::model_for(provider, ui.settings.engine_model.as_deref());
+                let mut models = Vec::new();
+                if !transcription.iter().any(|model| model.id == current) {
+                    models.push((provider, current));
+                }
+                models.extend(transcription.into_iter().map(|model| (provider, model.id)));
+                models
+            }
+            Provider::Gateway => vec![(
                 provider,
                 cloud::model_for(provider, ui.settings.engine_model.as_deref()),
             )],
@@ -715,10 +730,8 @@ fn cloud_card(ui: &Ui, p: Paint, index: usize, provider: Provider, model: String
             move |ui: &mut Ui, _| choose_cloud(ui, provider, &chosen),
         ));
     }
-    let price = cloud::PRICES
-        .iter()
-        .find(|price| price.provider == provider.id() && price.model == model)
-        .map(|price| tr_fill("${} / hour", &format!("{:.3}", price.usd_per_hour)));
+    let price = cloud::usd_per_hour(provider, &model)
+        .map(|usd_per_hour| tr_fill("${} / hour", &format!("{usd_per_hour:.3}")));
     let metadata = if keyed {
         tr("Audio is sent to this provider").to_owned()
     } else if provider == Provider::Gateway {

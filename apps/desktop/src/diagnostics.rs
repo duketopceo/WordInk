@@ -3,7 +3,8 @@
 //! diagnostics row, or `wordink diagnostics`) and is never sent anywhere.
 //!
 //! It names the app version, update channel, OS, architecture, engine kind,
-//! install method and the last few failure messages the event log already
+//! install method, how the cloud engines performed (counts and timings, no
+//! content) and the last few failure messages the event log already
 //! keeps. It never holds audio, transcript text, file paths (the home folder
 //! included), user names or keys: failure messages are scrubbed of anything
 //! that looks like one, and the transcripts in the event log are never read.
@@ -11,7 +12,18 @@
 use std::path::Path;
 
 use crate::desktop::events::{CommandOutcome, DictationPhase, EventReader, VoiceEvent};
+use crate::history::usage;
 use crate::transcription::cloud::Provider;
+use crate::transcription::cloud::request_log::{self, RequestRecord};
+
+const WEEK_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+
+/// The cloud request log's records, or none when there is no log.
+pub fn recent_requests() -> Vec<RequestRecord> {
+    request_log::default_path()
+        .map(|path| request_log::read(&path))
+        .unwrap_or_default()
+}
 
 /// How many recent failures the summary lists.
 const RECENT_ERRORS: usize = 5;
@@ -29,6 +41,10 @@ pub struct Diagnostics {
     pub arch: String,
     pub engine: String,
     pub install: String,
+    /// One line per cloud engine used in the last week: p50 and p95
+    /// transcription time, real-time factor, error rate and cost per audio
+    /// hour. Numbers only.
+    pub cloud: Vec<String>,
     pub errors: Vec<String>,
     /// Why the event log could not be read (the error kind, never a path);
     /// the summary then says so instead of claiming there were no errors.
@@ -86,9 +102,21 @@ impl Diagnostics {
             arch: std::env::consts::ARCH.to_owned(),
             engine: engine_kind(provider),
             install,
+            cloud: Vec::new(),
             errors,
             log_unreadable,
         }
+    }
+
+    /// Adds the cloud engines' timing lines from the request log's records
+    /// of the last week.
+    pub fn with_requests(mut self, requests: &[RequestRecord]) -> Self {
+        let since = crate::history::now_ms().saturating_sub(WEEK_MS);
+        self.cloud = usage::request_latency(requests, None, since)
+            .iter()
+            .map(usage::latency_line)
+            .collect();
+        self
     }
 
     /// The plain text people copy.
@@ -97,6 +125,14 @@ impl Diagnostics {
             "WordInk diagnostics\nVersion: {}\nUpdate channel: {}\nOS: {}\nArchitecture: {}\nEngine: {}\nInstall method: {}\n",
             self.version, self.channel, self.os, self.arch, self.engine, self.install
         );
+        if !self.cloud.is_empty() {
+            text.push_str("Cloud requests, last 7 days:\n");
+            for line in &self.cloud {
+                text.push_str("- ");
+                text.push_str(line);
+                text.push('\n');
+            }
+        }
         if let Some(kind) = &self.log_unreadable {
             text.push_str(&format!(
                 "Recent errors: unavailable (could not read the event log: {kind})\n"
@@ -326,6 +362,7 @@ mod tests {
             arch: "aarch64".into(),
             engine: engine_kind(Some(Provider::Groq)),
             install: "direct".into(),
+            cloud: Vec::new(),
             errors,
             log_unreadable: None,
         }
@@ -438,5 +475,35 @@ mod tests {
         for word in ["transcription", "microphone", "HTTP", "401", "Unauthorized"] {
             assert!(!looks_like_key(word) && !looks_like_path(word), "{word}");
         }
+    }
+
+    #[test]
+    fn cloud_timings_are_numbers_only_and_listed_after_the_engine() {
+        let now = crate::history::now_ms();
+        let record = |latency_ms, ok: bool| RequestRecord {
+            timestamp_ms: now - 1_000,
+            provider: "openrouter".into(),
+            endpoint_kind: "transcription".into(),
+            model: "microsoft/mai-transcribe-2".into(),
+            audio_ms: 5_000,
+            latency_ms,
+            error_class: (!ok).then(|| "unavailable".to_owned()),
+            ..RequestRecord::default()
+        };
+        let old = RequestRecord {
+            timestamp_ms: now - 8 * 24 * 60 * 60 * 1000,
+            ..record(1, true)
+        };
+        let text = state(Vec::new())
+            .with_requests(&[record(4_000, true), record(6_000, true), record(900, false), old])
+            .text();
+        assert!(
+            text.contains("Cloud requests, last 7 days:\n- openrouter \u{b7} microsoft/mai-transcribe-2: p50 5.0 s, p95 5.9 s"),
+            "{text}"
+        );
+        assert!(text.contains("33% errors (1 of 3 requests)"), "{text}");
+        assert!(text.find("Engine:").unwrap() < text.find("Cloud requests").unwrap());
+        // No requests, no section.
+        assert!(!state(Vec::new()).with_requests(&[]).text().contains("Cloud requests"));
     }
 }

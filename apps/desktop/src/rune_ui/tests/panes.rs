@@ -2328,8 +2328,8 @@ fn the_usage_pane_shows_speed_streak_length_top_apps_busiest_hour_and_latency() 
         "61",
         "Safari",
         "Groq · whisper-large-v3-turbo",
-        "380 ms",
-        "1.4 s",
+        "p50 380 ms",
+        "p50 1.4 s",
     ] {
         assert!(
             shown.iter().any(|t| t == expected),
@@ -2340,6 +2340,46 @@ fn the_usage_pane_shows_speed_streak_length_top_apps_busiest_hour_and_latency() 
         assert!(rt.find(key).is_some(), "{key}");
     }
     assert!(rt.find("usage-app4").is_some() && rt.find("usage-app5").is_none());
+}
+
+/// Each engine's row leads with its median and then says the p95, how it
+/// compares with real time, its error rate and what an audio hour cost.
+#[test]
+fn the_usage_pane_shows_p50_p95_real_time_errors_and_cost_per_hour() {
+    let rt = runtime("usage", true, PANE_SIZE);
+    let shown = texts(&rt);
+    for expected in [
+        "Transcription time \u{b7} 7 days",
+        "OpenRouter \u{b7} microsoft/mai-transcribe-2",
+        "p50 4.1 s",
+        "8 dictations \u{b7} p95 6.8 s \u{b7} 0.95\u{d7} real time \u{b7} 11% errors \u{b7} $0.100 / hour",
+        "96 dictations \u{b7} p95 720 ms \u{b7} 0.07\u{d7} real time \u{b7} 1% errors \u{b7} $0.040 / hour",
+        // A local model makes no requests and costs nothing: no error or price.
+        "41 dictations \u{b7} p95 2.3 s \u{b7} 0.35\u{d7} real time",
+    ] {
+        assert!(
+            shown.iter().any(|t| t == expected),
+            "shows {expected}: {shown:?}"
+        );
+    }
+    assert!(
+        !shown.iter().any(|t| t.starts_with("Average transcription time")),
+        "the mean is replaced by percentiles"
+    );
+    // An engine that only failed has no timings: a dash, and its errors.
+    let mut rt = runtime("usage", true, PANE_SIZE);
+    rt.state.usage.stats.latency = vec![crate::history::usage::ModelLatency {
+        provider: "openai".into(),
+        model: "whisper-1".into(),
+        requests: 2,
+        failed: 2,
+        ..Default::default()
+    }];
+    rt.invalidate();
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|t| t == "\u{2014}"), "{shown:?}");
+    assert!(shown.iter().any(|t| t == "100% errors"), "{shown:?}");
 }
 
 /// General's Speech model row names the model that transcribes: the cloud

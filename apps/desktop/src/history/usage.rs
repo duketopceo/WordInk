@@ -4,6 +4,7 @@
 
 use super::HistoryEntry;
 use super::stats::{self, HistoryStats};
+use crate::transcription::cloud::request_log::{Origin as RequestOrigin, RequestRecord};
 
 /// The typing speed time saved is measured against, in words per minute.
 pub const TYPING_WPM: f64 = 40.0;
@@ -125,8 +126,29 @@ pub fn summarize<'a>(
     summary
 }
 
-/// How long one engine took to transcribe, on average.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// The `percent`th percentile of `sorted` (ascending), by linear
+/// interpolation between the two nearest ranks, rounded to a millisecond.
+/// A single sample is every percentile of itself; no samples, no answer.
+/// With an even count the median is the mean of the two middle samples.
+pub fn percentile(sorted: &[u64], percent: f64) -> Option<u64> {
+    let last = sorted.len().checked_sub(1)?;
+    let rank = (percent.clamp(0.0, 100.0) / 100.0) * last as f64;
+    let (below, above) = (rank.floor() as usize, rank.ceil() as usize);
+    let low = sorted[below] as f64;
+    let high = sorted[above] as f64;
+    Some((low + (high - low) * (rank - below as f64)).round() as u64)
+}
+
+/// Transcription time over audio time: below 1 is faster than real time.
+/// `None` without audio.
+pub fn real_time_factor(latency_ms: u64, audio_ms: u64) -> Option<f64> {
+    (audio_ms > 0).then(|| latency_ms as f64 / audio_ms as f64)
+}
+
+/// How one engine did over a window: how long it took (percentiles over
+/// the dictations that recorded a time), how that compares with the audio,
+/// how often requests to it failed, and what an hour of audio cost.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ModelLatency {
     pub provider: String,
     pub model: String,
@@ -134,11 +156,116 @@ pub struct ModelLatency {
     pub dictations: u64,
     /// Mean transcription time in milliseconds, rounded.
     pub average_ms: u64,
+    /// Median transcription time; `None` when no dictation recorded a time.
+    pub p50_ms: Option<u64>,
+    pub p95_ms: Option<u64>,
+    /// Total transcription time over total audio time of those dictations.
+    pub real_time_factor: Option<f64>,
+    /// Cloud requests logged in the window, failed ones included. Zero for a
+    /// local model, which makes no requests.
+    pub requests: u64,
+    pub failed: u64,
+    /// US dollars paid per hour of audio: what the provider charged for the
+    /// dictations (its returned cost, else the bundled price table over
+    /// the audio). `None` when nothing was charged.
+    pub cost_per_hour: Option<f64>,
+}
+
+impl ModelLatency {
+    /// The share of logged requests that failed, 0 to 1.
+    pub fn error_rate(&self) -> Option<f64> {
+        (self.requests > 0).then(|| self.failed as f64 / self.requests as f64)
+    }
+}
+
+/// One engine's numbers as the CLI prints them as JSON.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct EngineReport {
+    pub provider: String,
+    pub model: String,
+    /// Requests or dictations that recorded a time.
+    pub samples: u64,
+    pub average_ms: u64,
+    pub p50_ms: Option<u64>,
+    pub p95_ms: Option<u64>,
+    pub real_time_factor: Option<f64>,
+    pub requests: u64,
+    pub failed: u64,
+    pub error_rate: Option<f64>,
+    pub cost_per_audio_hour_usd: Option<f64>,
+}
+
+impl From<&ModelLatency> for EngineReport {
+    fn from(row: &ModelLatency) -> Self {
+        Self {
+            provider: row.provider.clone(),
+            model: row.model.clone(),
+            samples: row.dictations,
+            average_ms: row.average_ms,
+            p50_ms: row.p50_ms,
+            p95_ms: row.p95_ms,
+            real_time_factor: row.real_time_factor,
+            requests: row.requests,
+            failed: row.failed,
+            error_rate: row.error_rate(),
+            cost_per_audio_hour_usd: row.cost_per_hour,
+        }
+    }
+}
+
+impl From<&EngineReport> for ModelLatency {
+    fn from(row: &EngineReport) -> Self {
+        Self {
+            provider: row.provider.clone(),
+            model: row.model.clone(),
+            dictations: row.samples,
+            average_ms: row.average_ms,
+            p50_ms: row.p50_ms,
+            p95_ms: row.p95_ms,
+            real_time_factor: row.real_time_factor,
+            requests: row.requests,
+            failed: row.failed,
+            cost_per_hour: row.cost_per_audio_hour_usd,
+        }
+    }
+}
+
+/// One engine's line for the CLI and diagnostics: `openrouter ·
+/// microsoft/mai-transcribe-2: p50 4.1 s, p95 6.8 s, 0.95× real time, 11%
+/// errors (1 of 9 requests), $0.100 per audio hour, 8 samples`. English: the
+/// terminal and a bug report are not translated.
+pub fn latency_line(row: &ModelLatency) -> String {
+    let mut parts = Vec::new();
+    match (row.p50_ms, row.p95_ms) {
+        (Some(p50), Some(p95)) => {
+            parts.push(format!("p50 {}", latency_label(p50)));
+            parts.push(format!("p95 {}", latency_label(p95)));
+        }
+        _ => parts.push("no timings".to_owned()),
+    }
+    if let Some(factor) = row.real_time_factor {
+        parts.push(format!("{} real time", factor_label(factor)));
+    }
+    if let Some(rate) = row.error_rate() {
+        parts.push(format!(
+            "{} errors ({} of {} requests)",
+            percent_label(rate),
+            row.failed,
+            row.requests
+        ));
+    }
+    if let Some(cost) = row.cost_per_hour {
+        parts.push(format!("${cost:.3} per audio hour"));
+    }
+    if row.dictations > 0 {
+        parts.push(format!("{} samples", row.dictations));
+    }
+    format!("{} \u{b7} {}: {}", row.provider, row.model, parts.join(", "))
 }
 
 /// The personal numbers of one window: the dictations themselves, not just
 /// their usage records.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct DictationStats {
     /// Dictations, words, speed, streak, active days, top apps, and the
     /// share Output changed.
@@ -149,7 +276,7 @@ pub struct DictationStats {
     /// Local hour of day (0 to 23) with the most dictations; the earliest
     /// wins a tie.
     pub busiest_hour: Option<u32>,
-    /// Fastest engine first, then by provider and model.
+    /// Fastest median first, then by provider and model.
     pub latency: Vec<ModelLatency>,
 }
 
@@ -165,8 +292,12 @@ impl DictationStats {
 /// Sums up the dictations of `entries` made at or after `since_ms`. `today`,
 /// `day_of` and `hour_of` turn timestamps into local days and hours (the
 /// app's own clock, or a fixed one in tests).
+///
+/// `requests` is the cloud request log; the dictation requests made at or
+/// after `since_ms` give each engine its error rate.
 pub fn dictation_stats<'a>(
     entries: impl IntoIterator<Item = &'a HistoryEntry>,
+    requests: &[RequestRecord],
     since_ms: u64,
     today: i64,
     day_of: impl Fn(u64) -> i64,
@@ -179,22 +310,19 @@ pub fn dictation_stats<'a>(
     let history = stats::summarize(entries.iter().copied(), today, day_of);
     let mut stats = DictationStats::default();
     let mut hours = [0_u64; 24];
-    let mut latency: Vec<(&str, &str, u64, u64)> = Vec::new();
+    let mut latency: Vec<Engine> = Vec::new();
     for entry in &entries {
         let words = entry.final_text.split_whitespace().count() as u64;
         stats.longest_words = stats.longest_words.max(words);
         hours[(hour_of(entry.timestamp_ms) as usize).min(23)] += 1;
-        if let Some(usage) = &entry.usage
-            && entry.inference_ms > 0
-        {
-            let key = (usage.provider.as_str(), usage.model.as_str());
-            match latency.iter_mut().find(|row| (row.0, row.1) == key) {
-                Some(row) => {
-                    row.2 += 1;
-                    row.3 += entry.inference_ms;
-                }
-                None => latency.push((key.0, key.1, 1, entry.inference_ms)),
+        if let Some(usage) = &entry.usage {
+            let row = engine_row(&mut latency, &usage.provider, &usage.model);
+            if entry.inference_ms > 0 {
+                row.times.push(entry.inference_ms);
+                row.audio_ms += (usage.audio_seconds * 1000.0).round() as u64;
             }
+            row.audio_seconds += usage.audio_seconds;
+            row.cost_usd += usage.cost_usd;
         }
     }
     if history.dictations > 0 {
@@ -205,23 +333,122 @@ pub fn dictation_stats<'a>(
         .then(|| hours.iter().position(|count| *count == most))
         .flatten()
         .map(|hour| hour as u32);
+    for request in requests.iter().filter(|request| {
+        request.timestamp_ms >= since_ms && request.origin == RequestOrigin::Dictation
+    }) {
+        let row = engine_row(&mut latency, &request.provider, &request.model);
+        row.requests += 1;
+        row.failed += u64::from(!request.ok());
+    }
     stats.latency = latency
         .into_iter()
-        .map(|(provider, model, dictations, total)| ModelLatency {
-            provider: provider.to_owned(),
-            model: model.to_owned(),
-            dictations,
-            average_ms: (total as f64 / dictations as f64).round() as u64,
-        })
+        // A row appears for an engine that timed a dictation or failed a
+        // request; one that only has a usage record (no time) does not.
+        .filter(|row| !row.times.is_empty() || row.failed > 0)
+        .map(Engine::finish)
         .collect();
-    stats.latency.sort_by(|a, b| {
-        a.average_ms
-            .cmp(&b.average_ms)
+    sort_latency(&mut stats.latency);
+    stats.history = history;
+    stats
+}
+
+/// The engines of the cloud request log over a window, from the requests
+/// alone: a successful request's wall time is its latency, its audio and
+/// cost are summed, and a failed one counts against the error rate. `origin`
+/// narrows to dictation or meeting requests. A request that raised an error
+/// has no usable time and is left out of the percentiles.
+pub fn request_latency(
+    requests: &[RequestRecord],
+    origin: Option<RequestOrigin>,
+    since_ms: u64,
+) -> Vec<ModelLatency> {
+    let mut rows: Vec<Engine> = Vec::new();
+    for request in requests.iter().filter(|request| {
+        request.timestamp_ms >= since_ms && origin.is_none_or(|origin| request.origin == origin)
+    }) {
+        let row = engine_row(&mut rows, &request.provider, &request.model);
+        row.requests += 1;
+        if request.ok() {
+            row.times.push(request.latency_ms);
+            row.audio_ms += request.audio_ms;
+            row.audio_seconds += request.audio_ms as f64 / 1000.0;
+            row.cost_usd += request.cost_usd.unwrap_or(0.0);
+        } else {
+            row.failed += 1;
+        }
+    }
+    let mut latency: Vec<ModelLatency> = rows.into_iter().map(Engine::finish).collect();
+    sort_latency(&mut latency);
+    latency
+}
+
+fn sort_latency(rows: &mut [ModelLatency]) {
+    rows.sort_by(|a, b| {
+        a.p50_ms
+            .unwrap_or(u64::MAX)
+            .cmp(&b.p50_ms.unwrap_or(u64::MAX))
             .then_with(|| a.provider.cmp(&b.provider))
             .then_with(|| a.model.cmp(&b.model))
     });
-    stats.history = history;
-    stats
+}
+
+impl Engine {
+    fn finish(mut self) -> ModelLatency {
+        self.times.sort_unstable();
+        let total: u64 = self.times.iter().sum();
+        let count = self.times.len() as u64;
+        ModelLatency {
+            provider: self.provider,
+            model: self.model,
+            dictations: count,
+            average_ms: if count > 0 {
+                (total as f64 / count as f64).round() as u64
+            } else {
+                0
+            },
+            p50_ms: percentile(&self.times, 50.0),
+            p95_ms: percentile(&self.times, 95.0),
+            real_time_factor: real_time_factor(total, self.audio_ms),
+            requests: self.requests,
+            failed: self.failed,
+            cost_per_hour: (self.cost_usd > 0.0 && self.audio_seconds > 0.0)
+                .then(|| self.cost_usd / self.audio_seconds * 3600.0),
+        }
+    }
+}
+
+/// One engine's samples while a window is added up.
+struct Engine {
+    provider: String,
+    model: String,
+    times: Vec<u64>,
+    /// Audio of the dictations that recorded a time.
+    audio_ms: u64,
+    /// Audio and cost of every dictation with a usage record.
+    audio_seconds: f64,
+    cost_usd: f64,
+    requests: u64,
+    failed: u64,
+}
+
+fn engine_row<'a>(rows: &'a mut Vec<Engine>, provider: &str, model: &str) -> &'a mut Engine {
+    let index = rows
+        .iter()
+        .position(|row| row.provider == provider && row.model == model)
+        .unwrap_or_else(|| {
+            rows.push(Engine {
+                provider: provider.to_owned(),
+                model: model.to_owned(),
+                times: Vec::new(),
+                audio_ms: 0,
+                audio_seconds: 0.0,
+                cost_usd: 0.0,
+                requests: 0,
+                failed: 0,
+            });
+            rows.len() - 1
+        });
+    &mut rows[index]
 }
 
 /// The local hour of day (0 to 23) of a timestamp.
@@ -254,6 +481,21 @@ pub fn hour_range_label(hour: u32) -> String {
     match (start.split_once(' '), end.split_once(' ')) {
         (Some((from, a)), Some((to, b))) if a == b => format!("{from}–{to} {a}"),
         _ => format!("{start}–{end}"),
+    }
+}
+
+/// `0.45×`: a real-time factor, two places.
+pub fn factor_label(factor: f64) -> String {
+    format!("{factor:.2}\u{d7}")
+}
+
+/// `2%`, or `0.4%` under one percent: a share of requests that failed.
+pub fn percent_label(share: f64) -> String {
+    let percent = share * 100.0;
+    if percent > 0.0 && percent < 1.0 {
+        format!("{percent:.1}%")
+    } else {
+        format!("{percent:.0}%")
     }
 }
 
@@ -515,7 +757,7 @@ mod tests {
     }
 
     fn habit_stats(since_ms: u64) -> DictationStats {
-        dictation_stats(&habits(), since_ms, 20_000, utc_day, utc_hour)
+        dictation_stats(&habits(), &[], since_ms, 20_000, utc_day, utc_hour)
     }
 
     #[test]
@@ -535,13 +777,13 @@ mod tests {
         entries.last_mut().unwrap().timestamp_ms -= DAY;
         entries.push(dictation(6, 8, "y", None, None, 0, 0));
         entries.last_mut().unwrap().timestamp_ms -= 5 * DAY;
-        let stats = dictation_stats(&entries, 0, 20_000, utc_day, utc_hour);
+        let stats = dictation_stats(&entries, &[], 0, 20_000, utc_day, utc_hour);
         assert_eq!(
             (stats.history.streak_days, stats.history.active_days),
             (2, 3)
         );
         // A window that starts today drops the older days.
-        let today = dictation_stats(&entries, 20_000 * DAY, 20_000, utc_day, utc_hour);
+        let today = dictation_stats(&entries, &[], 20_000 * DAY, 20_000, utc_day, utc_hour);
         assert_eq!(
             (today.history.streak_days, today.history.active_days),
             (1, 1)
@@ -562,7 +804,7 @@ mod tests {
     fn top_apps_and_the_changed_share_come_through() {
         let mut entries = habits();
         entries[0].final_text = "One two three four.".into();
-        let stats = dictation_stats(&entries, 0, 20_000, utc_day, utc_hour);
+        let stats = dictation_stats(&entries, &[], 0, 20_000, utc_day, utc_hour);
         let apps: Vec<_> = stats
             .history
             .top_apps
@@ -579,11 +821,11 @@ mod tests {
         let mut entries = habits();
         entries.push(dictation(5, 14, "z", None, None, 0, 0));
         // Two at 9, three at 14.
-        let stats = dictation_stats(&entries, 0, 20_000, utc_day, utc_hour);
+        let stats = dictation_stats(&entries, &[], 0, 20_000, utc_day, utc_hour);
         assert_eq!(stats.busiest_hour, Some(14));
         assert_eq!(DictationStats::default().busiest_hour, None);
         // One at 9 and one at 14 is a tie.
-        let even = dictation_stats(&habits()[1..3], 0, 20_000, utc_day, utc_hour);
+        let even = dictation_stats(&habits()[1..3], &[], 0, 20_000, utc_day, utc_hour);
         assert_eq!(even.busiest_hour, Some(9));
     }
 
@@ -609,5 +851,151 @@ mod tests {
         assert_eq!(latency_label(850), "850 ms");
         assert_eq!(latency_label(1_240), "1.2 s");
         assert!(local_hour(NOW) < 24);
+    }
+
+    #[test]
+    fn percentiles_interpolate_and_handle_small_samples() {
+        assert_eq!(percentile(&[], 50.0), None, "no samples, no answer");
+        assert_eq!(percentile(&[700], 50.0), Some(700));
+        assert_eq!(percentile(&[700], 95.0), Some(700), "one sample is every percentile");
+        // Odd count: the middle sample.
+        assert_eq!(percentile(&[100, 300, 200_000], 50.0), Some(300));
+        assert_eq!(percentile(&[1, 2, 3, 4, 5], 50.0), Some(3));
+        // Even count: the mean of the two middle samples.
+        assert_eq!(percentile(&[100, 200], 50.0), Some(150));
+        assert_eq!(percentile(&[100, 200, 300, 400], 50.0), Some(250));
+        // p95 reaches toward the slowest, never past it.
+        assert_eq!(percentile(&[100, 200], 95.0), Some(195));
+        assert_eq!(percentile(&[1, 2, 3, 4, 5], 95.0), Some(5));
+        let twenty: Vec<u64> = (1..=20).map(|n| n * 100).collect();
+        assert_eq!(percentile(&twenty, 95.0), Some(1_905));
+        assert_eq!(percentile(&twenty, 100.0), Some(2_000));
+        assert_eq!(percentile(&twenty, 0.0), Some(100));
+        assert_eq!(percentile(&twenty, 250.0), Some(2_000), "clamped");
+    }
+
+    #[test]
+    fn the_real_time_factor_is_transcription_time_over_audio_time() {
+        assert_eq!(real_time_factor(4_400, 60_000).map(|f| (f * 1000.0).round()), Some(73.0));
+        assert_eq!(real_time_factor(3_000, 3_000), Some(1.0));
+        assert_eq!(real_time_factor(500, 0), None, "no audio, no factor");
+        assert_eq!(real_time_factor(0, 1_000), Some(0.0));
+        assert_eq!(factor_label(0.0733), "0.07\u{d7}");
+        assert_eq!(factor_label(1.0), "1.00\u{d7}");
+    }
+
+    fn request(
+        age_ms: u64,
+        provider: &str,
+        model: &str,
+        ok: bool,
+        latency_ms: u64,
+        audio_ms: u64,
+        cost: Option<f64>,
+    ) -> RequestRecord {
+        RequestRecord {
+            timestamp_ms: 20_000 * DAY + 12 * 3_600_000 - age_ms,
+            provider: provider.into(),
+            endpoint_kind: "transcription".into(),
+            model: model.into(),
+            audio_ms,
+            latency_ms,
+            cost_usd: cost,
+            error_class: (!ok).then(|| "unavailable".to_owned()),
+            ..RequestRecord::default()
+        }
+    }
+
+    #[test]
+    fn latency_rows_give_p50_p95_real_time_error_rate_and_cost_per_hour() {
+        let mai = Some(("openrouter", "microsoft/mai-transcribe-2"));
+        let mut entries = vec![
+            dictation(1, 9, "a b", None, mai, 5_000, 4_000),
+            dictation(2, 9, "c d", None, mai, 5_000, 6_000),
+            dictation(3, 9, "e f", None, mai, 10_000, 5_000),
+        ];
+        // What the provider charged: $0.10 an hour of audio.
+        for entry in &mut entries {
+            let usage = entry.usage.as_mut().unwrap();
+            usage.cost_usd = usage.audio_seconds * 0.10 / 3600.0;
+        }
+        let requests = [
+            request(1_000, "openrouter", "microsoft/mai-transcribe-2", true, 4_000, 5_000, Some(0.0001)),
+            request(2_000, "openrouter", "microsoft/mai-transcribe-2", true, 6_000, 5_000, Some(0.0001)),
+            request(3_000, "openrouter", "microsoft/mai-transcribe-2", true, 5_000, 10_000, Some(0.0003)),
+            request(4_000, "openrouter", "microsoft/mai-transcribe-2", false, 900, 5_000, None),
+            // A meeting chunk does not count against dictation.
+            RequestRecord {
+                origin: crate::transcription::cloud::request_log::Origin::Meeting,
+                ..request(5_000, "openrouter", "microsoft/mai-transcribe-2", false, 1, 1, None)
+            },
+        ];
+        let stats = dictation_stats(&entries, &requests, 0, 20_000, utc_day, utc_hour);
+        let row = &stats.latency[0];
+        assert_eq!((row.provider.as_str(), row.model.as_str()), ("openrouter", "microsoft/mai-transcribe-2"));
+        assert_eq!(row.dictations, 3);
+        assert_eq!((row.p50_ms, row.p95_ms), (Some(5_000), Some(5_900)));
+        assert_eq!(row.average_ms, 5_000);
+        // 15 s of transcription over 20 s of audio.
+        assert!((row.real_time_factor.unwrap() - 0.75).abs() < 1e-9);
+        assert_eq!((row.requests, row.failed), (4, 1));
+        assert!((row.error_rate().unwrap() - 0.25).abs() < 1e-9);
+        assert!((row.cost_per_hour.unwrap() - 0.10).abs() < 1e-9);
+        // Local models make no requests: no error rate, and nothing paid.
+        let local = dictation_stats(&habits(), &[], 0, 20_000, utc_day, utc_hour);
+        let parakeet = local.latency.iter().find(|r| r.provider == "local").unwrap();
+        assert_eq!((parakeet.error_rate(), parakeet.cost_per_hour), (None, None));
+    }
+
+    #[test]
+    fn engines_sort_by_median_and_one_that_only_failed_still_shows() {
+        let fast = Some(("groq", "whisper-large-v3-turbo"));
+        let slow = Some(("openrouter", "microsoft/mai-transcribe-2"));
+        let entries = vec![
+            dictation(1, 9, "a", None, slow, 5_000, 4_500),
+            dictation(2, 9, "b", None, fast, 5_000, 400),
+        ];
+        let requests = [request(1, "openai", "whisper-1", false, 100, 1_000, None)];
+        let stats = dictation_stats(&entries, &requests, 0, 20_000, utc_day, utc_hour);
+        let order: Vec<_> = stats.latency.iter().map(|r| r.provider.as_str()).collect();
+        assert_eq!(order, ["groq", "openrouter", "openai"], "no timing sorts last");
+        let failed = &stats.latency[2];
+        assert_eq!((failed.p50_ms, failed.dictations, failed.failed), (None, 0, 1));
+        assert_eq!(failed.error_rate(), Some(1.0));
+        // Requests before the window do not count.
+        let old = dictation_stats(&entries, &requests, 20_000 * DAY + 13 * 3_600_000, 20_000, utc_day, utc_hour);
+        assert!(old.latency.is_empty());
+        // Nothing at all: nothing to show.
+        assert!(dictation_stats(&Vec::<HistoryEntry>::new(), &[], 0, 20_000, utc_day, utc_hour).latency.is_empty());
+    }
+
+    #[test]
+    fn the_request_log_alone_gives_meeting_engine_numbers() {
+        use crate::transcription::cloud::request_log::Origin;
+        let meeting = |latency, ok| RequestRecord {
+            origin: Origin::Meeting,
+            ..request(1, "openrouter", "microsoft/mai-transcribe-2", ok, latency, 8_000, Some(0.0002))
+        };
+        let requests = [meeting(3_000, true), meeting(5_000, true), meeting(99, false)];
+        let rows = request_latency(&requests, Some(Origin::Meeting), 0);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!((row.p50_ms, row.requests, row.failed), (Some(4_000), 3, 1));
+        assert!((row.real_time_factor.unwrap() - 0.5).abs() < 1e-9);
+        assert!((row.cost_per_hour.unwrap() - 0.0004 / 16.0 * 3600.0).abs() < 1e-9);
+        assert!(request_latency(&requests, Some(Origin::Dictation), 0).is_empty());
+        assert_eq!(request_latency(&requests, None, 0).len(), 1);
+        let line = latency_line(row);
+        assert!(line.starts_with("openrouter \u{b7} microsoft/mai-transcribe-2: p50 4.0 s, p95 4.9 s"), "{line}");
+        assert!(line.contains("0.50\u{d7} real time") && line.contains("33% errors (1 of 3 requests)"), "{line}");
+        assert!(line.contains("per audio hour") && line.contains("2 samples"), "{line}");
+    }
+
+    #[test]
+    fn rates_and_factors_read_for_a_person() {
+        assert_eq!(percent_label(0.0), "0%");
+        assert_eq!(percent_label(0.004), "0.4%");
+        assert_eq!(percent_label(0.02), "2%");
+        assert_eq!(percent_label(1.0), "100%");
     }
 }

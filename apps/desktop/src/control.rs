@@ -14,6 +14,7 @@ pub(crate) mod developer_control;
 pub(crate) mod host;
 pub mod settings;
 pub(crate) mod transcript_cli;
+pub(crate) mod usage_cli;
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 use std::time::Duration;

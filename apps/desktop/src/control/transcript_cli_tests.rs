@@ -131,7 +131,7 @@ fn history_stats_parse_sum_retained_entries_and_need_the_labs_toggle() {
         entry(3, 0, "ten words", "ten words"),
     ];
     let utc = |ms: u64| (ms / DAY) as i64;
-    let output = stats_output(&entries, None, None, HistoryRetention::Week, NOW, utc).unwrap();
+    let output = stats_output(&entries, &[], None, None, HistoryRetention::Week, NOW, utc).unwrap();
     assert_eq!(output.stats.dictations, 2);
     assert_eq!(output.stats.words, 3);
     assert_eq!(output.stats.words_per_minute, Some(15));
@@ -143,6 +143,7 @@ fn history_stats_parse_sum_retained_entries_and_need_the_labs_toggle() {
     assert_eq!(json["words"], 3);
     let today = stats_output(
         &entries,
+        &[],
         Some("today"),
         None,
         HistoryRetention::Week,

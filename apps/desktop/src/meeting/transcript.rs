@@ -725,6 +725,11 @@ impl ChunkModel {
         if speechless(samples) {
             return Ok(Chunked::Done(Transcript::default()));
         }
+        // A meeting engine set to a cloud provider takes the chunk there; the
+        // local model is not loaded at all.
+        if let Some(provider) = crate::transcription::cloud::meeting_route() {
+            return transcribe_in_cloud(provider, samples).map(Chunked::Done);
+        }
         let engine = crate::transcription::engine::TranscriptionEngine::shared();
         if let Some(engine) = &engine
             && let Some(result) = Self::transcribe_shared(engine, samples)
@@ -809,6 +814,41 @@ impl ChunkModel {
                 Chunked::Unavailable(error) => return Err(error),
             }
         }
+    }
+}
+
+/// Transcribes a chunk with the meeting engine's cloud provider. The error
+/// is the provider's own words for the failure, as dictation shows them.
+fn transcribe_in_cloud(
+    provider: crate::transcription::cloud::Provider,
+    samples: &[f32],
+) -> Result<Transcript> {
+    let outcome =
+        crate::transcription::cloud::run_meeting(provider, samples).map_err(|error| eyre!(error))?;
+    Ok(cloud_transcript(outcome.text, outcome.segments, outcome.words))
+}
+
+/// A cloud reply as a transcript: word timings when the provider gave them,
+/// else segment timings, else the text alone (placed across the chunk).
+fn cloud_transcript(
+    text: String,
+    segments: Vec<crate::transcription::cloud::openrouter::Timed>,
+    words: Vec<crate::transcription::cloud::openrouter::Timed>,
+) -> Transcript {
+    let timed = |items: Vec<crate::transcription::cloud::openrouter::Timed>| {
+        items
+            .into_iter()
+            .map(|item| TranscriptSegment {
+                start_ms: item.start_ms,
+                end_ms: item.end_ms,
+                text: item.text,
+            })
+            .collect()
+    };
+    Transcript {
+        text,
+        segments: timed(segments),
+        words: timed(words),
     }
 }
 
@@ -2401,6 +2441,58 @@ mod tests {
             "a single repeated word is ambiguous and kept"
         );
         assert_eq!(strip_repeated_prefix("", "Hello there"), "Hello there");
+    }
+
+    #[test]
+    fn a_cloud_reply_becomes_a_transcript_with_word_then_segment_timings() {
+        use crate::transcription::cloud::openrouter::Timed;
+        let timed = |start_ms, end_ms, text: &str| Timed {
+            start_ms,
+            end_ms,
+            text: text.into(),
+        };
+        let both = cloud_transcript(
+            "Hello there.".into(),
+            vec![timed(0, 1_200, "Hello there.")],
+            vec![timed(0, 400, "Hello"), timed(400, 1_200, "there.")],
+        );
+        assert_eq!(both.text, "Hello there.");
+        assert_eq!(both.words.len(), 2);
+        assert_eq!(both.segments[0].end_ms, 1_200);
+        // Plain JSON has the text alone: it lands across the chunk.
+        let plain = cloud_transcript("Hello there.".into(), Vec::new(), Vec::new());
+        assert!(plain.segments.is_empty() && plain.words.is_empty());
+        let mut track = TrackTranscript::new(MeetingSource::System, 0);
+        let chunk = Chunk {
+            start: 0,
+            overlap: 0,
+            tail: 0,
+            samples: vec![0.1; 8 * RATE],
+        };
+        track.accept(&chunk, plain);
+        track.finish();
+        assert!(
+            track
+                .entries
+                .iter()
+                .any(|entry| entry.text == "Hello there." && entry.end_ms <= 8_000),
+            "{:?}",
+            track.entries
+        );
+    }
+
+    #[test]
+    fn a_speechless_chunk_makes_no_cloud_call() {
+        let _detector = crate::transcription::speech_detector::override_for_test(Some(false));
+        // A request would fail with no key; Done(empty) proves none was made.
+        crate::transcription::cloud::force_meeting_route(Some(
+            crate::transcription::cloud::Provider::OpenRouter,
+        ));
+        let mut model = ChunkModel::new(TranscriptionSelection::default());
+        let Chunked::Done(transcript) = model.transcribe(&[0.1; 16_000]).unwrap() else {
+            panic!("a speechless chunk must not be sent");
+        };
+        assert!(transcript.text.is_empty());
     }
 
     #[test]

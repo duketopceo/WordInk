@@ -368,6 +368,10 @@ impl HistoryStore {
             crate::transcription::cloud::clear_clips(
                 &parent.join(crate::transcription::cloud::FAILED_CLIPS_DIR),
             );
+            // So is the record of its cloud requests.
+            crate::transcription::cloud::request_log::clear(
+                &parent.join(crate::transcription::cloud::request_log::FILE),
+            );
         }
         if self.entries.is_empty() {
             return Ok(());
@@ -391,6 +395,13 @@ impl HistoryStore {
     }
 
     /// All entries, newest first.
+    /// The cloud request log beside this history, if it has a directory.
+    pub fn request_log_path(&self) -> Option<PathBuf> {
+        self.path
+            .parent()
+            .map(|parent| parent.join(crate::transcription::cloud::request_log::FILE))
+    }
+
     pub fn entries(&self) -> impl Iterator<Item = &HistoryEntry> {
         self.entries.iter().rev()
     }
@@ -579,8 +590,14 @@ impl History {
     pub fn dictation_stats(&self, window: usage::Window) -> usage::DictationStats {
         let now = now_ms();
         let since = window.since_ms(now, usage::local_day_start(now));
+        let store = self.synced();
+        let requests = store
+            .request_log_path()
+            .map(|path| crate::transcription::cloud::request_log::read(&path))
+            .unwrap_or_default();
         usage::dictation_stats(
-            self.synced().entries(),
+            store.entries(),
+            &requests,
             since,
             stats::local_day(now),
             stats::local_day,

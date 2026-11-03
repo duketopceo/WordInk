@@ -126,6 +126,11 @@ pub enum ControlCli {
     /// it in the running Hex (`hex history clear --yes`).
     #[command(args_conflicts_with_subcommands = true)]
     History(crate::control::transcript_cli::HistoryArgs),
+    /// Add up usage: words, audio, cost, and each engine's p50 and p95
+    /// transcription time, real-time factor, error rate and cost per audio
+    /// hour. Reads History and the cloud request log; Hex need not be
+    /// running.
+    Usage(crate::control::usage_cli::UsageArgs),
     /// Read and search recorded meetings without starting the app; record
     /// and stop them in the running Hex.
     Meetings {
@@ -636,6 +641,7 @@ pub fn run(command: ControlCli) -> u8 {
             ..
         }) => clear_history(yes, output),
         ControlCli::History(args) => report(crate::control::transcript_cli::history(&args)),
+        ControlCli::Usage(args) => report(crate::control::usage_cli::run(&args)),
         ControlCli::Meetings { command } => meetings(command),
         ControlCli::Mcp { meetings_dir } => report(mcp(meetings_dir)),
         ControlCli::Commands { command } => report(match command {
@@ -1442,7 +1448,8 @@ fn diagnostics() -> u8 {
         .ok()
         .map(|directory| directory.join("live.ndjson"));
     let diagnostics =
-        crate::diagnostics::Diagnostics::collect(route_for(engine, groq_key), log.as_deref());
+        crate::diagnostics::Diagnostics::collect(route_for(engine, groq_key), log.as_deref())
+            .with_requests(&crate::diagnostics::recent_requests());
     print!("{}", diagnostics.text());
     0
 }
