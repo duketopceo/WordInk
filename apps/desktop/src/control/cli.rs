@@ -174,6 +174,22 @@ pub enum ControlCli {
         /// live.ndjson event log.
         #[arg(long)]
         process: bool,
+        /// Read the debug log: every stage of a dictation with timings.
+        /// From the running WordInk it includes what was captured silently
+        /// before you asked, and with --follow streams new events live;
+        /// without one it tails debug.log (written in developer mode).
+        #[arg(long, conflicts_with = "process")]
+        debug: bool,
+        /// With --debug: show this level and below (info, debug or trace).
+        #[arg(long, requires = "debug", value_parser = parse_level)]
+        level: Option<crate::debug_log::DebugLevel>,
+        /// With --debug: only these subsystems (audio, bluetooth, vad,
+        /// engine, output, media, hotkeys, settings, updater); repeatable.
+        #[arg(long, requires = "debug", value_delimiter = ',')]
+        subsystem: Vec<String>,
+        /// With --debug: one JSON object per line, for machines.
+        #[arg(long, requires = "debug")]
+        json: bool,
         /// How many lines from the end.
         #[arg(short = 'n', long, default_value_t = 50)]
         lines: usize,
@@ -529,10 +545,29 @@ pub fn run(command: ControlCli) -> u8 {
         },
         ControlCli::Diagnostics => diagnostics(),
         ControlCli::Logs {
+            debug: true,
+            process: _,
+            level,
+            subsystem,
+            json,
+            lines,
+            follow,
+        } => debug_logs(
+            crate::debug_log::Filter {
+                level: level.unwrap_or(crate::debug_log::DebugLevel::Trace),
+                subsystems: subsystem,
+                search: String::new(),
+            },
+            json,
+            lines,
+            follow,
+        ),
+        ControlCli::Logs {
             process,
             lines,
             follow,
-        } => logs(process, lines, follow),
+            ..
+        } => logs(process, false, lines, follow),
         ControlCli::History(crate::control::transcript_cli::HistoryArgs {
             action: Some(crate::control::transcript_cli::HistoryAction::Clear { yes, output }),
             ..
@@ -1328,11 +1363,75 @@ fn suggestion_reason(suggestion: &crate::dictation::vocabulary_suggestions::Sugg
     }
 }
 
-fn logs(process: bool, lines: usize, follow: bool) -> u8 {
+fn parse_level(text: &str) -> Result<crate::debug_log::DebugLevel, String> {
+    crate::debug_log::DebugLevel::parse(text)
+        .ok_or_else(|| "expected info, debug or trace".to_owned())
+}
+
+/// `wordink logs --debug`: from the running WordInk, its buffered history
+/// and (with `follow`) new events as they happen, polled over the control
+/// socket by sequence number; with none running, the tail of `debug.log`.
+fn debug_logs(filter: crate::debug_log::Filter, json: bool, lines: usize, follow: bool) -> u8 {
+    use std::io::Write;
+    if !running() {
+        if json {
+            return fail("--json needs a running WordInk; debug.log holds text lines");
+        }
+        return logs(false, true, lines, follow);
+    }
+    let redactions = crate::diagnostics::Redactions::from_environment();
+    let mut after = 0;
+    let mut stdout = std::io::stdout().lock();
+    loop {
+        let request = ControlRequest::new(ControlCommand::DebugLogs {
+            after,
+            filter: filter.clone(),
+            limit: if after == 0 { lines.max(1) } else { 1_000 },
+        });
+        match call(request) {
+            Ok(ControlResponse {
+                reply: ControlReply::DebugLogs { events, next },
+                ..
+            }) => {
+                after = next;
+                for event in &events {
+                    let line = if json {
+                        crate::debug_log::format_json(event, &redactions)
+                    } else {
+                        crate::debug_log::format_text(event, &redactions)
+                    };
+                    if writeln!(stdout, "{line}").is_err() {
+                        return 0;
+                    }
+                }
+                let _ = stdout.flush();
+            }
+            Ok(ControlResponse {
+                reply: ControlReply::Error { message, .. },
+                ..
+            }) => return fail(&message),
+            Ok(_) => return fail("the running WordInk answered unexpectedly"),
+            Err(reply) => {
+                return match reply {
+                    ControlReply::Error { message, .. } => fail(&message),
+                    _ => fail("could not reach WordInk"),
+                };
+            }
+        }
+        if !follow {
+            return 0;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+fn logs(process: bool, debug: bool, lines: usize, follow: bool) -> u8 {
     use std::io::{BufRead, Seek, SeekFrom};
 
     let path = match crate::app_paths::logs_dir() {
-        Ok(directory) => directory.join(if process {
+        Ok(directory) => directory.join(if debug {
+            crate::debug_log::LOG_NAME
+        } else if process {
             "process.log"
         } else {
             "live.ndjson"
@@ -1341,6 +1440,11 @@ fn logs(process: bool, lines: usize, follow: bool) -> u8 {
     };
     let mut file = match std::fs::File::open(&path) {
         Ok(file) => file,
+        Err(_) if debug => {
+            return fail(
+                "there is no debug log yet; turn on developer mode with `wordink settings set developer_mode on`",
+            );
+        }
         Err(error) => return fail(&format!("couldn't read {}: {error}", path.display())),
     };
     let length = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);

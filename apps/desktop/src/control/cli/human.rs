@@ -31,6 +31,12 @@ pub(crate) fn print(reply: ControlReply, output: Output) -> u8 {
         ControlReply::ScrawlCaptures { captures } => print!("{}", human_captures(&captures)),
         ControlReply::ScrawlCaptureDetail(detail) => print!("{}", human_capture_detail(&detail)),
         ControlReply::ScrawlCaptureRoute { explanation } => print!("{explanation}"),
+        ControlReply::DebugLogs { events, .. } => {
+            let redactions = crate::diagnostics::Redactions::from_environment();
+            for event in &events {
+                println!("{}", crate::debug_log::format_text(event, &redactions));
+            }
+        }
         ControlReply::Transcript { text } => println!("{text}"),
         ControlReply::Error { message, .. } => eprintln!("hex: {message}"),
     }

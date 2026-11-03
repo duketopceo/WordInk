@@ -92,6 +92,10 @@ pub enum Pane {
     Meetings,
 }
 
+fn debug_log_limit() -> usize {
+    1_000
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "command", rename_all = "kebab-case")]
 pub enum ControlCommand {
@@ -162,6 +166,16 @@ pub enum ControlCommand {
         play: bool,
     },
     HistoryClear,
+    /// `wordink logs --debug`: the buffered debug events after `after` (0
+    /// for the history), as `filter` shows them, at most `limit`.
+    DebugLogs {
+        #[serde(default)]
+        after: u64,
+        #[serde(default)]
+        filter: crate::debug_log::Filter,
+        #[serde(default = "debug_log_limit")]
+        limit: usize,
+    },
     CheckForUpdates,
     /// Report Launch at Login, or turn it on or off.
     LaunchAtLogin {
@@ -254,6 +268,11 @@ pub enum ControlReply {
     ScrawlCaptureDetail(Box<ScrawlCaptureDetail>),
     ScrawlCaptureRoute {
         explanation: String,
+    },
+    /// `wordink logs --debug`: debug events, and the cursor to ask from next.
+    DebugLogs {
+        events: Vec<crate::debug_log::Event>,
+        next: u64,
     },
     /// `hex dictation stop --print`: the processed transcript.
     Transcript {

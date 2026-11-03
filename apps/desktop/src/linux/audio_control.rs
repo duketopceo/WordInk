@@ -150,6 +150,25 @@ enum Suppressed {
 }
 
 fn suppress(behavior: RecordingAudioBehavior) -> Suppressed {
+    let started = std::time::Instant::now();
+    let held = suppress_inner(behavior);
+    crate::debug_log::dlog!(
+        Info,
+        "media.suppress",
+        "other audio held back while dictating",
+        behavior = format!("{behavior:?}"),
+        outcome = match &held {
+            Suppressed::Muted(_) => "muted".to_owned(),
+            Suppressed::Ducked(_) => "ducked".to_owned(),
+            Suppressed::Paused(players) => format!("paused {} players", players.len()),
+            Suppressed::Nothing => "nothing".to_owned(),
+        },
+        ms = started.elapsed().as_millis() as u64,
+    );
+    held
+}
+
+fn suppress_inner(behavior: RecordingAudioBehavior) -> Suppressed {
     match behavior {
         RecordingAudioBehavior::Mute => match Mixer::find() {
             Some(mixer) if mixer.mute(true) => Suppressed::Muted(mixer),
@@ -170,6 +189,17 @@ fn suppress(behavior: RecordingAudioBehavior) -> Suppressed {
 }
 
 fn restore(held: Held) {
+    crate::debug_log::dlog!(
+        Info,
+        "media.restore",
+        "other audio put back",
+        was = match &held.audio {
+            Suppressed::Muted(_) => "muted",
+            Suppressed::Ducked(_) => "ducked",
+            Suppressed::Paused(_) => "paused",
+            Suppressed::Nothing => "nothing",
+        },
+    );
     match held.audio {
         Suppressed::Muted(mixer) => {
             mixer.mute(false);

@@ -113,6 +113,15 @@ fn close_when_idle(shared: Weak<Mutex<PortalSession>>) {
 }
 
 impl WaylandKeys {
+    /// How the shortcut is sent, for the debug log.
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Unchosen => "unchosen",
+            Self::Wtype => "wtype",
+            Self::Portal(_) => "portal",
+        }
+    }
+
     fn choose() -> Self {
         if offers_virtual_keyboard() && on_path("wtype") {
             Self::Wtype
@@ -344,7 +353,32 @@ impl LinuxPaster {
     }
 
     fn send_paste(&mut self, mime: Mime, bytes: &[u8]) -> Result<()> {
+        let started = Instant::now();
         let paste_with_shift = self.paste_with_shift.load(Ordering::Relaxed);
+        let result = self.send_paste_keys(mime, bytes, paste_with_shift);
+        let method = match &self.backend {
+            Backend::X11(_) => "x11",
+            Backend::Wayland(wayland) => wayland.label(),
+        };
+        crate::debug_log::dlog!(
+            Info,
+            "output.paste",
+            if result.is_ok() {
+                "pasted"
+            } else {
+                "paste failed"
+            },
+            method = method,
+            terminal_shortcut = paste_with_shift,
+            bytes = bytes.len(),
+            ok = result.is_ok(),
+            error = result.as_ref().err().map(|error| format!("{error:#}")),
+            ms = started.elapsed().as_millis() as u64,
+        );
+        result
+    }
+
+    fn send_paste_keys(&mut self, mime: Mime, bytes: &[u8], paste_with_shift: bool) -> Result<()> {
         match &mut self.backend {
             Backend::X11(paster) => {
                 paster.paste(mime, bytes, &self.stop, &self.keys, paste_with_shift)?

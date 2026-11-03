@@ -104,6 +104,19 @@ impl LinuxIndicator {
         }
     }
 
+    /// The microphone delivered nothing: the HUD shows a failure, and a
+    /// desktop notification says which microphone to check, since the HUD
+    /// may be hidden. `message` already names the device.
+    pub(crate) fn silent_input(&mut self, message: &str) {
+        // Not a cancelled capture: the failure stands.
+        self.recording = false;
+        self.next_job += 1;
+        let job_id = self.next_job;
+        self.send(HudEvent::Submitted { job_id });
+        self.send(HudEvent::JobFailed { job_id });
+        notify(message);
+    }
+
     /// Earbuds are switching to headset mode (or have finished): the HUD says
     /// so until their microphone is ready.
     pub(crate) fn earbuds_connecting(&self, connecting: bool) {
@@ -221,4 +234,26 @@ fn wayland_reachable() -> bool {
 /// compositor has no layer-shell.
 fn xwayland() -> bool {
     std::env::var_os("DISPLAY").is_some_and(|display| !display.is_empty())
+}
+
+/// A critical desktop notification, best effort and off this thread. Unit
+/// tests never raise one.
+fn notify(message: &str) {
+    if cfg!(test) {
+        return;
+    }
+    let message = message.to_owned();
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("notify-send")
+            .args([
+                "--urgency=critical",
+                "--app-name=WordInk",
+                "WordInk",
+                &message,
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    });
 }

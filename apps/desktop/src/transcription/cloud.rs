@@ -962,7 +962,30 @@ pub fn run_at(
     keep: Option<KeepClips<'_>>,
 ) -> Result<(String, UsageRecord), String> {
     let provider = call.provider;
-    match send(call, samples) {
+    let started = std::time::Instant::now();
+    let sent = send(call, samples);
+    // Request size and timing only: never the key, the audio or the words.
+    crate::debug_log::dlog!(
+        Info,
+        "engine.request",
+        if sent.is_ok() {
+            "cloud transcription answered"
+        } else {
+            "cloud transcription failed"
+        },
+        route = provider.id(),
+        model = call.model,
+        audio_ms = samples.len() as u64 * 1_000 / u64::from(SAMPLE_RATE),
+        request_bytes = samples.len() * 2 + 44,
+        ok = sent.is_ok(),
+        error = sent.as_ref().err().map(|error| error.message(provider)),
+        words = sent
+            .as_ref()
+            .ok()
+            .map(|(text, _)| text.split_whitespace().count()),
+        ms = started.elapsed().as_millis() as u64,
+    );
+    match sent {
         Ok((text, cost)) => {
             let audio_seconds = samples.len() as f64 / f64::from(SAMPLE_RATE);
             let usage = UsageRecord {

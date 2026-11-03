@@ -1919,6 +1919,16 @@ pub struct AppSettings {
     /// left in music mode for another microphone. Replaces
     /// `avoid_bluetooth_microphone` there.
     pub bluetooth_mic: BluetoothMic,
+    /// Developer mode: opens the live debug log view and persists the debug
+    /// log to a rotating file in the logs folder (`crate::debug_log`). The
+    /// events are captured in memory either way. Works in release builds.
+    pub developer_mode: bool,
+    /// The detail debug logs capture and persist; trace also turns on
+    /// per-chunk events.
+    pub debug_logging_level: crate::debug_log::DebugLevel,
+    /// Also lets the debug log hold transcript text. Off by default: the log
+    /// is for diagnosing, and a bug report should not carry what was said.
+    pub debug_logging_transcripts: bool,
     /// The names the user gave microphones, by device id. A device without
     /// an entry shows its cleaned-up name.
     pub device_names: std::collections::BTreeMap<String, String>,
@@ -2084,6 +2094,9 @@ impl Default for AppSettings {
             microphone: None,
             avoid_bluetooth_microphone: true,
             bluetooth_mic: BluetoothMic::default(),
+            developer_mode: false,
+            debug_logging_level: Default::default(),
+            debug_logging_transcripts: false,
             device_names: Default::default(),
             recording_audio_behavior: RecordingAudioBehavior::DoNothing,
             recording_duck_volume: 0.2,
@@ -2409,6 +2422,11 @@ impl AppSettings {
         );
         crate::audio::set_avoid_bluetooth_microphone(self.avoid_bluetooth_microphone);
         crate::audio::set_keep_bluetooth_quality(self.bluetooth_mic == BluetoothMic::KeepQuality);
+        crate::debug_log::configure(
+            self.developer_mode,
+            self.debug_logging_level,
+            self.debug_logging_transcripts,
+        );
         CUSTOM_TRANSFORMATIONS_ENABLED.store(
             transformations_used(&self.dictation_processing),
             Ordering::Release,

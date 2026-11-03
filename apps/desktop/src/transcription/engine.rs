@@ -383,8 +383,7 @@ impl Running {
 }
 
 /// What a local transcription says when the engine started with no model.
-pub(crate) const NO_LOCAL_MODEL: &str =
-    "no local model installed \u{2014} install one in Settings";
+pub(crate) const NO_LOCAL_MODEL: &str = "no local model installed \u{2014} install one in Settings";
 
 pub struct TranscriptionEngine {
     commands: Sender<Command>,
@@ -420,9 +419,8 @@ type Held = Arc<Mutex<Option<crate::transcription::models::TranscriptionSelectio
 
 /// A cloud transcription of one clip: its text and usage, or the text for
 /// the pill.
-pub(crate) type CloudRun = Box<
-    dyn FnOnce(&[f32]) -> Result<(String, crate::history::UsageRecord), String> + Send,
->;
+pub(crate) type CloudRun =
+    Box<dyn FnOnce(&[f32]) -> Result<(String, crate::history::UsageRecord), String> + Send>;
 
 /// A live stream for one capture. Feed it the capture's 16 kHz audio in order,
 /// then either [`TranscriptionEngine::finish`] or drop it to cancel.
@@ -559,14 +557,18 @@ impl TranscriptionEngine {
     fn start_with(model: Option<Model>) -> Result<Self> {
         let cloud_only = model.is_none();
         let streams = Arc::new(AtomicBool::new(
-            model.as_ref().is_some_and(|model| model.stream_options().is_some()),
+            model
+                .as_ref()
+                .is_some_and(|model| model.stream_options().is_some()),
         ));
         let (commands, receiver) = mpsc::channel();
         let requests = Arc::new(AtomicU64::new(0));
         let running = Running::default();
         let stalled = Arc::new(AtomicBool::new(false));
         let held = Held::new(Mutex::new(
-            model.as_ref().and_then(|model| model.gguf_selection().cloned()),
+            model
+                .as_ref()
+                .and_then(|model| model.gguf_selection().cloned()),
         ));
         let dictating = Arc::new(AtomicBool::new(false));
         let worker = Worker {
@@ -808,7 +810,20 @@ impl TranscriptionEngine {
         clip: Vec<f32>,
         offline: Offline,
     ) -> Result<PendingTranscript> {
-        if let Some(provider) = self.take_route() {
+        let routed = self.take_route();
+        crate::debug_log::dlog!(
+            Info,
+            "engine.route",
+            "transcription route chosen",
+            route = routed.map_or("local", |provider| provider.id()),
+            local_model = routed.is_none().then(|| format!(
+                "{:?}",
+                crate::app_settings::transcription_selection().1.model
+            )),
+            streamed = stream.is_some(),
+            samples = clip.len(),
+        );
+        if let Some(provider) = routed {
             // A stream opened before the engine changed ends unused.
             drop(stream);
             let language = crate::transcription::cloud::language_hint(
@@ -1429,7 +1444,10 @@ mod tests {
         while let Ok(command) = commands.try_recv() {
             saw_finish |= matches!(command, Command::Finish { .. });
         }
-        assert!(saw_finish, "the finish used begin's decision, not a fresh one");
+        assert!(
+            saw_finish,
+            "the finish used begin's decision, not a fresh one"
+        );
         // The decision is spent: the next capture decides again.
         assert_eq!(engine.take_route(), Some(Provider::Groq));
     }
@@ -1443,7 +1461,10 @@ mod tests {
             .unwrap()
             .wait()
             .unwrap_err();
-        assert_eq!(error, "no local model installed \u{2014} install one in Settings");
+        assert_eq!(
+            error,
+            "no local model installed \u{2014} install one in Settings"
+        );
     }
 
     #[test]
@@ -1483,7 +1504,10 @@ mod tests {
         assert_eq!(done.text, "hello world");
         assert_eq!(done.source, Source::Cloud);
         assert_eq!(done.usage, Some(expected));
-        assert!(commands.try_recv().is_err(), "the model's queue saw nothing");
+        assert!(
+            commands.try_recv().is_err(),
+            "the model's queue saw nothing"
+        );
     }
 
     #[test]

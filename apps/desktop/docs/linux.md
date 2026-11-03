@@ -326,6 +326,18 @@ and short taps never do; Hex restores only what it changed.
 Cancelling shortcut capture preserves the old binding unless the new binding
 has already been saved; listening resumes only if it was previously running.
 
+### Diagnosing a microphone that records nothing
+
+Hex records through ALSA's default device, then has PipeWire move its capture
+stream to the microphone you chose. Audio is dropped, not buffered, until the
+sound server confirms the move, and a move that never confirms fails the open
+instead of recording the wrong source. A capture that comes back all zeros ends
+as "<microphone> is silent, check the microphone" (with a notification) rather
+than a quiet discard. Every end of a dictation, including a discard, a silent
+input, a cancel and shutdown, puts Bluetooth earbuds back in their previous
+profile. For the details of a failure, turn on Developer mode (General,
+Advanced) or run `wordink logs --debug` (see `docs/cli.md`, Debug logs).
+
 ### Bluetooth headsets
 
 A Bluetooth headset can't play high-quality audio (A2DP) and use its

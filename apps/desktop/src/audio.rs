@@ -1,6 +1,7 @@
 pub(crate) mod bluetooth_mic;
 #[cfg(target_os = "macos")]
 pub(crate) mod browser_media;
+pub(crate) mod capture_gate;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) mod devices_cli;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
@@ -472,13 +473,23 @@ impl AudioInput {
             .iter()
             .position(|name| name.to_lowercase().contains(&query_lower))
             .ok_or_else(|| eyre!("microphone is unavailable: {query}"))?;
-        Self::open_device(devices[index].clone(), names[index].clone(), false)
+        Self::open_device(
+            devices[index].clone(),
+            names[index].clone(),
+            false,
+            capture_gate::CaptureGate::open(),
+        )
     }
 
     /// Opens `device`. `follows_default` marks cpal's default-input handle,
     /// whose Windows stream reports a default change as invalidation while
     /// it keeps running on the old device.
-    fn open_device(device: Device, device_name: String, follows_default: bool) -> Result<Self> {
+    fn open_device(
+        device: Device,
+        device_name: String,
+        follows_default: bool,
+        gate: capture_gate::CaptureGate,
+    ) -> Result<Self> {
         #[cfg(target_os = "macos")]
         watch_input_devices();
         let restart_generation = audio_service_restart_generation();
@@ -505,6 +516,7 @@ impl AudioInput {
                 sender,
                 reporter.clone(),
                 feed,
+                gate.clone(),
                 |sample: f32| sample,
             )?,
             SampleFormat::I16 => build_stream(
@@ -514,6 +526,7 @@ impl AudioInput {
                 sender,
                 reporter.clone(),
                 feed,
+                gate.clone(),
                 |sample: i16| sample as f32 / i16::MAX as f32,
             )?,
             SampleFormat::U16 => build_stream(
@@ -523,6 +536,7 @@ impl AudioInput {
                 sender,
                 reporter.clone(),
                 feed,
+                gate.clone(),
                 |sample: u16| sample as f32 / 32768.0 - 1.0,
             )?,
             format => return Err(eyre!("unsupported microphone sample format: {format:?}")),
@@ -1219,6 +1233,27 @@ impl Inventory {
         }
     }
 
+    /// Each input as `id|label|kind|flags`, for the debug log.
+    fn snapshot(&self) -> String {
+        (0..self.names.len())
+            .map(|index| {
+                format!(
+                    "{}|{}|{:?}{}{}",
+                    self.names[index],
+                    self.labels[index],
+                    self.kinds[index],
+                    if self.hidden[index] { "|hidden" } else { "" },
+                    if self.music_mode[index] {
+                        "|music-mode"
+                    } else {
+                        ""
+                    },
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
     /// `--device` by id, else by its name, ignoring case.
     fn id_for(&self, query: &str) -> String {
         if self.names.iter().any(|name| name == query) {
@@ -1244,8 +1279,21 @@ impl Inventory {
 /// to the system default.
 fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
     let host = cpal::default_host();
+    let inventory_started = Instant::now();
     let inventory = Inventory::read(&host)?;
     let route = current_route();
+    crate::debug_log::dlog!(
+        Debug,
+        "audio.inventory",
+        "input devices",
+        count = inventory.names.len(),
+        sound_server = inventory.sound_server,
+        default = inventory.default.as_ref().map(|(_, name)| name.as_str()),
+        selected = request.selected_device.as_deref(),
+        device_override = request.device_override.as_deref(),
+        devices = inventory.snapshot(),
+        read_ms = inventory_started.elapsed().as_millis() as u64,
+    );
     let device_override = request
         .device_override
         .as_deref()
@@ -1313,16 +1361,55 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
                 "the saved microphone is off while the lid is closed; using the system default"
             ),
         }
-        let mut input = AudioInput::open_device(device, name.clone(), follows_default)?;
+        // A routed open waits for the sound server to confirm the stream is on
+        // the chosen source before any of its audio is kept.
+        #[cfg(target_os = "linux")]
+        let gate = if route_to.is_some() {
+            capture_gate::CaptureGate::waiting()
+        } else {
+            capture_gate::CaptureGate::open()
+        };
+        #[cfg(not(target_os = "linux"))]
+        let gate = capture_gate::CaptureGate::open();
+        let opening = Instant::now();
+        let mut input =
+            AudioInput::open_device(device, name.clone(), follows_default, gate.clone())?;
         if let Some(index) = inventory.names.iter().position(|listed| *listed == name) {
             input.device_label = inventory.labels[index].clone();
         }
         input.selection = plan.selection;
+        crate::debug_log::dlog!(
+            Info,
+            "audio.open",
+            "microphone stream opened",
+            id = name,
+            label = input.device_label,
+            kind = inventory
+                .names
+                .iter()
+                .position(|listed| *listed == name)
+                .map(|index| format!("{:?}", inventory.kinds[index])),
+            via = "alsa default",
+            follows_default = follows_default,
+            route_node = route_to,
+            sample_rate = input.sample_rate,
+            open_ms = opening.elapsed().as_millis() as u64,
+        );
         #[cfg(target_os = "linux")]
         if let Some(node) = route_to {
             // Hex records through ALSA's default; the sound server moves the
-            // stream to the chosen source.
-            crate::linux::pulse::route_streams_to(node);
+            // stream to the chosen source, and nothing is kept until it has.
+            match crate::linux::pulse::route_confirmed(&node) {
+                Ok(()) => gate.confirm(),
+                Err(error) => {
+                    gate.fail();
+                    tracing::warn!(source = %node, %error, "could not put the capture stream on the chosen microphone");
+                    return Err(eyre!(
+                        "could not record from {}: {error}",
+                        input.device_label
+                    ));
+                }
+            }
         } else if follows_default && route.avoid_bluetooth && !inventory.sound_server {
             // The ALSA default cannot name another PipeWire source, so Linux
             // moves the opened stream off a Bluetooth default instead.
@@ -1747,6 +1834,7 @@ fn report_stream_error(sender: &SyncSender<String>, error: cpal::Error) {
     let _ = sender.try_send(error.to_string());
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_stream<T: SizedSample>(
     device: &Device,
     config: &StreamConfig,
@@ -1754,6 +1842,7 @@ fn build_stream<T: SizedSample>(
     sender: Sender<(Vec<f32>, CaptureInstant)>,
     reporter: StreamErrorReporter,
     mut feed: crate::audio::hex_microphone::CaptureFeed,
+    gate: capture_gate::CaptureGate,
     convert: impl Fn(T) -> f32 + Send + 'static,
 ) -> Result<Stream> {
     let sample_rate = config.sample_rate;
@@ -1761,6 +1850,10 @@ fn build_stream<T: SizedSample>(
         .build_input_stream(
             *config,
             move |data: &[T], info| {
+                // Audio from before the stream reached its device is dropped.
+                if !gate.passes(data.len() / channels) {
+                    return;
+                }
                 let captured_through = captured_through(info, data.len() / channels, sample_rate);
                 let mono_samples = mono(data, channels, |sample| convert(*sample));
                 feed.push(&mono_samples);

@@ -9,7 +9,9 @@
 //! drives it with `pactl`.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use crate::debug_log::dlog;
 
 use crate::app_settings::BluetoothMic;
 use crate::audio::sources::{Device, is_music_profile};
@@ -87,6 +89,32 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
     /// Puts the earbuds in headset mode and waits for their microphone.
     /// `device_id` is the earbuds' `bluez_input.<address>` id.
     pub fn begin(&mut self, card: &str, device_id: &str) -> Result<Begun, String> {
+        let started = Instant::now();
+        let result = self.begin_inner(card, device_id);
+        match &result {
+            Ok(begun) => dlog!(
+                Info,
+                "bluetooth.begin",
+                "headset flow ready",
+                card = card,
+                device = device_id,
+                outcome = format!("{begun:?}"),
+                total_ms = started.elapsed().as_millis() as u64,
+            ),
+            Err(error) => dlog!(
+                Info,
+                "bluetooth.begin",
+                "headset flow failed",
+                card = card,
+                device = device_id,
+                error = error,
+                total_ms = started.elapsed().as_millis() as u64,
+            ),
+        }
+        result
+    }
+
+    fn begin_inner(&mut self, card: &str, device_id: &str) -> Result<Begun, String> {
         if self
             .active
             .as_ref()
@@ -96,6 +124,14 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
             return Ok(Begun::Reused);
         }
         let state = self.controller.card(card)?;
+        dlog!(
+            Debug,
+            "bluetooth.card",
+            "card profile before",
+            card = card,
+            active = state.active,
+            headset_profiles = state.headset_profiles.join(","),
+        );
         let Some(active) = state.active.clone() else {
             return Err("the earbuds are not connected".into());
         };
@@ -117,10 +153,27 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
             previous: active,
         };
         self.marker.save(&marker);
+        dlog!(
+            Debug,
+            "bluetooth.marker",
+            "marker saved",
+            card = card,
+            previous = marker.previous,
+        );
         self.active = Some(marker);
         let mut last_error = String::from("the earbuds' microphone did not appear");
         for (attempt, profile) in state.headset_profiles.iter().enumerate() {
+            let switching = Instant::now();
             if let Err(error) = self.controller.set_profile(card, profile) {
+                dlog!(
+                    Info,
+                    "bluetooth.switch",
+                    "profile switch failed",
+                    card = card,
+                    profile = profile,
+                    attempt = attempt + 1,
+                    error = error,
+                );
                 last_error = error;
                 continue;
             }
@@ -129,7 +182,18 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
             } else {
                 FALLBACK_WAIT
             };
-            if self.wait_for_source(device_id, wait) {
+            let appeared = self.wait_for_source(device_id, wait);
+            dlog!(
+                Debug,
+                "bluetooth.wait",
+                "waited for the earbuds' microphone",
+                profile = profile,
+                attempt = attempt + 1,
+                appeared = appeared,
+                limit_ms = wait.as_millis() as u64,
+                ms = switching.elapsed().as_millis() as u64,
+            );
+            if appeared {
                 return Ok(Begun::Switched);
             }
             last_error = format!("the earbuds' microphone did not appear in {profile}");
@@ -159,9 +223,27 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
         let Some(marker) = self.active.clone() else {
             return;
         };
+        let started = Instant::now();
         if self.put_back(&marker) {
             self.active = None;
             self.marker.clear();
+            dlog!(
+                Info,
+                "bluetooth.restore",
+                "earbuds back in their previous profile",
+                card = marker.card,
+                profile = marker.previous,
+                ms = started.elapsed().as_millis() as u64,
+            );
+        } else {
+            dlog!(
+                Info,
+                "bluetooth.restore",
+                "restore FAILED; the marker stays for the next start",
+                card = marker.card,
+                profile = marker.previous,
+                ms = started.elapsed().as_millis() as u64,
+            );
         }
         // On failure the switch stays recorded: `is_active` remains true, a
         // later restore retries, and the marker covers the next start.
@@ -172,11 +254,18 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
             if attempt > 0 {
                 self.controller.pause(RESTORE_RETRY);
             }
-            if self
-                .controller
-                .set_profile(&marker.card, &marker.previous)
-                .is_ok()
-            {
+            let result = self.controller.set_profile(&marker.card, &marker.previous);
+            dlog!(
+                Debug,
+                "bluetooth.restore",
+                "restore attempt",
+                card = marker.card,
+                profile = marker.previous,
+                attempt = attempt + 1,
+                ok = result.is_ok(),
+                error = result.as_ref().err(),
+            );
+            if result.is_ok() {
                 return true;
             }
         }
@@ -188,6 +277,13 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
         let Some(marker) = self.marker.load() else {
             return;
         };
+        dlog!(
+            Info,
+            "bluetooth.marker",
+            "stale marker from an earlier run",
+            card = marker.card,
+            previous = marker.previous,
+        );
         match self.controller.card(&marker.card) {
             // The card is in a headset mode we put it in, or never left music mode.
             Ok(state) => {

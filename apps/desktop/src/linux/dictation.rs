@@ -319,6 +319,9 @@ pub(crate) fn run(
     let mut headset = crate::linux::headset::HeadsetFlow::start();
     // The earbuds are switching, so the first chunk is still to come.
     let mut headset_connecting = false;
+    // When the press that is waiting on the microphone began, for latency.
+    let mut press_at: Option<Instant> = None;
+    let mut headset_began: Option<Instant> = None;
     let paste_with_shift = Arc::new(AtomicBool::new(settings.paste_with_shift));
     let worker_paste_with_shift = paste_with_shift.clone();
     let paste_keys = hotkey_status.keys();
@@ -365,6 +368,15 @@ pub(crate) fn run(
                 );
                 let usage = transcribed.usage;
                 let text = transcribed.text;
+                crate::debug_log::dlog!(
+                    Info,
+                    "engine.transcript",
+                    "transcript ready",
+                    source = transcribed.source.label(),
+                    inference_ms = inference_ms,
+                    chars = text.chars().count(),
+                    text = crate::debug_log::transcript(&text),
+                );
                 if text.is_empty() {
                     if let Some(print) = job.print.take() {
                         print.send(PrintedTranscript::NoSpeech);
@@ -631,7 +643,7 @@ pub(crate) fn run(
                 raw,
                 ..
             } = finishing.take().expect("a release is finishing");
-            submit_capture(
+            let outcome = submit_capture(
                 &mut capture,
                 ended_at,
                 &engine,
@@ -640,11 +652,14 @@ pub(crate) fn run(
                 &mut pending,
                 print,
                 raw,
+                &device_label,
             )?;
             // Earbuds in headset mode keep media paused until the words
-            // are pasted; anything else resumes now.
-            if !headset.as_ref().is_some_and(|flow| flow.is_active()) {
-                suppressor.restore();
+            // are pasted; anything else resumes now. A capture with nothing
+            // to paste resumes them here, since no result will come back.
+            settle_after_submit(outcome, &suppressor, &mut headset);
+            if outcome == Submitted::Silent {
+                indicator.silent_input(&silent_message(&device_label));
             }
             if release_while_idle && !timeline.wants_audio() {
                 input.close();
@@ -676,6 +691,16 @@ pub(crate) fn run(
                         .is_some_and(|host| host.recording_since(&timeline).is_some()) => {}
                 HotkeyEvent::Start { raw } if !capture.is_recording() && !start_pending => {
                     recording_raw = raw;
+                    press_at = Some(Instant::now());
+                    crate::debug_log::dlog!(
+                        Info,
+                        "hotkeys.start",
+                        "dictation shortcut pressed",
+                        raw = raw,
+                        microphone_ready = audio_ready,
+                        released_between = release_while_idle,
+                        earbuds = headset.as_ref().is_some_and(|flow| flow.is_active()),
+                    );
                     if audio_ready {
                         start_capture(&mut capture, captured_through, || {
                             feedback::play_provisional_start();
@@ -693,6 +718,7 @@ pub(crate) fn run(
                                 // their microphone exists.
                                 suppressor.suppress();
                                 flow.begin(id);
+                                headset_began = Some(Instant::now());
                                 headset_connecting = true;
                                 indicator.earbuds_connecting(true);
                             }
@@ -706,6 +732,13 @@ pub(crate) fn run(
                     emit_state(&mut events, VoiceState::Dictating, &device_label)?;
                 }
                 HotkeyEvent::Finish | HotkeyEvent::Cancel if start_pending => {
+                    crate::debug_log::dlog!(
+                        Info,
+                        "hotkeys.release",
+                        "released before the microphone produced audio",
+                        cancel = action == HotkeyEvent::Cancel,
+                        held_ms = press_at.map(|at| at.elapsed().as_millis() as u64),
+                    );
                     // Released before the opening microphone produced audio:
                     // nothing was captured.
                     start_pending = false;
@@ -731,6 +764,12 @@ pub(crate) fn run(
                     emit_state(&mut events, active_state(false, pending), &device_label)?;
                 }
                 HotkeyEvent::Finish if capture.is_recording() => {
+                    crate::debug_log::dlog!(
+                        Info,
+                        "hotkeys.release",
+                        "dictation shortcut released",
+                        held_ms = press_at.map(|at| at.elapsed().as_millis() as u64),
+                    );
                     finishing = Some(Finishing {
                         raw: recording_raw,
                         ..begin_finishing(&capture, captured_through, print.take(), || {
@@ -765,6 +804,7 @@ pub(crate) fn run(
                     }
                 }
                 HotkeyEvent::Cancel if capture.is_recording() => {
+                    crate::debug_log::dlog!(Info, "hotkeys.cancel", "recording cancelled");
                     capture.cancel();
                     feedback::retract_start();
                     resume_audio(&suppressor, &mut headset);
@@ -833,6 +873,15 @@ pub(crate) fn run(
                 continue;
             }
             indicator.earbuds_connecting(false);
+            crate::debug_log::dlog!(
+                Info,
+                "bluetooth.event",
+                "earbuds flow answered",
+                ready = matches!(event, crate::linux::headset::Event::Ready),
+                switch_ms = headset_began
+                    .take()
+                    .map(|at| at.elapsed().as_millis() as u64),
+            );
             match event {
                 crate::linux::headset::Event::Ready => input.request_open(),
                 crate::linux::headset::Event::Failed(error) => {
@@ -865,6 +914,15 @@ pub(crate) fn run(
                     capture = DictationCapture::new(input.sample_rate());
                     audio_ready = true;
                     device_label = shown_label(&settings, &input);
+                    crate::debug_log::dlog!(
+                        Info,
+                        "audio.first_chunk",
+                        "first audio arrived",
+                        device = device_label,
+                        sample_rate = input.sample_rate(),
+                        chunk_samples = samples.len(),
+                        since_press_ms = press_at.map(|at| at.elapsed().as_millis() as u64),
+                    );
                     if start_pending {
                         // The on-demand open finished while the shortcut is
                         // held: recording starts here, without pre-roll.
@@ -874,6 +932,16 @@ pub(crate) fn run(
                         });
                     }
                 }
+                crate::debug_log::dlog!(
+                    Trace,
+                    "audio.chunk",
+                    "chunk",
+                    samples = samples.len(),
+                    peak = samples
+                        .iter()
+                        .fold(0.0_f32, |peak, sample| peak.max(sample.abs())),
+                    recording = capture.is_recording(),
+                );
                 crate::audio::input_level::record(&samples);
                 timeline.feed(&samples, input.sample_rate(), captured_through);
                 capture.ingest(&samples, captured_through);
@@ -889,6 +957,12 @@ pub(crate) fn run(
             }
             RecoveringAudioInputEvent::Timeout => {}
             RecoveringAudioInputEvent::Interrupted => {
+                crate::debug_log::dlog!(
+                    Info,
+                    "audio.stream",
+                    "microphone stream interrupted",
+                    recording = capture.is_recording(),
+                );
                 timeline.restart();
                 // A release still in its tail finishes with the audio it has.
                 if let Some(release) = &mut finishing {
@@ -924,6 +998,13 @@ pub(crate) fn run(
                 )?;
             }
             RecoveringAudioInputEvent::OpenFailed(error) => {
+                crate::debug_log::dlog!(
+                    Info,
+                    "audio.open",
+                    "opening the microphone failed",
+                    error = error,
+                    since_press_ms = press_at.map(|at| at.elapsed().as_millis() as u64),
+                );
                 if !release_while_idle {
                     return Err(eyre!("could not open the microphone: {error}"));
                 }
@@ -1023,6 +1104,45 @@ fn begin_finishing(
     }
 }
 
+/// What ending a capture did with it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Submitted {
+    /// Sent to transcription; its result will arrive.
+    Queued,
+    /// A short tap, or audio with no speech in it.
+    Discarded,
+    /// The microphone delivered no signal at all: reported as an error.
+    Silent,
+    /// The transcription queue refused it.
+    Failed,
+}
+
+/// Puts other audio, and any earbuds in headset mode, back after a capture
+/// that ended. A queued one keeps earbuds in headset mode until its words are
+/// pasted (the result restores them); every other end has no result coming,
+/// so it restores them here.
+fn settle_after_submit(
+    outcome: Submitted,
+    suppressor: &crate::linux::audio_control::AudioSuppressor,
+    headset: &mut Option<crate::linux::headset::HeadsetFlow>,
+) {
+    match outcome {
+        Submitted::Queued => {
+            if !headset.as_ref().is_some_and(|flow| flow.is_active()) {
+                suppressor.restore();
+            }
+        }
+        Submitted::Discarded | Submitted::Silent | Submitted::Failed => {
+            resume_audio(suppressor, headset)
+        }
+    }
+}
+
+/// The message for a microphone that recorded nothing.
+fn silent_message(device: &str) -> String {
+    format!("{device} is silent \u{2014} check the microphone")
+}
+
 #[allow(clippy::too_many_arguments)]
 fn submit_capture(
     capture: &mut DictationCapture,
@@ -1033,25 +1153,85 @@ fn submit_capture(
     pending: &mut usize,
     print: Option<PrintReply>,
     raw: bool,
-) -> Result<()> {
+    device: &str,
+) -> Result<Submitted> {
     let no_speech = |print: Option<PrintReply>| {
         if let Some(print) = print {
             print.send(PrintedTranscript::NoSpeech);
         }
     };
-    match capture.finish_with_tail(ended_at, POST_RELEASE_TAIL) {
+    let outcome = match capture.finish_with_tail(ended_at, POST_RELEASE_TAIL) {
         Finish::Discard => {
             // A short tap or chord withdraws the start tone of its press.
             feedback::retract_start();
             no_speech(print);
-            events.dictation(DictationPhase::Discarded, "")?
+            events.dictation(DictationPhase::Discarded, "")?;
+            crate::debug_log::dlog!(
+                Info,
+                "dictation.end",
+                "discarded",
+                reason = "too short (a tap or chord, under the minimum hold)",
+                device = device,
+            );
+            Submitted::Discarded
+        }
+        Finish::Transcribe(clip) if clip.is_dead_input() => {
+            let levels = clip.levels();
+            let message = silent_message(device);
+            if let Some(print) = print {
+                print.send(PrintedTranscript::Failed(message.clone()));
+            }
+            crate::debug_log::dlog!(
+                Info,
+                "dictation.end",
+                "silent input: the microphone delivered no signal",
+                reason = "silent input",
+                device = device,
+                samples = levels.samples,
+                peak = levels.peak,
+                rms = levels.rms,
+                zero_fraction = levels.zero_fraction,
+            );
+            tracing::warn!(
+                device,
+                peak = levels.peak,
+                "the microphone recorded only silence"
+            );
+            fail(events, message)?;
+            Submitted::Silent
         }
         Finish::Transcribe(clip) if clip.is_near_silent() => {
             no_speech(print);
-            events.dictation(DictationPhase::Discarded, "")?
+            events.dictation(DictationPhase::Discarded, "")?;
+            let levels = clip.levels();
+            crate::debug_log::dlog!(
+                Info,
+                "dictation.end",
+                "discarded",
+                reason = "no speech (below the silence gate, or none detected)",
+                device = device,
+                samples = levels.samples,
+                peak = levels.peak,
+                rms = levels.rms,
+                loudest_window_dbfs = levels.loudest_window_dbfs,
+            );
+            Submitted::Discarded
         }
         Finish::Transcribe(mut clip) => {
             let audio_ms = clip.duration_ms();
+            let levels = clip.levels();
+            crate::debug_log::dlog!(
+                Debug,
+                "audio.capture",
+                "capture summary",
+                device = device,
+                audio_ms = audio_ms,
+                samples = levels.samples,
+                rms = levels.rms,
+                peak = levels.peak,
+                zero_fraction = levels.zero_fraction,
+                loudest_window_dbfs = levels.loudest_window_dbfs,
+            );
             let job = OutputJob::Dictation(Job {
                 transcript: engine.finish(clip.take_stream(), clip.into_transcription_samples())?,
                 audio_ms,
@@ -1062,15 +1242,19 @@ fn submit_capture(
                 Ok(()) => {
                     *pending += 1;
                     events.dictation(DictationPhase::Transcribing, "")?;
+                    Submitted::Queued
                 }
-                Err(TrySendError::Full(_)) => fail(events, "dictation queue is full")?,
+                Err(TrySendError::Full(_)) => {
+                    fail(events, "dictation queue is full")?;
+                    Submitted::Failed
+                }
                 Err(TrySendError::Disconnected(_)) => {
                     return Err(eyre!("dictation worker is unavailable"));
                 }
             }
         }
-    }
-    Ok(())
+    };
+    Ok(outcome)
 }
 
 fn active_state(recording: bool, pending: usize) -> VoiceState {
@@ -1091,6 +1275,13 @@ fn fail(events: &EventLog, error: impl Into<String>) -> Result<()> {
 }
 
 fn emit_state(events: &mut EventLog, state: VoiceState, device: &str) -> Result<()> {
+    crate::debug_log::dlog!(
+        Info,
+        "app.state",
+        "listener state",
+        state = format!("{state:?}"),
+        device = device,
+    );
     events.emit(&VoiceEvent::State {
         timestamp_ms: now_ms(),
         state,
@@ -1128,6 +1319,18 @@ mod tests {
         toggle: bool,
         seconds: u64,
     ) -> CaptureInstant {
+        record_at(capture, engine, toggle, seconds, 0.1)
+    }
+
+    /// [`record`] at a tone `amplitude`; 0 is a microphone that delivers
+    /// nothing but zeros.
+    fn record_at(
+        capture: &mut DictationCapture,
+        engine: &TranscriptionEngine,
+        toggle: bool,
+        seconds: u64,
+        amplitude: f32,
+    ) -> CaptureInstant {
         let start = capture_time();
         start_capture(capture, start, || {});
         stream_when_due(capture, engine, toggle);
@@ -1135,7 +1338,7 @@ mod tests {
         for _ in 0..seconds * 10 {
             through = through + Duration::from_millis(100);
             let tone = (0..1_600)
-                .map(|index| 0.1 * (index as f32 * 0.05).sin())
+                .map(|index| amplitude * (index as f32 * 0.05).sin())
                 .collect::<Vec<_>>();
             capture.ingest(&tone, through);
             capture.become_intentional(through);
@@ -1267,6 +1470,7 @@ mod tests {
             &mut pending,
             None,
             false,
+            "Test microphone",
         )
         .unwrap();
         assert_eq!(pending, 1);
@@ -1337,6 +1541,7 @@ mod tests {
             &mut pending,
             finishing.print,
             false,
+            "Test microphone",
         )
         .unwrap();
 
@@ -1370,6 +1575,7 @@ mod tests {
             &mut pending,
             None,
             false,
+            "Test microphone",
         )
         .unwrap();
         assert!(queued.try_recv().is_ok());
@@ -1415,5 +1621,234 @@ mod tests {
         assert!(result.is_err());
         assert!(stopped.load(Ordering::Acquire));
         assert!(finished.load(Ordering::Acquire));
+    }
+
+    fn submit_recorded(amplitude: f32) -> (Submitted, Vec<String>, usize) {
+        let (engine, commands) = TranscriptionEngine::for_test();
+        let (mut events, path) = event_log();
+        let (jobs, queued) = mpsc::sync_channel(2);
+        let mut capture = DictationCapture::new(16_000);
+        let released = record_at(&mut capture, &engine, true, 2, amplitude);
+        let mut pending = 0;
+        let (print, printed) = PrintReply::channel();
+        let outcome = submit_capture(
+            &mut capture,
+            released.checked_sub(POST_RELEASE_TAIL).unwrap(),
+            &engine,
+            &jobs,
+            &mut events,
+            &mut pending,
+            Some(print),
+            false,
+            "Between 3ANC",
+        )
+        .unwrap();
+        assert_eq!(queued.try_recv().is_ok(), outcome == Submitted::Queued);
+        let _ = commands;
+        drop(events);
+        let log = std::fs::read_to_string(&path).unwrap_or_default();
+        let _ = std::fs::remove_file(path);
+        let printed = match printed.try_recv() {
+            Ok(PrintedTranscript::Failed(message)) => vec![message],
+            Ok(PrintedTranscript::NoSpeech) => vec!["no speech".to_owned()],
+            _ => Vec::new(),
+        };
+        (outcome, printed, log.matches("is silent").count())
+    }
+
+    #[test]
+    fn a_capture_of_all_zeros_ends_as_a_silent_input_error_not_a_discard() {
+        let (outcome, printed, silent_events) = submit_recorded(0.0);
+        assert_eq!(outcome, Submitted::Silent);
+        assert_eq!(
+            printed,
+            ["Between 3ANC is silent \u{2014} check the microphone"]
+        );
+        assert_eq!(silent_events, 1, "the event log carries the error");
+    }
+
+    #[test]
+    fn near_silent_room_noise_is_a_discard_not_a_silent_input() {
+        // -66 dBFS: a live microphone in a quiet room.
+        let (outcome, printed, silent_events) = submit_recorded(0.000_7);
+        assert_eq!(outcome, Submitted::Discarded);
+        assert_eq!(printed, ["no speech"]);
+        assert_eq!(silent_events, 0);
+    }
+
+    #[test]
+    fn speech_is_queued() {
+        assert_eq!(submit_recorded(0.1).0, Submitted::Queued);
+    }
+
+    #[test]
+    fn the_silent_message_names_the_device() {
+        assert_eq!(
+            silent_message("Kit Pods"),
+            "Kit Pods is silent \u{2014} check the microphone"
+        );
+    }
+
+    mod earbuds {
+        use super::*;
+        use crate::app_settings::RecordingAudioBehavior;
+        use crate::audio::bluetooth_mic::{CardState, Controller, Machine, Marker, MarkerStore};
+        use crate::linux::headset::{Event, HeadsetFlow};
+        use std::sync::Mutex;
+
+        const CARD: &str = "bluez_card.00_11_22_33_44_55";
+        const ID: &str = "bluez_input.00:11:22:33:44:55";
+
+        #[derive(Default)]
+        struct World {
+            profile: String,
+            polls: u32,
+            marker: Option<Marker>,
+            calls: Vec<String>,
+        }
+
+        #[derive(Clone)]
+        struct Fake(Arc<Mutex<World>>);
+
+        impl Controller for Fake {
+            fn card(&mut self, _: &str) -> Result<CardState, String> {
+                Ok(CardState {
+                    active: Some(self.0.lock().unwrap().profile.clone()),
+                    headset_profiles: vec!["headset-head-unit".into()],
+                })
+            }
+            fn set_profile(&mut self, _: &str, profile: &str) -> Result<(), String> {
+                let mut world = self.0.lock().unwrap();
+                world.calls.push(profile.to_owned());
+                world.profile = profile.to_owned();
+                world.polls = 0;
+                Ok(())
+            }
+            fn source_present(&mut self, _: &str) -> bool {
+                let mut world = self.0.lock().unwrap();
+                world.polls += 1;
+                world.profile == "headset-head-unit" && world.polls > 2
+            }
+            fn pause(&mut self, _: Duration) {}
+        }
+
+        struct Store(Arc<Mutex<World>>);
+
+        impl MarkerStore for Store {
+            fn load(&mut self) -> Option<Marker> {
+                self.0.lock().unwrap().marker.clone()
+            }
+            fn save(&mut self, marker: &Marker) {
+                self.0.lock().unwrap().marker = Some(marker.clone());
+            }
+            fn clear(&mut self) {
+                self.0.lock().unwrap().marker = None;
+            }
+        }
+
+        fn earbuds() -> (Arc<Mutex<World>>, HeadsetFlow) {
+            let world = Arc::new(Mutex::new(World {
+                profile: "a2dp-sink".into(),
+                ..World::default()
+            }));
+            let backend = world.clone();
+            let mut flow = HeadsetFlow::with_backend(
+                move || Machine::new(Fake(backend.clone()), Store(backend)),
+                |_| Ok(CARD.to_owned()),
+            )
+            .expect("the worker starts");
+            flow.begin(ID);
+            let waiting = Instant::now();
+            loop {
+                match flow.poll() {
+                    Some(Event::Ready) => break,
+                    Some(Event::Failed(error)) => panic!("{error}"),
+                    None if waiting.elapsed() > Duration::from_secs(5) => panic!("never ready"),
+                    None => thread::sleep(Duration::from_millis(5)),
+                }
+            }
+            assert_eq!(world.lock().unwrap().profile, "headset-head-unit");
+            assert!(flow.is_active());
+            (world, flow)
+        }
+
+        fn wait_for(world: &Arc<Mutex<World>>, profile: &str) {
+            let waiting = Instant::now();
+            while world.lock().unwrap().profile != profile {
+                assert!(
+                    waiting.elapsed() < Duration::from_secs(5),
+                    "the earbuds stayed in {}",
+                    world.lock().unwrap().profile
+                );
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
+
+        fn settle(outcome: Submitted) -> (Arc<Mutex<World>>, Option<HeadsetFlow>) {
+            let (world, flow) = earbuds();
+            let mut flow = Some(flow);
+            let suppressor = crate::linux::audio_control::AudioSuppressor::new(
+                RecordingAudioBehavior::DoNothing,
+            );
+            settle_after_submit(outcome, &suppressor, &mut flow);
+            (world, flow)
+        }
+
+        #[test]
+        fn a_discarded_capture_puts_the_earbuds_back_in_music_mode() {
+            let (world, flow) = settle(Submitted::Discarded);
+            wait_for(&world, "a2dp-sink");
+            assert!(
+                world.lock().unwrap().marker.is_none(),
+                "the marker is cleared"
+            );
+            assert!(!flow.unwrap().is_active());
+        }
+
+        #[test]
+        fn a_silent_capture_puts_the_earbuds_back_in_music_mode() {
+            let (world, _flow) = settle(Submitted::Silent);
+            wait_for(&world, "a2dp-sink");
+            assert!(world.lock().unwrap().marker.is_none());
+        }
+
+        #[test]
+        fn a_refused_capture_puts_the_earbuds_back_in_music_mode() {
+            let (world, _flow) = settle(Submitted::Failed);
+            wait_for(&world, "a2dp-sink");
+        }
+
+        #[test]
+        fn a_queued_capture_keeps_the_earbuds_in_headset_mode_until_its_words_paste() {
+            let (world, mut flow) = settle(Submitted::Queued);
+            assert!(flow.as_ref().unwrap().is_active());
+            assert_eq!(world.lock().unwrap().profile, "headset-head-unit");
+            // The pasted result then restores them, as the listener does.
+            let suppressor = crate::linux::audio_control::AudioSuppressor::new(
+                RecordingAudioBehavior::DoNothing,
+            );
+            resume_audio(&suppressor, &mut flow);
+            wait_for(&world, "a2dp-sink");
+        }
+
+        #[test]
+        fn a_cancel_or_failure_restores_through_resume_audio() {
+            let (world, flow) = earbuds();
+            let suppressor = crate::linux::audio_control::AudioSuppressor::new(
+                RecordingAudioBehavior::DoNothing,
+            );
+            let mut flow = Some(flow);
+            resume_audio(&suppressor, &mut flow);
+            wait_for(&world, "a2dp-sink");
+            assert!(!flow.unwrap().is_active());
+        }
+
+        #[test]
+        fn shutdown_restores_the_earbuds_before_the_listener_exits() {
+            let (world, flow) = earbuds();
+            drop(flow);
+            assert_eq!(world.lock().unwrap().profile, "a2dp-sink");
+            assert!(world.lock().unwrap().marker.is_none());
+        }
     }
 }

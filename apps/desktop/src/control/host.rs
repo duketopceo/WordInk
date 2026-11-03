@@ -203,8 +203,16 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
         }
         ControlCommand::OnboardingReset => host.onboarding_reset(),
         ControlCommand::HistoryClear => reply(clear_history(host)),
-        ControlCommand::CheckForUpdates => reply(host.state().and_then(|state| {
-            match state.update {
+        ControlCommand::DebugLogs {
+            after,
+            filter,
+            limit,
+        } => {
+            let (events, next) = crate::debug_log::since(after, &filter, limit.clamp(1, 5_000));
+            ControlReply::DebugLogs { events, next }
+        }
+        ControlCommand::CheckForUpdates => {
+            reply(host.state().and_then(|state| match state.update {
                 DesktopUpdateStatus::Managed => Err(ControlError::new(
                     "unsupported",
                     "updates are managed by your organization",
@@ -215,11 +223,11 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
                     "unavailable",
                     "this WordInk build doesn't update itself",
                 )),
-                _ => host
-                    .check_for_updates()
-                    .map(|()| ControlReply::done("Checking for updates; WordInk shows what it finds")),
-            }
-        })),
+                _ => host.check_for_updates().map(|()| {
+                    ControlReply::done("Checking for updates; WordInk shows what it finds")
+                }),
+            }))
+        }
         ControlCommand::LaunchAtLogin { enabled } => launch_at_login(host, enabled),
         ControlCommand::VocabularyList => reply(load().map(|settings| ControlReply::Vocabulary {
             entries: settings.vocabulary,
@@ -347,6 +355,13 @@ fn set_setting(host: &dyn Host, key: &str, value: &str) -> Result<ControlReply, 
         return Err(error);
     }
     let before = load()?;
+    // The key only: values can be names, paths or secrets.
+    crate::debug_log::dlog!(
+        Info,
+        "settings.change",
+        "setting changed over the control socket",
+        key = key
+    );
     let change = settings::apply(&before, key, value, &host.shortcut_rules())?;
     commit(host, &before, change, || {
         format!("{key} is already {value}")
@@ -359,6 +374,12 @@ fn apply_settings(
     values: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<ControlReply, ControlError> {
     let before = load()?;
+    crate::debug_log::dlog!(
+        Info,
+        "settings.change",
+        "settings changed over the control socket",
+        keys = values.keys().cloned().collect::<Vec<_>>().join(","),
+    );
     let change = settings::apply_all(&before, values, &host.shortcut_rules())?;
     commit(host, &before, change, || {
         "Every setting already has its value".into()

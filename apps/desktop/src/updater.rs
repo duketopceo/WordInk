@@ -357,6 +357,7 @@ impl Updater {
     /// Checks now instead of at the next interval. A staged update stays
     /// offered while the check looks for a newer release.
     pub fn check_now(&self) {
+        crate::debug_log::dlog!(Info, "updater.check", "update check requested");
         let mut state = lock(&self.shared.state);
         match &*state {
             State::Disabled(_) | State::Applied | State::Downloading => return,
@@ -586,6 +587,13 @@ fn run(shared: &Shared, method: &Method) {
             }
             Err(error) => {
                 tracing::warn!(error = %format!("{error:#}"), "update check failed");
+                crate::debug_log::dlog!(
+                    Info,
+                    "updater.check",
+                    "update check failed",
+                    error = format!("{error:#}"),
+                    failures = failures + 1,
+                );
                 failures = (failures + 1).min(8);
                 let next = if lock(&shared.staged).is_some() {
                     State::Ready
@@ -675,6 +683,12 @@ fn check(
     };
     let decision = protocol::decide(APP, ARTIFACT, &channel, &manifest, &install);
     tracing::info!(?decision, "update decision");
+    crate::debug_log::dlog!(
+        Info,
+        "updater.decision",
+        "update decision",
+        decision = format!("{decision:?}"),
+    );
     match decision {
         Decision::Reject { reason } => Err(eyre!("the update manifest was rejected: {reason}")),
         Decision::None { .. } | Decision::Install { .. }
