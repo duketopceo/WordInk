@@ -574,6 +574,20 @@ impl History {
         usage::summarize(self.synced().entries(), since)
     }
 
+    /// The personal dictation numbers of `window`, over every retained
+    /// entry.
+    pub fn dictation_stats(&self, window: usage::Window) -> usage::DictationStats {
+        let now = now_ms();
+        let since = window.since_ms(now, usage::local_day_start(now));
+        usage::dictation_stats(
+            self.synced().entries(),
+            since,
+            stats::local_day(now),
+            stats::local_day,
+            usage::local_hour,
+        )
+    }
+
     pub fn delete(&self, id: u64) -> io::Result<bool> {
         self.synced().delete(id)
     }
