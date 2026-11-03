@@ -1153,7 +1153,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   `SIGNING_KEY`) and `packaging/linux/install.sh` refuse an executable without a valid
   signature over its SHA-256. Download URLs must be on the manifest's host
   (`protocol::resolve_url`).
-- Only direct installs replace themselves: Linux and Windows with our
+- WordInk releases use self-replacement on Linux only; macOS and Windows
+  builds link to the release (`docs/releasing.md`). The engine below is kept
+  from Hex. Only direct installs replace themselves: Linux and Windows with our
   installer's receipt (`install.json` in the user-owned data root, which also
   names the channel) and the version layout, macOS a `WordInk.app` this user can
   rename in a writable, non-translocated folder. A read-only macOS location

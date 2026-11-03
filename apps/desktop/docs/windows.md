@@ -46,7 +46,7 @@ release.
 
 **x64** decodes on the GPU through Vulkan and needs a current NVIDIA, AMD, or
 Intel graphics driver (it supplies `vulkan-1.dll`). **ARM64** decodes on the CPU.
-Uninstalling keeps settings, logs, history, and models in `%APPDATA%\hex`.
+Uninstalling keeps settings, logs, history, and models in `%APPDATA%\wordink`.
 
 ## Known Issues
 
@@ -152,7 +152,7 @@ cargo run -- listen --model parakeet_v3 --language pl
 Press Enter once to start, then again to stop. Captures shorter than 300 ms are
 discarded. `--device` accepts a case-insensitive fragment from `devices`.
 
-Runtime data is stored under `%APPDATA%\hex`. Observations are in
+Runtime data is stored under `%APPDATA%\wordink`. Observations are in
 `logs\live.ndjson`, and native/runtime diagnostics are in `logs\process.log`,
 including every panic with its thread and backtrace. A worker that stops
 unexpectedly leaves its cause there. The app detaches from its console at
@@ -170,7 +170,7 @@ start|stop|cancel|toggle` (with `stop --print`), `paste-last`, `settings`,
 `launch-at-login` (the Run key), `onboarding reset`, `logs`, and `commands
 init|check`, `annotate`, `meetings record|stop|copy-last`, `history`, and
 `mcp`. They reach it through its local API (`local-api.json` in
-`%APPDATA%\hex` and the bearer-authenticated `POST /control`). Dictation commands go
+`%APPDATA%\wordink` and the bearer-authenticated `POST /control`). Dictation commands go
 to the listener's own loop as a shortcut press would, and `annotate`
 start, stop, cancel, and status wait for its capture host. `history`,
 `meetings`, and `mcp` work as on macOS. `hex restart`

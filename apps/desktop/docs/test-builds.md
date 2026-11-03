@@ -5,8 +5,8 @@ unreleased build:
 
 - Build from a checkout (see [../README.md](../README.md) and
   [linux.md](linux.md), [windows.md](windows.md)). `HEX_TEST_BUILD=1
-  scripts/build-app.sh` produces an ad-hoc signed macOS `Hex Test.app` with its
-  own bundle ID and data folder (`hex-test`), so it never reads or changes an
+  scripts/build-app.sh` produces an ad-hoc signed macOS `WordInk Test.app` with its
+  own bundle ID and data folder (`wordink-test`), so it never reads or changes an
   installed WordInk's data. Test and local builds never self-update.
 - Or install a published release or the Dev channel build; see
   [downloads.md](downloads.md) and [releasing.md](../../../docs/releasing.md).
