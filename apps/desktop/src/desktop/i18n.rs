@@ -797,6 +797,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Refresh", ["Odśwież", "刷新", "更新", "Aktualisieren", "Actualizar", "Оновити"]),
     ("Replacement (e.g. OpenCode)", ["Zamiennik (np. OpenCode)", "替换为（例如 OpenCode）", "置換後（例: OpenCode）", "Ersetzung (z. B. OpenCode)", "Reemplazo (p. ej. OpenCode)", "Заміна (наприклад, OpenCode)"]),
     ("Switch to {channel} {version}", ["Przełącz na {channel} {version}", "切换到{channel} {version}", "{channel} {version} に切り替え", "Zu {channel} {version} wechseln", "Cambiar a {channel} {version}", "Перейти на {channel} {version}"]),
+    ("Switch to {channel} {version} (installs an older version)", ["Przełącz na {channel} {version} (zainstaluje starszą wersję)", "切换到{channel} {version}（将安装较旧版本）", "{channel} {version} に切り替え（古いバージョンをインストール）", "Zu {channel} {version} wechseln (installiert eine ältere Version)", "Cambiar a {channel} {version} (instala una versión anterior)", "Перейти на {channel} {version} (встановить старішу версію)"]),
     ("Restart to update", ["Uruchom ponownie, aby zaktualizować", "重启以更新", "再起動してアップデート", "Zum Aktualisieren neu starten", "Reiniciar para actualizar", "Перезапустити для оновлення"]),
     ("Retry", ["Ponów", "重试", "再試行", "Erneut versuchen", "Reintentar", "Повторити спробу"]),
     ("Retry setup", ["Ponów konfigurację", "重试设置", "セットアップを再試行", "Einrichtung wiederholen", "Reintentar configuración", "Повторити налаштування"]),

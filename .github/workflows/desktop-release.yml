@@ -1,7 +1,8 @@
 # Desktop release: a `desktop-v<version>` tag builds the app on the four
 # platforms, signs the Linux executables and the checksum list, and publishes
 # one GitHub Release with SHA256SUMS(.sig), an SBOM, build-provenance
-# attestations and the update manifest (stable.json) the in-app updater reads.
+# attestations and the update manifests (dev.json, plus stable.json on a final)
+# the in-app updater reads.
 # Tags are `desktop-vX.Y.Z` (final, channel stable, marked latest) and
 # `desktop-vX.Y.Z-rc.N` (release candidate, channel dev, prerelease, never
 # latest). See docs/releasing.md for the runbook.
@@ -28,7 +29,8 @@
 #                   assets on each OS with the published installers, from a
 #                   loopback server, and checks `wordink --version`. A failure
 #                   keeps the release a draft.
-#   publish         only un-drafts the release; checks out and runs nothing.
+#   publish         un-drafts the release and refreshes dev.json on the rolling
+#                   desktop-dev prerelease; checks out and runs nothing.
 # macOS and Windows ship unsigned; their updater only links to the release.
 name: Desktop release
 on:
@@ -335,14 +337,20 @@ jobs:
         env:
           WORDINK_LINUX_SIGNING_KEY: ${{ secrets.WORDINK_LINUX_SIGNING_KEY }}
         run: apps/desktop/packaging/linux/sign-linux.sh "$RUNNER_TEMP/release"
-      # A final release carries the stable update manifest. A release candidate
-      # publishes none for now: U4 adds the dev.json feed here.
-      - name: Write the update manifest
-        if: needs.prepare.outputs.prerelease == 'false'
+      # Every release carries dev.json; a final also carries stable.json. They
+      # sit in the release before SHA256SUMS is written, so both are listed and
+      # signed there, and `publish` copies dev.json to the rolling feed.
+      - name: Write the update manifests
         env:
           WORDINK_TAG: ${{ github.ref_name }}
           WORDINK_REPO: ${{ github.repository }}
-        run: apps/desktop/packaging/linux/write-manifest.sh "$RUNNER_TEMP/release"
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          apps/desktop/packaging/linux/write-manifest.sh "$RUNNER_TEMP/release" dev
+          if [ "$PRERELEASE" = false ]; then
+            apps/desktop/packaging/linux/write-manifest.sh "$RUNNER_TEMP/release" stable
+          fi
       - name: List every file in SHA256SUMS
         run: apps/desktop/packaging/linux/write-sums.sh "$RUNNER_TEMP/release"
       - name: Sign SHA256SUMS
@@ -542,7 +550,7 @@ jobs:
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
 
-  # The only step that makes the release public. It checks out and runs nothing.
+  # The only job that makes the release public. It checks out and runs nothing.
   publish:
     needs: [prepare, draft, smoke]
     runs-on: ubuntu-24.04
@@ -562,3 +570,18 @@ jobs:
           else
             gh release edit "$WORDINK_TAG" -R "$WORDINK_REPO" --draft=false --prerelease=false --latest
           fi
+      # The Dev channel reads dev.json from the rolling `desktop-dev` prerelease
+      # (never latest). The copy is the file SHA256SUMS signed, fetched from the
+      # release just published; manifests are unsigned themselves, as stable.json.
+      - name: Refresh the Dev feed
+        run: |
+          set -euo pipefail
+          gh release view desktop-dev -R "$WORDINK_REPO" > /dev/null 2>&1 \
+            || gh release create desktop-dev -R "$WORDINK_REPO" --prerelease --latest=false \
+              --title "WordInk desktop Dev feed" \
+              --notes "Rolling feed for the Dev update channel. It holds only dev.json; install from the desktop-v* releases."
+          mkdir "$RUNNER_TEMP/feed"
+          gh release download "$WORDINK_TAG" -R "$WORDINK_REPO" -p dev.json -p SHA256SUMS -D "$RUNNER_TEMP/feed"
+          # Only the dev.json that SHA256SUMS (signed in sign-linux) lists may reach the feed.
+          (cd "$RUNNER_TEMP/feed" && grep -E '^[0-9a-f]{64}  dev\.json$' SHA256SUMS | sha256sum --check --strict)
+          gh release upload desktop-dev -R "$WORDINK_REPO" --clobber "$RUNNER_TEMP/feed/dev.json"
