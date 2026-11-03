@@ -581,5 +581,7 @@ jobs:
               --title "WordInk desktop Dev feed" \
               --notes "Rolling feed for the Dev update channel. It holds only dev.json; install from the desktop-v* releases."
           mkdir "$RUNNER_TEMP/feed"
-          gh release download "$WORDINK_TAG" -R "$WORDINK_REPO" -p dev.json -D "$RUNNER_TEMP/feed"
+          gh release download "$WORDINK_TAG" -R "$WORDINK_REPO" -p dev.json -p SHA256SUMS -D "$RUNNER_TEMP/feed"
+          # Only the dev.json that SHA256SUMS (signed in sign-linux) lists may reach the feed.
+          (cd "$RUNNER_TEMP/feed" && grep -E '^[0-9a-f]{64}  dev\.json$' SHA256SUMS | sha256sum --check --strict)
           gh release upload desktop-dev -R "$WORDINK_REPO" --clobber "$RUNNER_TEMP/feed/dev.json"
