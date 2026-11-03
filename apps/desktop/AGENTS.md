@@ -224,7 +224,7 @@ substitute for source inspection or a second roadmap.
   settled through QuickJS's job queue by `personal_commands/io`. They work
   only once the person allows the config's content hash (`personal_commands/trust`,
   the Output pane's trust prompt). Public API docs:
-  `site/public/docs/transforms.md` (https://anoma.ly/hex/docs/transforms).
+  `site/public/docs/transforms.md`.
   macOS, Windows, and Linux share it.
 - `desktop/background_process`: the one constructor for child processes Hex starts for
   its own work (OpenCode CLI, curl, PowerShell); on Windows they
@@ -1144,20 +1144,20 @@ CoreAudio formats, AppleScript details, or event serialization.
   `0.0.0-dev-<run number>`, as OpenCode numbers them. Requests carry nothing about the install. Checks run 10 seconds
   after launch, hourly (every 10 minutes and on window focus, at most once a minute, on the Dev channel), and on the sidebar footer's Check for updates, backing off on errors; manifests are
   not signed, so nothing runs before the download's size and SHA-256 match
-  the manifest and, on macOS and Windows, its code signature passes: macOS
-  `app/update-requirement.txt` (Developer ID team `5NZ4Q7NXJ4`, `anomaly.hex`,
-  notarized), Windows a valid Authenticode signature whose signer is
-  `AUTHENTICODE_SIGNER`. Linux has no OS signature, so Release signs each
-  Linux executable with Anomaly's ed25519 key (`HEX_RELEASE_SIGNING_KEY`,
-  `.github/release/sign-linux.sh`, which refuses a key that does not match
-  `.github/release/linux-signing.pub`) and publishes the 64-byte signature
+  the manifest. Only Linux installs update themselves (macOS and Windows
+  link to the release; see `docs/releasing.md`). Release signs each
+  Linux executable with WordInk's ed25519 key (`WORDINK_LINUX_SIGNING_KEY`,
+  `packaging/linux/sign-linux.sh`, which refuses a key that does not match
+  `packaging/linux/wordink-signing.pub`) and publishes the 64-byte signature
   as the `<target>-sig` file; the updater (`updater/linux.rs`
-  `SIGNING_KEY`) and `install-linux.sh` refuse an executable without a valid
+  `SIGNING_KEY`) and `packaging/linux/install.sh` refuse an executable without a valid
   signature over its SHA-256. Download URLs must be on the manifest's host
   (`protocol::resolve_url`).
-- Only direct installs replace themselves: Linux and Windows with our
+- WordInk releases use self-replacement on Linux only; macOS and Windows
+  builds link to the release (`docs/releasing.md`). The engine below is kept
+  from Hex. Only direct installs replace themselves: Linux and Windows with our
   installer's receipt (`install.json` in the user-owned data root, which also
-  names the channel) and the version layout, macOS a `Hex.app` this user can
+  names the channel) and the version layout, macOS a `WordInk.app` this user can
   rename in a writable, non-translocated folder. A read-only macOS location
   shows Download update (the DMG); package-managed installs (pacman, Nix) show
   their manager's command once it serves another version; source and test
@@ -1413,57 +1413,16 @@ smoke tests.
 Microphone selection is System default (the OS default input, live) unless a
 saved microphone is connected; override everything with `--device`. The app
 bundle build requires Xcode 26 for Icon Composer compilation and a Developer ID
-signing identity. The Release workflow builds and publishes the notarized DMG and ZIP. Hex publishes every platform to
-the Anomaly release service (`anomalyco/release`, `https://anoma.ly/release`;
-its dev stage, `dev.anoma.ly/release`, only tests the service itself, and Hex
-never publishes to or reads from it) from the Release workflow with curl and its
-GitHub OIDC token, under app `hex`, artifact `desktop`;
-[`docs/plans/release-service.md`](docs/plans/release-service.md) pins the
-target and file names and the direct-install receipt, and
-[`docs/releasing.md`](docs/releasing.md) owns the workflow, channels, secrets,
-and old clients. The 2.3.1 feeds and appcast at `https://anoma.ly/hex/files`
-(and Kit's `downloads.hex.kitlangton.dev`/`.com`, which must keep redirecting
-there) stay frozen. GitHub app releases use `v<VERSION>` tags (`app-v…`
-through 2.3.1) with `--latest=false`, keeping them distinct from SDK
-releases. Never overwrite a published artifact with different bytes.
-`https://anoma.ly/hex` (in-repo `site/`) is the only Hex website. One
-`site/cloudflare.config.ts` defines the production Worker `hex-production-site` (anoma.ly/hex,
-bucket `hex-production-files`) and the dev Worker `hex-dev-site` (dev.anoma.ly/hex,
-bucket `hex-dev-files`); `cf deploy --prebuilt --mode <mode>` picks one, and
-only CI deploys: a push to `dev` touching `site/` deploys dev, a stable
-Release deploys production. No subdomains. The site's download links come
-from the service's stable manifest when it builds. After publishing a version,
-bump the explicit GitHub mirror/version link in `README.md`; the Release
-workflow updates the Homebrew cask. `bun run --cwd site check:downloads` fails until every download link
-serves a file; every deploy runs it. Verify the live links afterwards.
-The Rust app is named `Hex`, packaged as `Hex.app`,
-with bundle identifier `anomaly.hex` (deliberately not reverse-DNS) and executable
-`hex`; its SDK helper is `anomaly.hex.service` and the virtual microphone driver
-`anomaly.hex.microphone.driver`. Releases through 2.3.1 were `com.kitlangton.hex2`,
-signed by Kit's team `QC99C9JE59`; macOS treats `anomaly.hex` as a new app (fresh
-permissions, login item, and preferences domain), while the `hex` Application
-Support folder, and with it settings, history, and models, is shared. Signing requires
-an explicit `HEX_TEAM_ID` and matching `HEX_NOTARY_PROFILE`; the build
-and release scripts verify the selected team rather than assuming an Anomaly team.
-`scripts/validate-app.sh` checks this identity before preparation and publication.
-The move to Anomaly's team (`5NZ4Q7NXJ4`) is planned in
-`docs/plans/macos-signing.md`; the manual `macOS signed build` workflow signs
-and notarizes an unpublished candidate once the Apple secrets are in the
-`release` environment.
-The release leaves `hex-<version>-macos-arm64.dmg` and
-`hex-<version>-macos-arm64.zip` (root `Hex.app`, the updater's archive); both
-contain the same signed, stapled app. Do not reuse a released version for
-changed code. Macs on 2.3.1 or earlier (Sparkle, `com.kitlangton.hex2`) get
-one informational appcast item that
-links to the new app; they never auto-update into it.
-There is no Swift migration: never import Swift preferences or data, adopt its
-bundle identifier, publish Rust artifacts to its S3 feed, or automatically quit,
-delete, or replace the Swift app. Prefer a website-only informational item in
-the legacy Sparkle feed, with no enclosure, pointing to the new app for manual
-installation and fresh setup. Publish it only after the new artifact is live. See
-`docs/plans/swift-app-handoff.md`. The Rust data root remains unchanged, but the
-new app identity requires fresh macOS permission grants. Validate signed
-distribution with the selected signing team before publishing an app update.
+signing identity. The Release workflow builds and publishes WordInk to GitHub Releases
+(`desktop-vX.Y.Z` tags; the rolling `desktop-dev` prerelease feeds the Dev
+channel). The macOS app is an unsigned `WordInk.app` installed by
+`install-macos.sh`; it only links to newer releases and never updates itself.
+Linux uses `install.sh` (ed25519-verified, self-updating) and Windows uses
+`install.ps1` (per-user, unsigned). There is no Sparkle feed, notarization, or
+Authenticode signing yet. Never overwrite a published artifact with different
+bytes, and never reuse a released version for changed code. See
+[`docs/releasing.md`](../../docs/releasing.md) for the workflow and
+[`docs/downloads.md`](docs/downloads.md) for the download paths.
 
 `SMAppService` is meaningful only from a signed app installed in
 `/Applications`. When replacing a local bundle outside Finder during a login-item
@@ -1471,7 +1430,7 @@ smoke test, register the new bundle with Launch Services before launch:
 
 ```sh
 '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister' \
-  -f /Applications/Hex.app
+  -f /Applications/WordInk.app
 ```
 
 Pass the actual installed Rust host path to `lsregister` if it was renamed.
@@ -1520,25 +1479,16 @@ Ubuntu 24.04 runners with their `.deb` and `.rpm`, Windows x64 and ARM64 through
 macOS as an ad-hoc signed `HEX_RELEASE_UNSIGNED=1` app, installers through
 `windows-installers.yml`, AUR and Homebrew staging) run repository code with
 no environment, secret, or id-token; sign and publish jobs run in `release`,
-check out only `.github/release/`, and run only those scripts and SHA-pinned
-actions on artifacts treated as data (macOS Developer ID signing,
-notarization, and stapling; Azure Authenticode; the release service through
-OIDC; the AUR and Homebrew pushes). Every artifact carries a `SHA256SUMS`
-whose digest its job reports and every consumer checks. Site deploy follows
-the same split: its build job has no secret, and its `release` job runs only
-`.github/release/deploy-site.sh`, which deploys the verified Build Output only
-when it names exactly that mode's site Worker, routes, and bindings, with the
-cf CLI locked in `.github/release/cf/`; Legacy appcast checks out only
-`.github/release/` and the appcast. Keep that boundary:
+check out only the release scripts, and run only those scripts and SHA-pinned
+actions on artifacts treated as data (the Linux ed25519 signature
+and the GitHub release publish). Every artifact carries a `SHA256SUMS`
+whose digest its job reports and every consumer checks. Keep that boundary:
 never add a step that builds, installs dependencies, or runs repository code
 to a job that holds a secret or an OIDC token, and pin every action by SHA.
-`.github/` changes need Dax (CODEOWNERS and the "release boundary" ruleset).
-`.github/workflows/test-builds.yml` calls the same desktop
-workflow on every push to `dev` with `test-build`, plus an ad-hoc signed
-`Hex Test.app` (`HEX_TEST_BUILD=1 scripts/build-app.sh`: bundle ID
-`anomaly.hex.test`, its own `hex-test` data folder and `~/.config/hex-test`;
-it must never read the real `hex` data), as unsigned 14-day artifacts for
-teammates (`docs/test-builds.md`). `HEX_TEST_BUILD=1` builds never update
+Test builds (`HEX_TEST_BUILD=1 scripts/build-app.sh`) build an ad-hoc signed
+`Hex Test.app` with its own bundle ID and data folder (`hex-test`,
+`~/.config/hex-test`; it must never read the real `hex` data); see
+`docs/test-builds.md`. `HEX_TEST_BUILD=1` builds never update
 themselves, and neither do local builds (`HEX_LOCAL_BUILD=1`, the owner's own
 build from a checkout: footer "Local build · updates off", version label with its
 commit, no channel row). Every push to `dev` (except docs/site-only changes) publishes a dev-channel
@@ -1583,12 +1533,11 @@ through the patched `transcribe-cpp-sys` in `Cargo.toml`): about 7 MB of
 SPIR-V instead of 44 MB. ggml aborts a Vulkan run whose weights use another
 type, so widen `GGML_VULKAN_SHADER_TYPES` before the catalog gains a non-Q8_0
 model. Release executables are stripped (`[profile.release]`). The
-installers live in the locked `.github/release/` (`install-linux.sh`,
-`install-windows.ps1`; the Installers workflow serves them at
-`https://anoma.ly/hex/files/`) and install from the service's manifest,
-checking each file's size and SHA-256 plus the Linux ed25519 signature or the
-Windows Authenticode signature; `scripts/test-install-linux-release.sh`
-exercises the Linux one against a fixture service with a fixture key.
+installers live in `packaging/` (`linux/install.sh`,
+`macos/install-macos.sh`, `windows/install.ps1`; the release attaches them) and
+install from the release's manifest, checking each file's size and SHA-256 plus
+the Linux ed25519 signature; `scripts/test-install-linux-release.sh`
+exercises the Linux one against a fixture release with a fixture key.
 
 Use `termctrl` to verify TUI changes at both wide and narrow dimensions. The
 `hex dev dashboard` keys are `1` for the activity log, `2` for meetings,

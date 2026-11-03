@@ -18,4 +18,4 @@ release gates; passing container tests alone does not establish those behaviors.
 The beta builds on the proposals in [#28](https://github.com/anomalyco/hex/pull/28)
 and [#29](https://github.com/anomalyco/hex/pull/29). It does not claim GNOME or KDE
 support and reads no input devices. See
-[`../linux.md`](../linux.md) and [`../nix.md`](../nix.md) for the supported setup.
+[`../../linux.md`](../../linux.md) and [`../../nix.md`](../../nix.md) for the supported setup.
