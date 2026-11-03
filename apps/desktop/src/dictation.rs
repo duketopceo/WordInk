@@ -58,10 +58,37 @@ const PARAKEET_SAMPLE_RATE: u32 = 16_000;
 /// sits well above it, so only a quiet room's noise floor is discarded.
 const SILENCE_THRESHOLD_DBFS: f32 = -50.0;
 const SILENCE_WINDOW_SAMPLES: usize = 480;
+/// A capture whose loudest sample stays below this (about -80 dBFS) came from
+/// a stream that carries no signal at all: a muted or disconnected device, or
+/// the wrong source. A quiet room's noise floor sits far above it, so room
+/// noise is never mistaken for a dead input.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const DEAD_INPUT_PEAK: f32 = 0.000_1;
+/// Less audio than this (100 ms of 16 kHz) is too little to call dead.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const DEAD_INPUT_MIN_SAMPLES: usize = 1_600;
 /// Live audio is handed to a capture's stream in blocks of at least this many
 /// 16 kHz samples (160 ms), well under the model's chunk, to keep per-feed
 /// overhead low.
 const STREAM_FEED_SAMPLES: usize = 2_560;
+
+/// A finished capture's measured levels (16 kHz samples), for the debug log.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Clone, Copy, Debug)]
+pub struct AudioLevels {
+    pub samples: usize,
+    pub rms: f32,
+    pub peak: f32,
+    pub zero_fraction: f32,
+    pub loudest_window_dbfs: f32,
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn peak_of(samples: &[f32]) -> f32 {
+    samples
+        .iter()
+        .fold(0.0, |peak: f32, sample| peak.max(sample.abs()))
+}
 
 pub enum Finish {
     Discard,
@@ -204,6 +231,35 @@ impl DictationClip {
                 .fold(0.0, |peak: f32, sample| peak.max(sample.abs())),
             pre_press_dbfs: loudest_window_dbfs(pre_press),
             post_press_dbfs: loudest_window_dbfs(post_press),
+        }
+    }
+
+    /// Whether the input delivered no signal at all (every sample at or near
+    /// zero), which is a broken or wrong microphone rather than a quiet room
+    /// and is reported as an error instead of being discarded as no speech.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub fn is_dead_input(&self) -> bool {
+        let released = self.released();
+        released.len() >= DEAD_INPUT_MIN_SAMPLES && peak_of(released) < DEAD_INPUT_PEAK
+    }
+
+    /// What the captured audio measured, for the debug log.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub fn levels(&self) -> AudioLevels {
+        let released = self.released();
+        let zeros = released.iter().filter(|&&sample| sample == 0.0).count();
+        let mean_square = released.iter().map(|sample| sample * sample).sum::<f32>()
+            / released.len().max(1) as f32;
+        AudioLevels {
+            samples: released.len(),
+            rms: mean_square.sqrt(),
+            peak: peak_of(released),
+            zero_fraction: if released.is_empty() {
+                1.0
+            } else {
+                zeros as f32 / released.len() as f32
+            },
+            loudest_window_dbfs: self.loudest_window_dbfs(),
         }
     }
 
@@ -1030,6 +1086,39 @@ mod tests {
         assert!(!quiet_speech.is_near_silent());
         assert!((quiet_speech.loudest_window_dbfs() - -43.0).abs() < 0.5);
         assert!(!clip(tone(0.1, 16_000).collect()).is_near_silent());
+    }
+
+    #[test]
+    fn an_all_zero_capture_is_a_dead_input_but_room_noise_is_not() {
+        let clip = |samples: Vec<f32>| DictationClip::for_test(samples);
+        // Digital silence: a stream that carries nothing.
+        assert!(clip(vec![0.0; 16_000]).is_dead_input());
+        // A few stray LSBs of dither still count as no signal.
+        assert!(clip(tone(0.000_03, 16_000).collect()).is_dead_input());
+        // A -66 dBFS noise floor is a live microphone in a quiet room: it is
+        // near-silent (no speech) but not dead.
+        let room = clip(tone(0.000_7, 16_000).collect());
+        assert!(!room.is_dead_input());
+        assert!(room.is_near_silent());
+        // Speech and a constant offset are live signals.
+        assert!(!clip(tone(0.1, 16_000).collect()).is_dead_input());
+        assert!(!clip(vec![0.2; 16_000]).is_dead_input());
+        // Too little audio to judge, as a bare tap leaves.
+        assert!(!clip(vec![0.0; 800]).is_dead_input());
+        assert!(!clip(Vec::new()).is_dead_input());
+    }
+
+    #[test]
+    fn levels_report_the_capture_for_the_debug_log() {
+        let levels = DictationClip::for_test(vec![0.0; 16_000]).levels();
+        assert_eq!(levels.samples, 16_000);
+        assert_eq!(levels.rms, 0.0);
+        assert_eq!(levels.peak, 0.0);
+        assert_eq!(levels.zero_fraction, 1.0);
+        let levels = DictationClip::for_test(tone(0.1, 16_000).collect()).levels();
+        assert!((levels.peak - 0.1).abs() < 0.001);
+        assert!((levels.rms - 0.0707).abs() < 0.002);
+        assert!(levels.zero_fraction < 0.01);
     }
 
     #[test]

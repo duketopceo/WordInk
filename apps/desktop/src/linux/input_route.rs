@@ -27,7 +27,7 @@ pub(crate) fn mark_streams() {
         return;
     }
     let properties = format!(
-        "{{ state.restore-target = false, {PID_PROPERTY} = {} }}",
+        "{{ state.restore-target = false, application.name = WordInk, {PID_PROPERTY} = {} }}",
         std::process::id()
     );
     // SAFETY: No other thread exists yet to read the environment.

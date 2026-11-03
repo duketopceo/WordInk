@@ -64,6 +64,27 @@ impl Controller for Pactl {
         })
     }
 
+    fn source_node(&mut self, device_id: &str) -> Option<String> {
+        listing()?
+            .devices
+            .into_iter()
+            .find(|device| device.id == device_id)?
+            .bluetooth?
+            .source
+    }
+
+    fn default_source(&mut self) -> Option<String> {
+        pactl(&["get-default-source"])
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+    }
+
+    fn set_default_source(&mut self, node: &str) -> Result<(), String> {
+        pactl(&["set-default-source", node])
+            .map(|_| ())
+            .ok_or_else(|| format!("could not set {node} as the default source"))
+    }
+
     fn pause(&mut self, how_long: Duration) {
         std::thread::sleep(how_long);
     }
@@ -87,21 +108,39 @@ impl MarkerStore for MarkerFile {
         Some(Marker {
             card: lines.next()?.trim().to_owned(),
             previous: lines.next()?.trim().to_owned(),
+            previous_source: lines
+                .next()
+                .map(|line| line.trim().to_owned())
+                .filter(|line| !line.is_empty()),
         })
     }
 
     fn save(&mut self, marker: &Marker) {
         let Some(path) = Self::path() else { return };
+        crate::debug_log::dlog!(
+            Debug,
+            "bluetooth.marker",
+            "writing the marker file",
+            card = marker.card
+        );
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Err(error) = std::fs::write(&path, format!("{}\n{}\n", marker.card, marker.previous))
-        {
+        if let Err(error) = std::fs::write(
+            &path,
+            format!(
+                "{}\n{}\n{}\n",
+                marker.card,
+                marker.previous,
+                marker.previous_source.as_deref().unwrap_or("")
+            ),
+        ) {
             tracing::warn!(%error, "could not record the earbuds' profile switch");
         }
     }
 
     fn clear(&mut self) {
+        crate::debug_log::dlog!(Debug, "bluetooth.marker", "removing the marker file");
         if let Some(path) = Self::path() {
             let _ = std::fs::remove_file(path);
         }
@@ -130,11 +169,39 @@ pub(crate) struct HeadsetFlow {
 impl HeadsetFlow {
     /// Starts the worker, which first undoes a switch an earlier run left.
     pub(crate) fn start() -> Option<Self> {
+        Self::with_backend(
+            || Machine::new(Pactl, MarkerFile),
+            |device_id| {
+                let listing = listing().ok_or("the sound server did not answer")?;
+                let device = listing
+                    .devices
+                    .iter()
+                    .find(|device| device.id == device_id)
+                    .ok_or("the earbuds are not connected")?;
+                let card = device
+                    .bluetooth
+                    .as_ref()
+                    .ok_or("that microphone is not Bluetooth")?;
+                Ok(card.card.clone())
+            },
+        )
+    }
+
+    /// Starts the worker over `machine`, with `card_of` finding the card of a
+    /// microphone id. Tests pass fakes, so none touches the sound server.
+    pub(crate) fn with_backend<C, M>(
+        machine: impl FnOnce() -> Machine<C, M> + Send + 'static,
+        card_of: impl Fn(&str) -> Result<String, String> + Send + 'static,
+    ) -> Option<Self>
+    where
+        C: Controller + 'static,
+        M: MarkerStore + 'static,
+    {
         let (requests, receiver) = mpsc::channel();
         let (sender, events) = mpsc::channel();
         let worker = std::thread::Builder::new()
             .name("bluetooth-headset".into())
-            .spawn(move || serve(receiver, sender))
+            .spawn(move || serve(machine(), card_of, receiver, sender))
             .inspect_err(|error| tracing::warn!(%error, "could not start the earbuds flow"))
             .ok()?;
         Some(Self {
@@ -183,13 +250,19 @@ impl Drop for HeadsetFlow {
     }
 }
 
-fn serve(requests: Receiver<Request>, events: Sender<Event>) {
-    let mut machine = Machine::new(Pactl, MarkerFile);
+fn serve<C: Controller, M: MarkerStore>(
+    mut machine: Machine<C, M>,
+    card_of: impl Fn(&str) -> Result<String, String>,
+    requests: Receiver<Request>,
+    events: Sender<Event>,
+) {
     machine.recover_stale();
     while let Ok(request) = requests.recv() {
         match request {
             Request::Begin { device_id } => {
-                let _ = events.send(match begin(&mut machine, &device_id) {
+                let result = card_of(&device_id)
+                    .and_then(|card| machine.begin(&card, &device_id).map(|_| ()));
+                let _ = events.send(match result {
                     Ok(()) => Event::Ready,
                     Err(error) => Event::Failed(error),
                 });
@@ -204,18 +277,4 @@ fn serve(requests: Receiver<Request>, events: Sender<Event>) {
         }
     }
     machine.restore();
-}
-
-fn begin(machine: &mut Machine<Pactl, MarkerFile>, device_id: &str) -> Result<(), String> {
-    let listing = listing().ok_or("the sound server did not answer")?;
-    let device = listing
-        .devices
-        .iter()
-        .find(|device| device.id == device_id)
-        .ok_or("the earbuds are not connected")?;
-    let card = device
-        .bluetooth
-        .as_ref()
-        .ok_or("that microphone is not Bluetooth")?;
-    machine.begin(&card.card, device_id).map(|_| ())
 }

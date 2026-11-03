@@ -29,6 +29,8 @@ pub fn recent_requests() -> Vec<RequestRecord> {
 const RECENT_ERRORS: usize = 5;
 /// The longest a listed failure message gets, in characters.
 const MAX_MESSAGE_CHARS: usize = 160;
+/// The longest a scrubbed debug-log line gets, in characters.
+const MAX_LINE_CHARS: usize = 1200;
 
 /// Everything the summary says, already safe to print.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -185,6 +187,55 @@ fn recent_errors(path: &Path, redactions: &Redactions) -> Result<Vec<String>, st
 /// `message` on one line with paths, key-like tokens and this machine's user
 /// name replaced, cut to a short length.
 pub fn scrub(message: &str, redactions: &Redactions) -> String {
+    scrub_to(message, redactions, MAX_MESSAGE_CHARS)
+}
+
+/// [`scrub`] for one debug-log line, which is longer than a failure message.
+pub fn scrub_line(line: &str, redactions: &Redactions) -> String {
+    scrub_to(line, redactions, MAX_LINE_CHARS)
+}
+
+fn scrub_to(message: &str, redactions: &Redactions, limit: usize) -> String {
+    let message = strip_machine(message, redactions);
+    let words: Vec<String> = message
+        .split_whitespace()
+        .map(|word| {
+            if looks_like_path(word) {
+                "<path>".to_owned()
+            } else if word_is_key(word) {
+                "<redacted>".to_owned()
+            } else {
+                word.to_owned()
+            }
+        })
+        .collect();
+    let line = words.join(" ");
+    if line.chars().count() > limit {
+        let cut: String = line.chars().take(limit).collect();
+        format!("{cut}...")
+    } else {
+        line
+    }
+}
+
+/// `line` with this machine's home folder and user name, and any key-like
+/// token (bare or as a `name=value` value), replaced. Spacing and paths stay,
+/// so a log line keeps its shape; the debug log writes through this.
+pub fn redact(line: &str, redactions: &Redactions) -> String {
+    strip_machine(line, redactions)
+        .split(' ')
+        .map(|word| {
+            if word_is_key(word) {
+                "<redacted>"
+            } else {
+                word
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn strip_machine(message: &str, redactions: &Redactions) -> String {
     let mut message = message.to_owned();
     // Longest first, so the home folder goes before the user name inside it.
     for secret in [redactions.home.as_deref(), redactions.user.as_deref()]
@@ -194,25 +245,15 @@ pub fn scrub(message: &str, redactions: &Redactions) -> String {
     {
         message = replace_ignoring_case(&message, secret, "<redacted>");
     }
-    let words: Vec<String> = message
-        .split_whitespace()
-        .map(|word| {
-            if looks_like_path(word) {
-                "<path>".to_owned()
-            } else if looks_like_key(word) {
-                "<redacted>".to_owned()
-            } else {
-                word.to_owned()
-            }
-        })
-        .collect();
-    let line = words.join(" ");
-    if line.chars().count() > MAX_MESSAGE_CHARS {
-        let cut: String = line.chars().take(MAX_MESSAGE_CHARS).collect();
-        format!("{cut}...")
-    } else {
-        line
-    }
+    message
+}
+
+/// A word that is a key, or `name=key`.
+fn word_is_key(word: &str) -> bool {
+    looks_like_key(word)
+        || word
+            .split_once('=')
+            .is_some_and(|(_, value)| looks_like_key(value))
 }
 
 fn replace_ignoring_case(haystack: &str, needle: &str, with: &str) -> String {

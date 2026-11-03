@@ -4,7 +4,10 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use color_eyre::eyre::{Result, eyre};
+use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// Whether this is a local build (`HEX_LOCAL_BUILD=1`): made from a checkout
 /// for its owner's own machine, so it never checks for or offers updates.
@@ -58,9 +61,18 @@ pub fn init_process_logging(shutdown: &'static AtomicBool) -> Result<PathBuf> {
         .open(log_dir.join("process.log"))?;
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("hex=info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
+    // Process diagnostics keep their own filter; the debug log sees Hex's
+    // events at its own level, and only while it is on.
+    let process = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr.and(Mutex::new(process_log)))
+        .with_filter(filter);
+    let debug =
+        crate::debug_log::BridgeLayer.with_filter(tracing_subscriber::filter::dynamic_filter_fn(
+            |meta, _| crate::debug_log::bridge_wants(meta),
+        ));
+    tracing_subscriber::registry()
+        .with(process)
+        .with(debug)
         .init();
     log_panics();
     ctrlc::set_handler(|| shutdown.store(true, Ordering::Relaxed))?;
@@ -111,12 +123,11 @@ fn user_config_dir() -> Result<PathBuf> {
 }
 
 fn user_config_dir_in(home: &std::path::Path, test_build: bool) -> PathBuf {
-    home.join(".config")
-        .join(if test_build {
-            "wordink-test"
-        } else {
-            "wordink"
-        })
+    home.join(".config").join(if test_build {
+        "wordink-test"
+    } else {
+        "wordink"
+    })
 }
 
 #[cfg(test)]

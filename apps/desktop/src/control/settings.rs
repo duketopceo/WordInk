@@ -167,6 +167,21 @@ const KEYS: &[Key] = &[
         "Linux: dictate with Bluetooth earbuds' own microphone, switching them to headset mode while you dictate (headset), or keep music quality and dictate with another microphone (keep_quality)",
     ),
     key(
+        "developer_mode",
+        Kind::Bool,
+        "Developer mode: opens the live debug log view and saves the debug log (every dictation stage: audio, Bluetooth, transcription, paste) to a rotating file in the logs folder. Debug events are always kept in memory; read them with `wordink logs --debug`. Never keys, audio or, by default, transcripts",
+    ),
+    key(
+        "debug_logging_level",
+        Kind::Choice(&["info", "debug", "trace"]),
+        "How much the debug log saves and captures: info (decisions and failures), debug (plus timings and device lists) or trace (plus per-chunk levels)",
+    ),
+    key(
+        "debug_logging_transcripts",
+        Kind::Bool,
+        "Let the debug log hold transcript text; off by default so a bug report never carries what you said",
+    ),
+    key(
         "device_names",
         Kind::Json,
         "Names you gave microphones, as a JSON object of device id to name; `wordink devices rename` edits one",
@@ -1434,6 +1449,66 @@ pub fn format_hotkey(binding: &HotkeyBinding) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn developer_mode_and_debug_log_keys_are_settable_and_default_off() {
+        let settings = AppSettings::default();
+        assert!(!settings.developer_mode);
+        assert_eq!(
+            settings.debug_logging_level,
+            crate::debug_log::DebugLevel::Info
+        );
+        assert!(
+            !settings.debug_logging_transcripts,
+            "transcripts are opt-in"
+        );
+        for key in [
+            "developer_mode",
+            "debug_logging_level",
+            "debug_logging_transcripts",
+        ] {
+            assert!(
+                list(&settings)
+                    .iter()
+                    .any(|value| value.key == key && value.writable),
+                "{key} is listed and writable"
+            );
+        }
+        let on = apply(&settings, "developer_mode", "on", &rules()).unwrap();
+        assert!(on.settings.developer_mode);
+        let off = apply(&on.settings, "developer_mode", "off", &rules()).unwrap();
+        assert!(!off.settings.developer_mode);
+        for (text, level) in [
+            ("info", crate::debug_log::DebugLevel::Info),
+            ("debug", crate::debug_log::DebugLevel::Debug),
+            ("trace", crate::debug_log::DebugLevel::Trace),
+        ] {
+            let change = apply(&settings, "debug_logging_level", text, &rules()).unwrap();
+            assert_eq!(change.settings.debug_logging_level, level);
+        }
+        assert!(apply(&settings, "debug_logging_level", "loud", &rules()).is_err());
+        assert!(apply(&settings, "developer_mode", "maybe", &rules()).is_err());
+        let transcripts = apply(&settings, "debug_logging_transcripts", "on", &rules()).unwrap();
+        assert!(transcripts.settings.debug_logging_transcripts);
+    }
+
+    #[test]
+    fn developer_mode_survives_a_save_and_an_older_file_loads_with_it_off() {
+        let settings = AppSettings {
+            developer_mode: true,
+            debug_logging_level: crate::debug_log::DebugLevel::Trace,
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let loaded: AppSettings = serde_json::from_str(&json).unwrap();
+        assert!(loaded.developer_mode);
+        assert_eq!(
+            loaded.debug_logging_level,
+            crate::debug_log::DebugLevel::Trace
+        );
+        let older: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!older.developer_mode && !older.debug_logging_transcripts);
+    }
 
     fn rules() -> ShortcutRules {
         ShortcutRules {

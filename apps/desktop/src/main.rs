@@ -20,6 +20,7 @@ mod calendar;
 mod capture_host;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod control;
+mod debug_log;
 mod desktop;
 mod dev_build;
 mod diagnostics;
@@ -32,11 +33,11 @@ mod hardware;
 mod history;
 #[cfg(target_os = "macos")]
 mod keyboard;
-mod keyboard_kind;
 #[cfg_attr(target_os = "macos", path = "keyboard_input_sources/macos.rs")]
 #[cfg_attr(target_os = "windows", path = "keyboard_input_sources/windows.rs")]
 #[cfg_attr(target_os = "linux", path = "keyboard_input_sources/x11.rs")]
 mod keyboard_input_sources;
+mod keyboard_kind;
 mod keys;
 mod labs;
 #[cfg(target_os = "linux")]
@@ -426,7 +427,7 @@ fn main() -> Result<()> {
         }
         Command::Control(_) | Command::Keys { .. } | Command::Import { .. } => {
             unreachable!("handled before startup")
-        },
+        }
         #[cfg(hex_capture)]
         Command::CapsulePlayground { .. } => unreachable!("handled before startup"),
         Command::Dev { command } => {
@@ -810,6 +811,44 @@ mod tests {
                 command: crate::control::cli::VocabularyCommand::Suggest { output }
             }))) if output.json
         ));
+    }
+
+    #[test]
+    fn debug_logs_parse_with_follow_level_subsystem_and_json() {
+        use crate::debug_log::DebugLevel;
+
+        let parsed = Cli::try_parse_from([
+            "hex",
+            "logs",
+            "--debug",
+            "--follow",
+            "--level",
+            "debug",
+            "--subsystem",
+            "audio,bluetooth",
+            "--json",
+            "-n",
+            "20",
+        ])
+        .map(|cli| cli.command);
+        assert!(matches!(
+            parsed,
+            Ok(Some(Command::Control(ControlCli::Logs {
+                debug: true,
+                follow: true,
+                json: true,
+                lines: 20,
+                level: Some(DebugLevel::Debug),
+                ref subsystem,
+                ..
+            }))) if subsystem == &["audio".to_owned(), "bluetooth".to_owned()]
+        ));
+        // The filters belong to --debug, which excludes --process.
+        assert!(Cli::try_parse_from(["hex", "logs", "--level", "info"]).is_err());
+        assert!(Cli::try_parse_from(["hex", "logs", "--json"]).is_err());
+        assert!(Cli::try_parse_from(["hex", "logs", "--debug", "--process"]).is_err());
+        assert!(Cli::try_parse_from(["hex", "logs", "--debug", "--level", "loud"]).is_err());
+        assert!(Cli::try_parse_from(["hex", "logs", "--process"]).is_ok());
     }
 
     #[test]

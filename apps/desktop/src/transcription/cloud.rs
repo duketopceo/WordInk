@@ -1438,6 +1438,29 @@ pub fn run_outcome_at(
             error_class: result.as_ref().err().map(|error| error.class().to_owned()),
         };
         record.emit();
+        // Sizes, ids and timings only: never the key, the audio or the words.
+        crate::debug_log::dlog!(
+            Info,
+            "engine.request",
+            if record.ok() {
+                "cloud transcription answered"
+            } else {
+                "cloud transcription failed"
+            },
+            route = record.provider.as_str(),
+            endpoint_kind = record.endpoint_kind.as_str(),
+            model = record.model.as_str(),
+            audio_ms = record.audio_ms,
+            request_bytes = record.request_bytes,
+            status = record.status,
+            request_id = record.request_id.as_deref(),
+            generation_id = record.generation_id.as_deref(),
+            routed_provider = record.routed_provider.as_deref(),
+            cost_usd = record.cost_usd,
+            retries = record.retries,
+            error_class = record.error_class.as_deref(),
+            ms = record.latency_ms,
+        );
         if let Some(path) = call.request_log
             && let Err(error) = request_log::append(path, &record)
         {
