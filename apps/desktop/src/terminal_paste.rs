@@ -98,7 +98,7 @@ pub(crate) fn store(shared: &AtomicU8, setting: TerminalPaste) {
 }
 
 /// Stores `setting` when it is known; a failed read leaves the value alone.
-#[cfg(any(test, hex_capture))]
+#[cfg(any(test, all(hex_capture, target_os = "linux")))]
 pub(crate) fn store_if_known(shared: &AtomicU8, setting: Option<TerminalPaste>) {
     if let Some(setting) = setting {
         store(shared, setting);
