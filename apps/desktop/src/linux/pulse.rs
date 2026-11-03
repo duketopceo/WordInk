@@ -86,6 +86,7 @@ const UNLINKED: u32 = u32::MAX;
 /// EasyEffects move every new capture stream into their own chain a moment
 /// after it is placed.
 const STABLE_POLLS: u32 = 3;
+const UNLINKED_GRACE_POLLS: u32 = 5;
 const STABLE_FOR: Duration = Duration::from_millis(300);
 
 /// The message for a stream another program keeps taking off the chosen
@@ -169,6 +170,11 @@ pub(crate) fn route_until_confirmed(
                 let mut refused = false;
                 let mut moved_now = false;
                 for stream in streams.iter().filter(|stream| stream.source != target) {
+                    // A stream still being linked gets a moment to follow the
+                    // default source before it is moved by hand.
+                    if stream.source == UNLINKED && polls <= UNLINKED_GRACE_POLLS {
+                        continue;
+                    }
                     if seen_on_target && stream.source != UNLINKED {
                         // Placed there by us earlier and found elsewhere now.
                         bounced_to = Some(stream.source);

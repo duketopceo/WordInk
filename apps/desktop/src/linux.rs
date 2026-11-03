@@ -5,6 +5,7 @@ pub(crate) mod background;
 pub(crate) mod clipboard;
 pub(crate) mod context;
 pub(crate) mod dictation;
+pub(crate) mod failure;
 pub(crate) mod gnome_shortcuts;
 pub(crate) mod gsettings;
 pub(crate) mod icons;

@@ -104,17 +104,15 @@ impl LinuxIndicator {
         }
     }
 
-    /// The microphone delivered nothing: the HUD shows a failure, and a
-    /// desktop notification says which microphone to check, since the HUD
-    /// may be hidden. `message` already names the device.
-    pub(crate) fn silent_input(&mut self, message: &str) {
+    /// A dictation failed with no job to fail: the HUD shows a failure state
+    /// (it stays for a few seconds). The caller also raises a notification.
+    pub(crate) fn failure(&mut self) {
         // Not a cancelled capture: the failure stands.
         self.recording = false;
         self.next_job += 1;
         let job_id = self.next_job;
         self.send(HudEvent::Submitted { job_id });
         self.send(HudEvent::JobFailed { job_id });
-        notify(message);
     }
 
     /// Earbuds are switching to headset mode (or have finished): the HUD says
@@ -238,7 +236,7 @@ fn xwayland() -> bool {
 
 /// A critical desktop notification, best effort and off this thread. Unit
 /// tests never raise one.
-fn notify(message: &str) {
+pub(crate) fn notify(message: &str) {
     if cfg!(test) {
         return;
     }

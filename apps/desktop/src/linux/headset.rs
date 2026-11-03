@@ -64,6 +64,27 @@ impl Controller for Pactl {
         })
     }
 
+    fn source_node(&mut self, device_id: &str) -> Option<String> {
+        listing()?
+            .devices
+            .into_iter()
+            .find(|device| device.id == device_id)?
+            .bluetooth?
+            .source
+    }
+
+    fn default_source(&mut self) -> Option<String> {
+        pactl(&["get-default-source"])
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+    }
+
+    fn set_default_source(&mut self, node: &str) -> Result<(), String> {
+        pactl(&["set-default-source", node])
+            .map(|_| ())
+            .ok_or_else(|| format!("could not set {node} as the default source"))
+    }
+
     fn pause(&mut self, how_long: Duration) {
         std::thread::sleep(how_long);
     }
@@ -87,6 +108,10 @@ impl MarkerStore for MarkerFile {
         Some(Marker {
             card: lines.next()?.trim().to_owned(),
             previous: lines.next()?.trim().to_owned(),
+            previous_source: lines
+                .next()
+                .map(|line| line.trim().to_owned())
+                .filter(|line| !line.is_empty()),
         })
     }
 
@@ -101,8 +126,15 @@ impl MarkerStore for MarkerFile {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Err(error) = std::fs::write(&path, format!("{}\n{}\n", marker.card, marker.previous))
-        {
+        if let Err(error) = std::fs::write(
+            &path,
+            format!(
+                "{}\n{}\n{}\n",
+                marker.card,
+                marker.previous,
+                marker.previous_source.as_deref().unwrap_or("")
+            ),
+        ) {
             tracing::warn!(%error, "could not record the earbuds' profile switch");
         }
     }

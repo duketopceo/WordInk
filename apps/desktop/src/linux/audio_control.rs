@@ -408,34 +408,174 @@ where
     reply.body().deserialize().ok()
 }
 
-/// Pauses every MPRIS player that is playing, and returns their bus names.
-fn pause_players() -> Vec<String> {
-    with_session_bus(async |bus| {
-        let names: Vec<String> = call(
-            bus,
-            "org.freedesktop.DBus",
-            "/org/freedesktop/DBus",
-            "org.freedesktop.DBus",
-            "ListNames",
-            &(),
-        )
-        .await
-        .unwrap_or_default();
-        let mut paused = Vec::new();
-        for name in names
+/// The MPRIS players on the bus, as far as pausing needs them. The real one
+/// is the session D-Bus; tests fake it.
+trait PlayerBus {
+    /// Bus names of every MPRIS player.
+    fn players(&mut self) -> Vec<String>;
+    /// A player's identity (its display name), when it says.
+    fn identity(&mut self, player: &str) -> Option<String>;
+    fn status(&mut self, player: &str) -> Option<String>;
+    fn pause(&mut self, player: &str) -> bool;
+    fn wait(&mut self, how_long: Duration);
+}
+
+/// How long a player gets to act on Pause before its status is read again.
+const PAUSE_VERIFY: Duration = Duration::from_millis(150);
+
+/// What pausing did.
+#[derive(Debug, Default, Eq, PartialEq)]
+struct Paused {
+    /// Players that were Playing and now are not: the ones to resume.
+    paused: Vec<String>,
+    /// Players that stayed Playing after Pause.
+    stuck: Vec<String>,
+}
+
+/// Pauses every player whose PlaybackStatus is Playing (not just one),
+/// checks each really stopped, and logs each one's before and after.
+fn pause_playing(bus: &mut impl PlayerBus) -> Paused {
+    let mut result = Paused::default();
+    let mut asked = Vec::new();
+    for player in bus.players() {
+        let before = bus.status(&player);
+        let identity = bus.identity(&player);
+        crate::debug_log::dlog!(
+            Debug,
+            "media.suppress",
+            "player found",
+            player = player,
+            identity = identity,
+            status_before = before,
+        );
+        if before.as_deref() != Some("Playing") {
+            continue;
+        }
+        let sent = bus.pause(&player);
+        asked.push((player, identity, sent));
+    }
+    if asked.is_empty() {
+        return result;
+    }
+    bus.wait(PAUSE_VERIFY);
+    for (player, identity, sent) in asked {
+        let after = bus.status(&player);
+        if after.as_deref() == Some("Playing") {
+            crate::debug_log::dlog!(
+                Info,
+                "media.suppress",
+                "not_paused",
+                player = player,
+                identity = identity,
+                pause_sent = sent,
+                status_after = after,
+            );
+            result.stuck.push(player);
+        } else {
+            crate::debug_log::dlog!(
+                Info,
+                "media.suppress",
+                "player paused",
+                player = player,
+                identity = identity,
+                status_before = "Playing",
+                status_after = after,
+            );
+            result.paused.push(player);
+        }
+    }
+    result
+}
+
+struct SessionBus {
+    runtime: tokio::runtime::Runtime,
+    bus: Connection,
+}
+
+impl SessionBus {
+    fn connect() -> Option<Self> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .inspect_err(|error| tracing::warn!(%error, "cannot start the D-Bus runtime"))
+            .ok()?;
+        let bus = runtime
+            .block_on(async { tokio::time::timeout(DBUS_TIMEOUT, Connection::session()).await })
+            .ok()?
+            .inspect_err(|error| tracing::warn!(%error, "cannot reach the session D-Bus"))
+            .ok()?;
+        Some(Self { runtime, bus })
+    }
+}
+
+impl PlayerBus for SessionBus {
+    fn players(&mut self) -> Vec<String> {
+        let names: Vec<String> = self
+            .runtime
+            .block_on(call(
+                &self.bus,
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "ListNames",
+                &(),
+            ))
+            .unwrap_or_default();
+        names
             .into_iter()
             .filter(|name| name.starts_with(MPRIS_PREFIX))
-        {
-            if playback_status(bus, &name).await.as_deref() == Some("Playing")
-                && call::<_, ()>(bus, &name, MPRIS_PATH, MPRIS_PLAYER, "Pause", &())
-                    .await
-                    .is_some()
-            {
-                paused.push(name);
-            }
-        }
-        paused
-    })
+            .collect()
+    }
+
+    fn identity(&mut self, player: &str) -> Option<String> {
+        let identity: OwnedVariant = self.runtime.block_on(call(
+            &self.bus,
+            player,
+            MPRIS_PATH,
+            "org.freedesktop.DBus.Properties",
+            "Get",
+            &("org.mpris.MediaPlayer2", "Identity"),
+        ))?;
+        <&str>::try_from(&identity).ok().map(str::to_owned)
+    }
+
+    fn status(&mut self, player: &str) -> Option<String> {
+        self.runtime.block_on(playback_status(&self.bus, player))
+    }
+
+    fn pause(&mut self, player: &str) -> bool {
+        self.runtime
+            .block_on(call::<_, ()>(
+                &self.bus,
+                player,
+                MPRIS_PATH,
+                MPRIS_PLAYER,
+                "Pause",
+                &(),
+            ))
+            .is_some()
+    }
+
+    fn wait(&mut self, how_long: Duration) {
+        std::thread::sleep(how_long);
+    }
+}
+
+/// Pauses every playing MPRIS player; returns the bus names that stopped,
+/// which are the only ones resumed later. A player that ignores Pause is
+/// warned about, not resumed.
+fn pause_players() -> Vec<String> {
+    let Some(mut bus) = SessionBus::connect() else {
+        return Vec::new();
+    };
+    let result = pause_playing(&mut bus);
+    for player in &result.stuck {
+        let name = bus.identity(player).unwrap_or_else(|| player.clone());
+        crate::linux::rune_hud::notify(&format!(
+            "[W-MEDIA-NOTPAUSED] {name} kept playing when WordInk asked it to pause. Pause it yourself, or set \"While dictating\" to Mute."
+        ));
+    }
+    result.paused
 }
 
 async fn playback_status(bus: &Connection, name: &str) -> Option<String> {
@@ -465,6 +605,104 @@ fn resume_players(players: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct FakeBus {
+        /// (bus name, identity, status, ignores Pause)
+        players: Vec<(&'static str, &'static str, &'static str, bool)>,
+        pauses: Vec<String>,
+        waited: Duration,
+    }
+
+    impl PlayerBus for FakeBus {
+        fn players(&mut self) -> Vec<String> {
+            self.players.iter().map(|p| p.0.to_owned()).collect()
+        }
+        fn identity(&mut self, player: &str) -> Option<String> {
+            self.players
+                .iter()
+                .find(|p| p.0 == player)
+                .map(|p| p.1.to_owned())
+        }
+        fn status(&mut self, player: &str) -> Option<String> {
+            self.players
+                .iter()
+                .find(|p| p.0 == player)
+                .map(|p| p.2.to_owned())
+        }
+        fn pause(&mut self, player: &str) -> bool {
+            self.pauses.push(player.to_owned());
+            if let Some(p) = self.players.iter_mut().find(|p| p.0 == player)
+                && !p.3
+            {
+                p.2 = "Paused";
+            }
+            true
+        }
+        fn wait(&mut self, how_long: Duration) {
+            self.waited += how_long;
+        }
+    }
+
+    #[test]
+    fn only_the_playing_player_is_paused_and_resumed() {
+        let mut bus = FakeBus {
+            players: vec![
+                (
+                    "org.mpris.MediaPlayer2.idle",
+                    "Idle Player",
+                    "Paused",
+                    false,
+                ),
+                ("org.mpris.MediaPlayer2.music", "Music", "Playing", false),
+            ],
+            ..FakeBus::default()
+        };
+        let result = pause_playing(&mut bus);
+        assert_eq!(bus.pauses, ["org.mpris.MediaPlayer2.music"]);
+        assert_eq!(result.paused, ["org.mpris.MediaPlayer2.music"]);
+        assert!(result.stuck.is_empty());
+        assert_eq!(bus.waited, PAUSE_VERIFY, "status is re-read after a pause");
+    }
+
+    #[test]
+    fn every_playing_player_is_paused_not_just_one() {
+        let mut bus = FakeBus {
+            players: vec![
+                ("org.mpris.MediaPlayer2.a", "A", "Playing", false),
+                ("org.mpris.MediaPlayer2.b", "B", "Playing", false),
+                ("org.mpris.MediaPlayer2.c", "C", "Stopped", false),
+            ],
+            ..FakeBus::default()
+        };
+        let result = pause_playing(&mut bus);
+        assert_eq!(result.paused.len(), 2);
+        assert!(!bus.pauses.iter().any(|p| p.ends_with(".c")));
+    }
+
+    #[test]
+    fn a_player_that_ignores_pause_is_reported_stuck_and_never_resumed() {
+        let mut bus = FakeBus {
+            players: vec![
+                ("org.mpris.MediaPlayer2.browser", "Browser", "Playing", true),
+                ("org.mpris.MediaPlayer2.music", "Music", "Playing", false),
+            ],
+            ..FakeBus::default()
+        };
+        let result = pause_playing(&mut bus);
+        assert_eq!(result.stuck, ["org.mpris.MediaPlayer2.browser"]);
+        assert_eq!(result.paused, ["org.mpris.MediaPlayer2.music"]);
+    }
+
+    #[test]
+    fn nothing_playing_pauses_nothing_and_waits_for_nothing() {
+        let mut bus = FakeBus {
+            players: vec![("org.mpris.MediaPlayer2.a", "A", "Paused", false)],
+            ..FakeBus::default()
+        };
+        assert_eq!(pause_playing(&mut bus), Paused::default());
+        assert_eq!(bus.waited, Duration::ZERO);
+    }
 
     #[test]
     fn sink_volumes_parse_per_channel() {

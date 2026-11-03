@@ -659,7 +659,13 @@ pub(crate) fn run(
             // to paste resumes them here, since no result will come back.
             settle_after_submit(outcome, &suppressor, &mut headset);
             if outcome == Submitted::Silent {
-                indicator.silent_input(&silent_message(&device_label));
+                raise_failure(
+                    &Failure::Silent {
+                        device: device_label.clone(),
+                    },
+                    &events,
+                    Some(&mut indicator),
+                )?;
             }
             if release_while_idle && !timeline.wants_audio() {
                 input.close();
@@ -753,14 +759,22 @@ pub(crate) fn run(
                         input.close();
                         audio_ready = false;
                     }
-                    events.dictation(
-                        if action == HotkeyEvent::Cancel {
-                            DictationPhase::Cancelled
-                        } else {
-                            DictationPhase::Discarded
-                        },
-                        "",
-                    )?;
+                    if action == HotkeyEvent::Cancel {
+                        events.dictation(DictationPhase::Cancelled, "")?;
+                    } else {
+                        // Released before the microphone was ready: say so,
+                        // since the words were lost to the switch.
+                        raise_failure(
+                            &Failure::ReleasedEarly {
+                                device: settings.microphone.as_deref().map_or_else(
+                                    || device_label.clone(),
+                                    |id| released_name(&settings, id),
+                                ),
+                            },
+                            &events,
+                            Some(&mut indicator),
+                        )?;
+                    }
                     emit_state(&mut events, active_state(false, pending), &device_label)?;
                 }
                 HotkeyEvent::Finish if capture.is_recording() => {
@@ -858,7 +872,9 @@ pub(crate) fn run(
                     })?;
                     events.dictation(phase, text)?;
                 }
-                Err(error) => fail(&events, error)?,
+                Err(error) => {
+                    raise_failure(&Failure::from_job(&error), &events, None)?;
+                }
             }
             emit_state(
                 &mut events,
@@ -873,24 +889,35 @@ pub(crate) fn run(
                 continue;
             }
             indicator.earbuds_connecting(false);
+            let switch_ms = headset_began
+                .take()
+                .map(|at| at.elapsed().as_millis() as u64);
             crate::debug_log::dlog!(
                 Info,
                 "bluetooth.event",
                 "earbuds flow answered",
                 ready = matches!(event, crate::linux::headset::Event::Ready),
-                switch_ms = headset_began
-                    .take()
-                    .map(|at| at.elapsed().as_millis() as u64),
+                switch_ms = switch_ms,
             );
             match event {
                 crate::linux::headset::Event::Ready => input.request_open(),
                 crate::linux::headset::Event::Failed(error) => {
                     start_pending = false;
                     resume_audio(&suppressor, &mut headset);
+                    // The attempt is over: the microphone stays closed.
+                    if !timeline.wants_audio() {
+                        input.close();
+                        audio_ready = false;
+                    }
                     events.dictation(DictationPhase::Cancelled, "")?;
-                    fail(
+                    let earbuds = settings
+                        .microphone
+                        .as_deref()
+                        .map_or_else(|| device_label.clone(), |id| released_name(&settings, id));
+                    raise_failure(
+                        &Failure::from_headset(&earbuds, &error, switch_ms),
                         &events,
-                        format!("could not use the earbuds' microphone: {error}"),
+                        Some(&mut indicator),
                     )?;
                     emit_state(&mut events, active_state(false, pending), &device_label)?;
                 }
@@ -979,13 +1006,34 @@ pub(crate) fn run(
                     resume_audio(&suppressor, &mut headset);
                     events.dictation(DictationPhase::Cancelled, "")?;
                 }
-                events.dictation(
-                    DictationPhase::Failed(
-                        route_problem
-                            .unwrap_or_else(|| "microphone stream interrupted; reopening".into()),
-                    ),
-                    "",
-                )?;
+                if release_while_idle {
+                    // A microphone that opens per dictation is not reopened
+                    // behind the user's back: the dictation fails.
+                    if !timeline.wants_audio() {
+                        input.close();
+                    }
+                    start_pending = false;
+                    if std::mem::take(&mut headset_connecting) {
+                        indicator.earbuds_connecting(false);
+                    }
+                    resume_audio(&suppressor, &mut headset);
+                    let reason = route_problem
+                        .unwrap_or_else(|| "the microphone stream ended unexpectedly".into());
+                    raise_failure(
+                        &Failure::from_open(&device_label, &reason),
+                        &events,
+                        Some(&mut indicator),
+                    )?;
+                } else {
+                    events.dictation(
+                        DictationPhase::Failed(
+                            route_problem.unwrap_or_else(|| {
+                                "microphone stream interrupted; reopening".into()
+                            }),
+                        ),
+                        "",
+                    )?;
+                }
                 emit_state(
                     &mut events,
                     active_state(capture.is_recording(), pending),
@@ -1022,7 +1070,22 @@ pub(crate) fn run(
                     indicator.earbuds_connecting(false);
                 }
                 resume_audio(&suppressor, &mut headset);
-                fail(&events, format!("could not open microphone: {error}"))?;
+                // Never reopen after a failed open, and never fall back to
+                // another microphone: the dictation fails.
+                if !timeline.wants_audio() {
+                    input.close();
+                    audio_ready = false;
+                }
+                let chosen = settings
+                    .microphone
+                    .as_deref()
+                    .map_or_else(|| device_label.clone(), |id| released_name(&settings, id));
+                events.dictation(DictationPhase::Cancelled, "")?;
+                raise_failure(
+                    &Failure::from_open(&chosen, &error),
+                    &events,
+                    Some(&mut indicator),
+                )?;
                 emit_state(&mut events, active_state(false, pending), &device_label)?;
             }
         }
@@ -1145,9 +1208,42 @@ fn settle_after_submit(
     }
 }
 
-/// The message for a microphone that recorded nothing.
-fn silent_message(device: &str) -> String {
-    format!("{device} is silent \u{2014} check the microphone")
+use crate::linux::failure::{self, Failure};
+
+/// The listener's real alerts: the error tone, the HUD failure state (when it
+/// has no job of its own to fail), a critical notification, and the event log.
+struct ListenerAlerts<'a> {
+    events: &'a EventLog,
+    indicator: Option<&'a mut LinuxIndicator>,
+}
+
+impl failure::Alerts for ListenerAlerts<'_> {
+    fn tone(&mut self) {
+        feedback::play(Tone::Error);
+    }
+    fn hud(&mut self, _: &str) {
+        if let Some(indicator) = &mut self.indicator {
+            indicator.failure();
+        }
+    }
+    fn notify(&mut self, text: &str) {
+        crate::linux::rune_hud::notify(text);
+    }
+    fn event(&mut self, text: &str) -> Result<()> {
+        self.events
+            .dictation(DictationPhase::Failed(text.to_owned()), "")?;
+        Ok(())
+    }
+}
+
+/// Raises `failure` loudly. A failed job already shows in the HUD through its
+/// own result, so those pass no indicator.
+fn raise_failure(
+    failure: &Failure,
+    events: &EventLog,
+    indicator: Option<&mut LinuxIndicator>,
+) -> Result<()> {
+    failure::raise(failure, &mut ListenerAlerts { events, indicator })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1175,7 +1271,7 @@ fn submit_capture(
             events.dictation(DictationPhase::Discarded, "")?;
             crate::debug_log::dlog!(
                 Info,
-                "dictation.end",
+                "vad.end",
                 "discarded",
                 reason = "too short (a tap or chord, under the minimum hold)",
                 device = device,
@@ -1184,13 +1280,16 @@ fn submit_capture(
         }
         Finish::Transcribe(clip) if clip.is_dead_input() => {
             let levels = clip.levels();
-            let message = silent_message(device);
+            let message = Failure::Silent {
+                device: device.to_owned(),
+            }
+            .text();
             if let Some(print) = print {
                 print.send(PrintedTranscript::Failed(message.clone()));
             }
             crate::debug_log::dlog!(
                 Info,
-                "dictation.end",
+                "vad.end",
                 "silent input: the microphone delivered no signal",
                 reason = "silent input",
                 device = device,
@@ -1204,7 +1303,7 @@ fn submit_capture(
                 peak = levels.peak,
                 "the microphone recorded only silence"
             );
-            fail(events, message)?;
+            // The loop raises the error: tone, HUD, notification, event.
             Submitted::Silent
         }
         Finish::Transcribe(clip) if clip.is_near_silent() => {
@@ -1213,7 +1312,7 @@ fn submit_capture(
             let levels = clip.levels();
             crate::debug_log::dlog!(
                 Info,
-                "dictation.end",
+                "vad.end",
                 "discarded",
                 reason = "no speech (below the silence gate, or none detected)",
                 device = device,
@@ -1630,7 +1729,7 @@ mod tests {
         assert!(finished.load(Ordering::Acquire));
     }
 
-    fn submit_recorded(amplitude: f32) -> (Submitted, Vec<String>, usize) {
+    fn submit_recorded(amplitude: f32) -> (Submitted, Vec<String>) {
         let (engine, commands) = TranscriptionEngine::for_test();
         let (mut events, path) = event_log();
         let (jobs, queued) = mpsc::sync_channel(2);
@@ -1653,47 +1752,43 @@ mod tests {
         assert_eq!(queued.try_recv().is_ok(), outcome == Submitted::Queued);
         let _ = commands;
         drop(events);
-        let log = std::fs::read_to_string(&path).unwrap_or_default();
         let _ = std::fs::remove_file(path);
         let printed = match printed.try_recv() {
             Ok(PrintedTranscript::Failed(message)) => vec![message],
             Ok(PrintedTranscript::NoSpeech) => vec!["no speech".to_owned()],
             _ => Vec::new(),
         };
-        (outcome, printed, log.matches("is silent").count())
+        (outcome, printed)
     }
 
     #[test]
     fn a_capture_of_all_zeros_ends_as_a_silent_input_error_not_a_discard() {
-        let (outcome, printed, silent_events) = submit_recorded(0.0);
+        let (outcome, printed) = submit_recorded(0.0);
         assert_eq!(outcome, Submitted::Silent);
         assert_eq!(
             printed,
-            ["Between 3ANC is silent \u{2014} check the microphone"]
+            [Failure::Silent {
+                device: "Between 3ANC".into()
+            }
+            .text()]
         );
-        assert_eq!(silent_events, 1, "the event log carries the error");
+        assert!(
+            printed[0]
+                .starts_with("[E-MIC-SILENT] Between 3ANC is silent \u{2014} check the microphone")
+        );
     }
 
     #[test]
     fn near_silent_room_noise_is_a_discard_not_a_silent_input() {
         // -66 dBFS: a live microphone in a quiet room.
-        let (outcome, printed, silent_events) = submit_recorded(0.000_7);
+        let (outcome, printed) = submit_recorded(0.000_7);
         assert_eq!(outcome, Submitted::Discarded);
         assert_eq!(printed, ["no speech"]);
-        assert_eq!(silent_events, 0);
     }
 
     #[test]
     fn speech_is_queued() {
         assert_eq!(submit_recorded(0.1).0, Submitted::Queued);
-    }
-
-    #[test]
-    fn the_silent_message_names_the_device() {
-        assert_eq!(
-            silent_message("Kit Pods"),
-            "Kit Pods is silent \u{2014} check the microphone"
-        );
     }
 
     mod earbuds {
@@ -1705,6 +1800,8 @@ mod tests {
 
         const CARD: &str = "bluez_card.00_11_22_33_44_55";
         const ID: &str = "bluez_input.00:11:22:33:44:55";
+        const NODE: &str = "bluez_input.00_11_22_33_44_55.0";
+        const MAC_MIC: &str = "alsa_input.mac_mic";
 
         #[derive(Default)]
         struct World {
@@ -1712,6 +1809,7 @@ mod tests {
             polls: u32,
             marker: Option<Marker>,
             calls: Vec<String>,
+            default: String,
         }
 
         #[derive(Clone)]
@@ -1736,6 +1834,18 @@ mod tests {
                 world.polls += 1;
                 world.profile == "headset-head-unit" && world.polls > 2
             }
+            fn source_node(&mut self, _: &str) -> Option<String> {
+                Some(NODE.to_owned())
+            }
+            fn default_source(&mut self) -> Option<String> {
+                Some(self.0.lock().unwrap().default.clone())
+            }
+            fn set_default_source(&mut self, node: &str) -> Result<(), String> {
+                let mut world = self.0.lock().unwrap();
+                world.calls.push(format!("default:{node}"));
+                world.default = node.to_owned();
+                Ok(())
+            }
             fn pause(&mut self, _: Duration) {}
         }
 
@@ -1756,6 +1866,7 @@ mod tests {
         fn earbuds() -> (Arc<Mutex<World>>, HeadsetFlow) {
             let world = Arc::new(Mutex::new(World {
                 profile: "a2dp-sink".into(),
+                default: MAC_MIC.into(),
                 ..World::default()
             }));
             let backend = world.clone();
@@ -1775,13 +1886,23 @@ mod tests {
                 }
             }
             assert_eq!(world.lock().unwrap().profile, "headset-head-unit");
+            assert_eq!(
+                world.lock().unwrap().default,
+                NODE,
+                "capture follows the default, which is now the earbuds' microphone"
+            );
             assert!(flow.is_active());
             (world, flow)
         }
 
+        /// Waits until the earbuds are back in `profile` and the default
+        /// source is the one before the dictation, restored in that order:
+        /// default source first, then the profile.
         fn wait_for(world: &Arc<Mutex<World>>, profile: &str) {
             let waiting = Instant::now();
-            while world.lock().unwrap().profile != profile {
+            while world.lock().unwrap().profile != profile
+                || world.lock().unwrap().default != MAC_MIC
+            {
                 assert!(
                     waiting.elapsed() < Duration::from_secs(5),
                     "the earbuds stayed in {}",
@@ -1789,6 +1910,13 @@ mod tests {
                 );
                 thread::sleep(Duration::from_millis(5));
             }
+            let calls = world.lock().unwrap().calls.clone();
+            let tail = &calls[calls.len() - 2..];
+            assert_eq!(
+                tail,
+                [format!("default:{MAC_MIC}"), profile.to_owned()],
+                "{calls:?}"
+            );
         }
 
         fn settle(outcome: Submitted) -> (Arc<Mutex<World>>, Option<HeadsetFlow>) {
@@ -1854,8 +1982,19 @@ mod tests {
         fn shutdown_restores_the_earbuds_before_the_listener_exits() {
             let (world, flow) = earbuds();
             drop(flow);
-            assert_eq!(world.lock().unwrap().profile, "a2dp-sink");
-            assert!(world.lock().unwrap().marker.is_none());
+            let world = world.lock().unwrap();
+            assert_eq!(world.profile, "a2dp-sink");
+            assert_eq!(world.default, MAC_MIC);
+            assert!(world.marker.is_none());
+        }
+
+        #[test]
+        fn the_marker_records_the_default_source_before_it_is_changed() {
+            let (world, flow) = earbuds();
+            let marker = world.lock().unwrap().marker.clone().unwrap();
+            assert_eq!(marker.previous, "a2dp-sink");
+            assert_eq!(marker.previous_source.as_deref(), Some(MAC_MIC));
+            drop(flow);
         }
     }
 }

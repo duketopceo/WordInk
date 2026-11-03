@@ -247,7 +247,8 @@ mod tests {
 
     fn settles_after(what: Audition) -> bool {
         let mut hud = Hud::new(Tuning::default(), what);
-        hud.advance_to(what.length().as_secs_f32() + 1.5);
+        // A failure stays on screen for about four seconds first.
+        hud.advance_to(what.length().as_secs_f32() + 6.0);
         hud.settled()
     }
 

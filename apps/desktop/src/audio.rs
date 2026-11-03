@@ -1437,6 +1437,9 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         Ok(Opened::Input(Box::new(input)))
     };
     let plan = resolve(request.selected_device.as_deref())?;
+    if let Some(error) = no_silent_fallback(request, plan.selection) {
+        return Err(error);
+    }
     let (Some(selected), InputTarget::Named(_), None) = (
         request.selected_device.as_deref(),
         plan.target,
@@ -1449,12 +1452,43 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         request.fallback,
         || open(plan),
         || {
+            // An open for a dictation never records from a different
+            // microphone than the one chosen: it fails instead.
+            if request.fallback == SelectedFallback::AfterRetries && is_earbuds(selected) {
+                crate::debug_log::dlog!(
+                    Info,
+                    "audio.open",
+                    "the chosen microphone would not open; not falling back",
+                    selected = selected,
+                );
+                return Err(eyre!("{selected} would not open"));
+            }
             let mut fallback = resolve(None)?;
             fallback.selection = Selection::Unopenable;
             open(fallback)
         },
         std::thread::sleep,
     )
+}
+
+/// Bluetooth earbuds' microphone (`bluez_input.<address>`): the one choice
+/// that is never swapped for another microphone behind the user's back.
+fn is_earbuds(id: &str) -> bool {
+    id.starts_with("bluez_input.")
+}
+
+/// An on-demand dictation open whose chosen earbuds are not connected
+/// fails instead of quietly recording from the system default.
+fn no_silent_fallback(
+    request: &OpenRequest,
+    selection: Selection,
+) -> Option<color_eyre::eyre::Report> {
+    let selected = request.selected_device.as_deref()?;
+    (request.fallback == SelectedFallback::AfterRetries
+        && is_earbuds(selected)
+        && request.device_override.is_none()
+        && matches!(selection, Selection::Unlisted | Selection::Unopenable))
+    .then(|| eyre!("the sound server has no source {selected}; it is not connected"))
 }
 
 /// Opens the microphone a meeting records, resolved like dictation's, or
@@ -2729,6 +2763,91 @@ mod tests {
             open(SelectedFallback::Immediate, 1),
             (Ok("automatic"), 1, 0)
         );
+    }
+
+    fn request(selected: &str, fallback: SelectedFallback) -> OpenRequest {
+        OpenRequest {
+            device_override: None,
+            selected_device: Some(selected.to_owned()),
+            fallback,
+            keep: None,
+        }
+    }
+
+    #[test]
+    fn earbuds_that_are_gone_fail_a_dictation_instead_of_falling_back() {
+        let earbuds = "bluez_input.00:11:22:33:44:55";
+        let error = no_silent_fallback(
+            &request(earbuds, SelectedFallback::AfterRetries),
+            Selection::Unlisted,
+        )
+        .expect("a dictation open fails");
+        assert!(error.to_string().contains("no source"), "{error}");
+        assert!(
+            no_silent_fallback(
+                &request(earbuds, SelectedFallback::AfterRetries),
+                Selection::Unopenable
+            )
+            .is_some()
+        );
+        // Resolved fine, an immediate open, or another microphone: unchanged.
+        assert!(
+            no_silent_fallback(
+                &request(earbuds, SelectedFallback::AfterRetries),
+                Selection::InUse
+            )
+            .is_none()
+        );
+        assert!(
+            no_silent_fallback(
+                &request(earbuds, SelectedFallback::Immediate),
+                Selection::Unlisted
+            )
+            .is_none()
+        );
+        assert!(
+            no_silent_fallback(
+                &request("alsa_input.usb", SelectedFallback::AfterRetries),
+                Selection::Unlisted
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn a_failed_open_ends_the_attempt_and_nothing_reopens_after_it() {
+        let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = opens.clone();
+        let mut input = RecoveringAudioInput::with_opener_for_test(
+            Some("bluez_input.00:11:22:33:44:55"),
+            || 0,
+            move |_| {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err(eyre!("the sound server has no source bluez_input"))
+            },
+        );
+        input.request_open();
+        let waiting = Instant::now();
+        loop {
+            match input.recv_timeout(Duration::from_millis(20), true) {
+                RecoveringAudioInputEvent::OpenFailed(error) => {
+                    assert!(error.contains("no source"));
+                    break;
+                }
+                _ => assert!(waiting.elapsed() < Duration::from_secs(5), "never failed"),
+            }
+        }
+        // The listener closes the input when the dictation ends; from then
+        // on nothing opens it again, however long it idles.
+        input.close();
+        for _ in 0..25 {
+            assert!(matches!(
+                input.recv_timeout(Duration::from_millis(20), true),
+                RecoveringAudioInputEvent::Timeout
+            ));
+        }
+        assert!(!input.is_active());
+        assert_eq!(opens.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]
