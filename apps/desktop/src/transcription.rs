@@ -1,6 +1,7 @@
 pub(crate) mod artifacts;
 pub(crate) mod background_priority;
 pub(crate) mod cloud;
+pub(crate) mod compare;
 #[cfg(target_os = "macos")]
 pub(crate) mod benchmark;
 #[cfg(all(

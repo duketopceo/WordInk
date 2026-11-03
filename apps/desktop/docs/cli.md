@@ -51,7 +51,9 @@ hex
 │   ├── rename <id> <name>         Labs: an import's picker name
 │   ├── repair <id>                Labs: rehash Hex's copy; ready again if it still matches
 │   ├── remove <id>                Labs: Hex's copy of an import (not the selected model)
-│   └── status|devices|check|transcribe <wav>  Linux and Windows, run in this process (`wordink devices [--all]`, `devices rename <id> <name>`)
+│   └── status|devices|check|transcribe <wav>  Linux and Windows, run in this process (`wordink devices [--all]`, `devices rename <id> <name>`); `transcribe --device auto|gpu|cpu` picks where it runs and prints device, load and run time, and real-time factor on stderr
+├── compare <wav> [--engines E,..] [--reference R.txt] [--device auto|gpu|cpu]  developer tool (hidden): one WAV through several engines (`provider:model`, `local:<model id>`); metrics, texts side by side, word diff; rows go to `compare.jsonl` in the logs folder
+│   └── --report [--reference R.txt] [--clip ID]  rank the logged runs: median latency, real-time factor, $/hour, and word error rate against a reference; shortlist = top three plus the best local engine
 ├── commands
 │   ├── init                       create ~/.config/hex (local, no running Hex needed)
 │   └── check                      validate ~/.config/hex/hex.config.ts transformations
