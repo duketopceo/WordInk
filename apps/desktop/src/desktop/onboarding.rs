@@ -930,6 +930,7 @@ pub fn relaunch_allowed(now_ms: u64) -> bool {
 }
 
 /// The step a relaunched Hex resumes at, consumed once.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn take_resume() -> Option<Step> {
     let directory = crate::app_paths::support_dir().ok()?;
     take_resume_at(&directory, unix_ms())
@@ -987,6 +988,7 @@ pub fn record_step(step: Step) {
     }
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn saved_step() -> Option<Step> {
     saved_step_at(&crate::app_paths::support_dir().ok()?)
 }
