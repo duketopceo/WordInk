@@ -1,1 +1,0 @@
-../../../WordInkRemote/WordInkRemoteApp.swift

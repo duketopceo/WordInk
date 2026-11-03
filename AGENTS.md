@@ -2,7 +2,7 @@
 
 WordInk is open-source dictation. The direction is **one desktop app**, `apps/desktop`, based on Hex (MIT) and arriving in a pull request. It uses Groq by default and Parakeet v3 locally with no key, and targets Linux on any Wayland desktop, Windows, and macOS on Apple silicon. The current plan is `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`; `docs/archive/` holds superseded plans. Phases and status are in `ROADMAP.md`.
 
-Until the app reaches parity on each OS, the Python `wordink-dictd` (`sdks/python`) is the working desktop client. Three products are separate and stay separate: the web SDK (`packages/core`, `web`, `react`, `local`), the gateway (`packages/server`) and the iOS app (`apps/ios`, `sdks/ios`). Repo name `WordInk`, npm scope `@wordink`.
+Until the app reaches parity on each OS, the Python `wordink-dictd` (`sdks/python`) is the working desktop client. Products are separate and stay separate: the web SDK (`packages/core`, `web`, `react`, `local`), the gateway (`packages/server`). The iOS app is paused (preserved on branch `archive/ios-2026-11-03`). Repo name `WordInk`, npm scope `@wordink`.
 
 ## Commands
 
@@ -22,7 +22,7 @@ scripts/scrub-check.sh <expressions-file>       # private strings must not appea
 - The core wasm has a 150 KB gzip budget. Check size before adding a crate.
 - Long-lived provider keys never go to the browser. `@wordink/server` fails closed until an `authorize` hook is supplied. Dev-key mode is localhost-only.
 - No telemetry leaves the end user's device.
-- Shared behavior fixtures live in `tests/fixtures/` and are checked by the TypeScript, Python and Swift tests. Change a fixture and its tests together.
+- Shared behavior fixtures live in `tests/fixtures/` and are checked by the TypeScript, Python and Rust tests. Change a fixture and its tests together.
 - No personal or machine-specific details in the repo: no real hostnames, home paths, personal emails or private tool names. Use `example.com`, `Alex`, `~`.
 - TypeWhisper is GPL-3.0: use its ideas only, never its code, strings or assets.
 

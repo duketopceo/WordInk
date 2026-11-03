@@ -28,7 +28,6 @@ body:
         - Python SDK
         - Web SDK / packages
         - Gateway / server
-        - iOS app
         - Docs
         - Other
     validations:

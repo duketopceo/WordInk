@@ -40,7 +40,7 @@ The two hotkeys `wordink-dictd` registers. Hold: record while the key is down, t
 
 ### Clean-up
 
-The post-transcription step that turns raw speech into finished text: filler removal, course corrections ("no wait"), spoken lists, snippet expansion, tone presets and vocabulary learning. The same contract is kept in the gateway (`flow.ts`), the Python tooling and the iOS SDK, checked by `tests/fixtures/flow-contract.json`. Also called flow.
+The post-transcription step that turns raw speech into finished text: filler removal, course corrections ("no wait"), spoken lists, snippet expansion, tone presets and vocabulary learning. The same contract is kept in the gateway (`flow.ts`), the Python tooling and the desktop app, checked by `tests/fixtures/flow-contract.json`. Also called flow.
 
 ### Snippet
 

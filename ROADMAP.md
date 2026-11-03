@@ -10,7 +10,7 @@ This page lists themes, not tickets. "Done" means merged to `master`. "Planned" 
 - **Open source, no telemetry, no WordInk servers.** MIT licensed.
 - **Linux on any Wayland desktop** (Omarchy gets extras), **Windows**, and **macOS on Apple silicon**.
 - **`wordink-dictd` stays** (Python, `sdks/python`) until the desktop app reaches parity on each OS. Then it is retired there.
-- **Separate products, not merged into the app:** the web SDK (`packages/*`), the gateway (`packages/server`) and the iOS app (`apps/ios`, `sdks/ios`).
+- **Separate products, not merged into the app:** the web SDK (`packages/*`), the gateway (`packages/server`). The iOS app is paused.
 
 ## Now
 
@@ -29,7 +29,7 @@ This page lists themes, not tickets. "Done" means merged to `master`. "Planned" 
 
 - macOS notarization and Windows Authenticode signing (both need paid accounts). Until then macOS and Windows builds are unsigned and the docs say so.
 - Live-API hardening for OpenAI and Deepgram in the web SDK, and a manual cross-browser handcheck.
-- Mobile beyond the current iOS app.
+- Rebuild the iOS app, lightweight (the earlier app is preserved on branch `archive/ios-2026-11-03`).
 - Stronger local engines in the browser SDK.
 
 ## Platform support
@@ -39,7 +39,7 @@ This page lists themes, not tickets. "Done" means merged to `master`. "Planned" 
 | Linux, Wayland (any desktop) | App code in `master`; device acceptance and release pending | Works; text insertion and binds are Hyprland-first (see `examples/omarchy-dictation`) | Omarchy smoke test remains; Linux release signing is planned |
 | Windows | App code in `master`; device acceptance and release pending | Works (`examples/windows-dictation`) | Real-hardware acceptance remains; unsigned |
 | macOS, Apple silicon | App code in `master`; device acceptance and release pending | Works; first-run verified on a real Mac (`examples/macos-dictation`) | Real-app acceptance remains; unsigned, not notarized |
-| iOS | Separate product (`apps/ios`) | n/a | Talks to a gateway you run; built from source |
+| iOS | Paused | n/a | The earlier app is preserved on branch `archive/ios-2026-11-03` and will be rebuilt later |
 | Web | Separate product (`packages/*`) | n/a | `<wordink-mic>` and React; not on npm yet |
 
 ## Model and provider support
@@ -60,6 +60,5 @@ This page lists themes, not tickets. "Done" means merged to `master`. "Planned" 
 - **Web SDK.** `@wordink/core` (Rust core as WebAssembly plus a TypeScript host), `<wordink-mic>`, `useDictation`, the credential relay.
 - **Gateway.** `wordink-gateway`: OpenAI-compatible endpoint, provider fallback, per-device tokens, runtime vocabulary.
 - **Python tooling.** `wordink` CLI and `wordink-mcp`; `wordink-dictd` on Linux, Windows and macOS.
-- **iOS app.** Hold-to-talk remote and keyboard through a gateway (in progress).
 
 Background: [`docs/research/2026-10-10-landscape.md`](docs/research/2026-10-10-landscape.md) (landscape), [`DESIGN.md`](DESIGN.md) (design direction).

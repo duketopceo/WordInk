@@ -28,13 +28,6 @@ updates:
     groups:
       desktop-rust-deps:
         patterns: ["*"]
-  # Swift packages
-  - package-ecosystem: swift
-    directory: /sdks/ios
-    schedule: { interval: weekly }
-  - package-ecosystem: swift
-    directory: /apps/ios/xtool
-    schedule: { interval: weekly }
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
