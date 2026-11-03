@@ -28,3 +28,32 @@ your machine.
   `SHA256SUMS`, and `SHA256SUMS.sig` is an ed25519 signature over that list.
   Each file also has a build-provenance attestation
   (`gh attestation verify <file> -R duketopceo/WordInk`).
+
+### Features
+
+- Terminal auto-paste: text goes into terminal apps with the right shortcut.
+- Usage stats: words, speaking speed, streak and top apps.
+- Vocabulary suggestions from your own corrections.
+- Bluetooth earbuds work for dictation, and microphones have clean, renameable names.
+- Shorter first run, with a Finish later option.
+- Bigger bottom indicator pill (1.25x).
+- `wordink compare` runs one recording through several engines, and uploads can be FLAC.
+- Copy diagnostics in Settings (the only opt-in data sharing) and release download counts from GitHub.
+- `[record] device` setting for `wordink-dictd`.
+- GPU transcription through Vulkan on Linux.
+- OpenRouter as a first-party engine (transcription endpoint, 29 models) with p50/p95 latency in Usage, and a separate meeting engine setting.
+- Developer mode: full debug logs with a live view, and clear coded errors for microphone, earbud, engine and paste failures.
+
+### Fixes
+
+- A GPU run that was slower than CPU is now detected and reported instead of silently kept.
+
+### Release and install
+
+- One-line installers: `install.sh` (Linux), `install-macos.sh` (macOS) and `install.ps1` (Windows), published as release assets.
+- Tag-driven release workflow with an install smoke test on Linux x86_64 and aarch64, macOS arm64 and Windows x64. Prereleases follow the rolling `desktop-dev` channel.
+- See [`docs/releasing.md`](../../docs/releasing.md) and [`docs/release-checklist.md`](../../docs/release-checklist.md).
+
+### Removed
+
+- The iOS app is paused and removed from the active tree; it is preserved on branch `archive/ios-2026-11-03`.

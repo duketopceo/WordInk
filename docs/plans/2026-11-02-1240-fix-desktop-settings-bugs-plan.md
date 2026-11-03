@@ -6,6 +6,8 @@ topic: desktop-settings-bugs
 artifact_contract: ce-unified-plan/v1
 product_contract_source: ce-plan-bootstrap
 execution: code
+status: done
+pr: [119, 121]
 ---
 
 # WordInk desktop settings bug fixes (GUI test report) - Plan
