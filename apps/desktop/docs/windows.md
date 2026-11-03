@@ -29,41 +29,24 @@ app and **Disabled** when it does nothing.
 
 ## Install
 
-x86_64 PCs need a 2013 or newer processor with AVX2 (Intel Haswell / AMD Excavator or later); on an older processor Hex shows a message and quits instead of starting.
+x86_64 PCs need a 2013 or newer processor with AVX2 (Intel Haswell / AMD Excavator or later); on an older processor WordInk shows a message and quits instead of starting.
 
-Download and run the installer for your PC:
-
-- x64: [`HexSetup.exe`](https://anoma.ly/hex/download/windows-x64-setup)
-- ARM64: [`HexSetup.exe`](https://anoma.ly/hex/download/windows-arm64-setup)
-
-Until Hex's first stable release these are the newest dev build, which keeps
-updating itself from the Dev channel; afterwards, the stable release.
-
-[anoma.ly/hex](https://anoma.ly/hex/) picks the right one. The
-installer needs no administrator rights: it installs for the current user,
-adds Hex to the Start menu and to **Settings › Apps** for uninstalling, and
-opens Hex, whose first run downloads a speech model. Releases built once
-Anomaly's Azure Artifact Signing is configured are Authenticode-signed
-([windows-signing.md](windows-signing.md)). Until then, and while a new
-publisher builds SmartScreen reputation, SmartScreen may say it protected your
-PC; choose **More info**, then **Run anyway**.
-
-**x64** decodes on the GPU through Vulkan and needs a current NVIDIA, AMD, or
-Intel graphics driver (it supplies `vulkan-1.dll`); the installer stops with an
-explanation when it is missing. **ARM64** decodes on the CPU. Both are
-self-contained: no Visual C++ Redistributable is required. Hex then keeps
-itself current through the signed update feed. Uninstalling removes every
-installed version, the shortcut, and Launch at login, and keeps settings, logs,
-history, and models in `%APPDATA%\hex`.
-
-The installer and the script below create the same managed layout, so either
-can replace the other. For a scripted install:
+Install with the one-line PowerShell installer from the latest release
+(see [downloads.md](downloads.md) and [releasing.md](../../../docs/releasing.md)):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr https://anoma.ly/hex/files/install-windows.ps1 -OutFile install-windows.ps1; ./install-windows.ps1"
+irm https://github.com/duketopceo/WordInk/releases/latest/download/install.ps1 | iex
 ```
 
-Uninstall a script install with `install-windows.ps1 -Uninstall`.
+It installs per user, needs no
+administrator rights, and is **unsigned**: SmartScreen may say it protected your
+PC; choose **More info**, then **Run anyway**. WordInk's first run downloads a
+speech model. The app does not update itself on Windows; it links to the newest
+release.
+
+**x64** decodes on the GPU through Vulkan and needs a current NVIDIA, AMD, or
+Intel graphics driver (it supplies `vulkan-1.dll`). **ARM64** decodes on the CPU.
+Uninstalling keeps settings, logs, history, and models in `%APPDATA%\hex`.
 
 ## Known Issues
 
@@ -311,9 +294,9 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Vocabulary as Whisper and Qwen3-ASR's context prompt | Implemented |
 | Release microphone while idle | Implemented; mutually exclusive with audio pre-roll, as documented in Settings |
 | While-dictating audio control (mute other apps or pause media) | Implemented via WASAPI session volumes and GSMTC |
-| Signed automatic self-update for managed installs | Implemented for x64 and ARM64; the same ed25519 key and `https://anoma.ly/hex/files` origin as Linux, one feed per architecture, activating into a user-local versions directory. Checks 10 s after launch and every 6 h (or Check for updates); a staged update shows Restart to update in the tray menu and the window's sidebar footer, and the tray tooltip says an update is available. Source builds keep the GitHub release link (Download update); CI test builds never check |
+| Update check | Windows builds are unsigned and only link to the newest GitHub release (no self-update); see [releasing.md](../../../docs/releasing.md) |
 | Web-domain mode rules and browser context via UI Automation | Implemented; the page URL comes from the browser's UIA document element, bounded so a hung provider degrades to application-only context |
-| Managed installer with Start Menu integration and clean uninstall | Implemented as `.github/release/install-windows.ps1`; it creates the self-updating versions layout, and updates retarget the managed shortcut and Launch-at-login entry |
+| Managed installer with Start Menu integration and clean uninstall | Implemented as `packaging/windows/install.ps1`; it creates the self-updating versions layout, and updates retarget the managed shortcut and Launch-at-login entry |
 | First-run onboarding | Implemented; a fresh install picks a dictation language, downloads its recommended model with live progress, and starts listening only once setup is recorded — the shared first-run story, with a Microphone page only while the privacy switch is off and the practice game on the real shortcut |
 | Activity pane with the live session and recent transcripts | Implemented in developer builds; the shared read-only pane |
 | Developer Meetings, live drafts, and meeting paste | Missing |
@@ -349,6 +332,6 @@ x64 and ARM64 by
 [`release.yml`](../.github/workflows/release.yml) with
 [`scripts/build-windows.sh`](../scripts/build-windows.sh), Authenticode-signed,
 and published to the Anomaly release service with the other platforms
-(`docs/releasing.md`); [`.github/release/install-windows.ps1`](../.github/release/install-windows.ps1)
+(`docs/releasing.md`); [`packaging/windows/install.ps1`](../packaging/windows/install.ps1)
 installs from its stable manifest. Users install
 with the command under [Install](#install).

@@ -5,7 +5,7 @@ This maps existing behavior. [ROADMAP.md](../../ROADMAP.md) owns future work;
 [AGENTS.md](../../AGENTS.md) owns implementation invariants.
 
 Initial source baseline: September 1, 2026, `9e9da53aa9ed`. Public macOS release:
-[2.3.1](../releases/2.3.1.md), with custom-domain downloads, a GitHub DMG mirror,
+[2.3.1](../archive/hex-releases/2.3.1.md), with custom-domain downloads, a GitHub DMG mirror,
 and model-download recovery guidance. The initial map was source-only. Listed checks are
 locators unless an executed result is explicitly recorded, as in the
 [keyboard-layout verification](recovery.md#keyboard-layout-resolution).
@@ -48,48 +48,17 @@ The other capabilities stay here until they need their own verification recipe.
 
 ## Get Ready
 
-Install the signed macOS app with `brew install --cask anomalyco/tap/hex` or the
-[manual DMG](../../README.md#downloads). The cask uses a versioned, checksum-pinned
-DMG, requires Apple silicon/macOS 15+, and leaves updates to Hex's own updater. It does
-not require OpenCode, launch the app automatically, migrate the legacy
-Swift app, or forcibly replace an existing app destination. Homebrew uninstall
-leaves runtime settings, models, and retained data intact.
+Install WordInk with the one-line installer for your platform; see [downloads.md](../downloads.md)
+and [releasing.md](../../../../docs/releasing.md).
 
 ```ts
-Download Hex                              // setup.download-recovery
-├── anoma.ly/hex names the visitor's platform  // setup.download-button
-│   ├── Mac -> DMG | Intel Mac -> disabled, "needs Apple silicon"
-│   ├── Windows x64 / ARM64 (UA-CH) -> wordink-setup-<version>-windows-<arch>.exe + SmartScreen note
-│   ├── Linux -> copyable `curl … install-linux.sh | sh` + Arch/glibc requirement
-│   ├── Phone -> Send yourself the link
-│   └── Other platforms -> every build, Homebrew, the GitHub release
-├── Website, README, installers, apps, feeds, appcast -> anoma.ly/hex/files -> R2 bytes (Worker hex-production-site)
-├── Releases up to 2.3.1 -> downloads.hex.kitlangton.dev (Kit's frozen bucket) -> the same bytes
-├── GitHub v<version> (app-v through 2.3.1) -> identical DMG, Setup.exe, and Linux bytes
-└── Older app cannot reach its update feed -> manually install the DMG
-
-Install on Windows                        // setup.windows-installer
-├── Setup.exe, per user, no admin -> managed versions\<version>\hex.exe
-│   ├── x64 without vulkan-1.dll -> stop with driver guidance
-│   ├── another version installed (e.g. self-updated) -> install this one over it
-│   └── finish -> Open Hex -> the first run downloads a model
-└── Settings › Apps -> uninstall every version, shortcut, Launch at login; keep data
-
-Install on Linux                          // setup.linux-installer
-└── curl … | sh -> signed feed -> verified artifact -> launcher + hex.service
-    └── cannot start -> name the glibc floor or the missing Arch packages
-
-Prepare local models                      // separate network dependency
-└── Dictation -> huggingface.co and its download CDN
-    └── Transfer fails -> host-specific guidance -> restore access -> Retry
+Download WordInk
+├── GitHub Releases (duketopceo/WordInk, desktop-vX.Y.Z tags) -> one-line installers
+│   ├── Linux -> install.sh (ed25519-verified, self-updating)
+│   ├── macOS -> install-macos.sh (unsigned WordInk.app, link-only updates)
+│   └── Windows -> install.ps1 (per user, unsigned, link-only updates)
+└── Dev channel -> rolling desktop-dev prerelease (dev.json)
 ```
-
-The website shows the pinned macOS version and platform requirements beside its
-download links. App mirrors use explicit `v…` release tags (`app-v…` through 2.3.1) rather than GitHub's
-repository-wide latest release, which may refer to the SDK. Builds on the release
-service update from `https://anoma.ly/release` (docs/releasing.md); the 2.3.1
-feeds, appcast, and the legacy `r2.dev` endpoint stay frozen for installed
-clients. Hosting does not guarantee access through every corporate policy.
 
 The site's hero is an animated, optional show: an idle head and an ⌥ keycap until
 the visitor presses it, then a voiced demo of messages, OpenCode prompts and fixes
@@ -933,7 +902,7 @@ Timeout or settle -> requests abandoned, process group / job object killed
 ```
 
 The API is documented for agents at
-[anoma.ly/hex/docs/transforms](../../site/public/docs/transforms.md), linked
+`site/public/docs/transforms.md`, linked
 from `llms.txt`, the managed `AGENTS.md`, and Edit with agent's prompt. Checks:
 [tests/host_apis.rs](../../src/personal_commands/tests/host_apis.rs) runs
 `fetch` against a local server (approval, re-ask on edit, abort, network
@@ -1204,7 +1173,7 @@ failed; no visual or installed-app startup verification is claimed.
 
 ```ts
 Hex checks the release service            // maintain.updates
-├── 10 s after launch, hourly (Dev channel: every 10 min and on window focus), and Check for updates -> anoma.ly/release/hex/desktop/<channel>.json
+├── 10 s after launch, hourly (Dev channel: every 10 min and on window focus), and Check for updates -> GitHub Releases `stable.json` / `dev.json`
 │   ├── User-Agent: hex/<build channel>/<version> (hex/dev/0.0.0-dev-171, hex/stable/2.3.1); nothing else about the install
 │   ├── Failed check -> backs off, never past hourly
 │   └── <channel> -> updates.channel (General › Application › Update channel: Stable | Dev,
@@ -1219,14 +1188,14 @@ Hex checks the release service            // maintain.updates
 │   ├── required -> install without waiting for the rollout
 │   └── Rollout -> device-local bucket in <support>/update-bucket, never sent
 ├── Direct install -> download (resumable) -> size + SHA-256 -> code signature -> stage
-│   ├── macOS -> unpack beside Hex.app -> Developer ID 5NZ4Q7NXJ4, anomaly.hex, notarized
-│   ├── Windows -> Authenticode valid, signer AUTHENTICODE_SIGNER -> new version directory
+│   ├── macOS -> link-only (unsigned; no direct install)
+│   ├── Windows -> link-only (unsigned; no direct install)
 │   ├── Linux -> SHA-256 only -> new version directory, `current` switched
 │   ├── Staged -> checks continue; Restart to update stays offered meanwhile
 │   │   ├── Another release this install takes (update, required) -> download -> replaces the staged one
 │   │   └── Same release, rollout deferred, unconfirmed switch, rollback, failure -> keep the staged one
 │   └── Sidebar Update, menu bar / tray: Restart to update; a dev build lists its
-│       first changes and What's new (https://anoma.ly/hex/dev) under it (updater/notes.rs)
+│       first changes and What's new under it (updater/notes.rs)
 │       ├── One more check first (manifest within 15 s) -> Checking / Downloading -> newest staged
 │       │   └── A release published after the relaunch -> the next launch's check
 │       └── macOS -> renamex_np swap (also at quit) -> relaunch -> old bundle removed at launch
@@ -1933,7 +1902,7 @@ same host built with a local Command Line Tools stub passed clippy and all
 builds stub the HUD's Metal shader and Apple Intelligence (Xcode is missing),
 so the HUD failed to load its shader there; window contents (including the
 Meetings list and the practice step), dragging the window, the folder
-panel, the status item, reopen, shortcut capture, and Sparkle have not been
+panel, the status item, reopen, and shortcut capture have not been
 seen or exercised, and no screenshot could be taken over SSH.
 
 `dev.rune-ui-windows` lives in [windows/rune.rs](../../src/windows/rune.rs) and
