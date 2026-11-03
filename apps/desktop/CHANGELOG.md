@@ -41,6 +41,8 @@ your machine.
 - Copy diagnostics in Settings (the only opt-in data sharing) and release download counts from GitHub.
 - `[record] device` setting for `wordink-dictd`.
 - GPU transcription through Vulkan on Linux.
+- OpenRouter as a first-party engine (transcription endpoint, 29 models) with p50/p95 latency in Usage, and a separate meeting engine setting.
+- Developer mode: full debug logs with a live view, and clear coded errors for microphone, earbud, engine and paste failures.
 
 ### Fixes
 

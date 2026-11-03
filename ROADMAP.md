@@ -14,7 +14,6 @@ This page lists themes, not tickets. "Done" means merged to `master`.
 
 ## Now: finish 1.0
 
-- Merge the open PRs: developer-mode debug logs, coded errors and earbud reliability (#139); the OpenRouter transcription engine, p50/p95 latency and the meeting engine setting (#142).
 - Cut `desktop-v1.0.0-rc.2`, run [`docs/release-checklist.md`](docs/release-checklist.md), then tag `desktop-v1.0.0`. The flow is in [`docs/releasing.md`](docs/releasing.md).
 
 ## Next
@@ -52,14 +51,14 @@ This page lists themes, not tickets. "Done" means merged to `master`.
 | Engine | Where | State |
 |---|---|---|
 | Groq `whisper-large-v3-turbo` | Desktop app, `wordink-dictd`, gateway, web relay | Done. Default when a Groq key is set |
-| OpenRouter | Desktop app | Audio-chat models today; first-party transcription endpoint (29 models, including MAI-Transcribe 2 and Nemotron 3.5) in open PR #142 |
+| OpenRouter | Desktop app | Done. Audio-chat models and the transcription endpoint (29 models, including MAI-Transcribe 2 and Nemotron 3.5), with p50/p95 latency in Usage |
 | Parakeet (local, no key) | Desktop app | Done. v3 is recommended; the installed default is Parakeet Unified until the switch. GPU through Vulkan on Linux |
 | OpenAI transcription, Deepgram | Gateway, web relay | Done; live-API check still to do |
 | Moonshine (in the browser, offline) | `@wordink/local` | Done |
 
 ## Done so far
 
-- **Desktop app 1.0 line.** App merged (#111), terminal auto-paste (#126), usage stats (#123), vocabulary suggestions (#125), copy diagnostics and download counts (#132), Bluetooth earbuds and clean mic names (#134), shorter first run (#138), FLAC uploads and `wordink compare` (#143), cross-OS installers and release workflow.
+- **Desktop app 1.0 line.** App merged (#111), terminal auto-paste (#126), usage stats (#123), vocabulary suggestions (#125), copy diagnostics and download counts (#132), Bluetooth earbuds and clean mic names (#134), shorter first run (#138), FLAC uploads and `wordink compare` (#143), developer-mode debug logs, coded errors and earbud reliability (#139), OpenRouter transcription engine and p50/p95 latency (#142), cross-OS installers and release workflow.
 - **Foundation.** Monorepo tooling, CI, docs site with live demo, open-source basics.
 - **Web SDK.** `@wordink/core`, `<wordink-mic>`, `useDictation`, the credential relay.
 - **Gateway.** `wordink-gateway`: OpenAI-compatible endpoint, provider fallback, per-device tokens, runtime vocabulary.
