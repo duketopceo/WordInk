@@ -14,7 +14,7 @@ This directory is a copy of [Hex](https://github.com/anomalyco/hex) by Anomaly, 
 These Hex paths were left out because WordInk does not use them:
 
 - `site/` (Hex's website)
-- `ios/` (WordInk has its own iOS app in `apps/ios`)
+- `ios/` (the iOS app is paused; see branch `archive/ios-2026-11-03`)
 - `prototypes/`, `skills/`, `release-notes/`
 - `flake.nix`, `flake.lock`, `nix/`
 - `.github/`, `.cloudflare/`, `.hivemind.toml` (Hex's CI and hosting; WordInk's CI lives in the repo root `.github/`)

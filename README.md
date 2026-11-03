@@ -21,9 +21,9 @@ WordInk is one desktop app plus the pieces developers need to put dictation in t
 | **`wordink-dictd`** (`sdks/python`) | The interim dictation daemon for Linux, Windows and macOS | Works today (Groq Whisper, then clean-up, then typed into the focused window). Kept until the desktop app reaches parity on each OS. See [examples](examples/). |
 | **Web SDK** (`packages/*`) | Developers adding a `<wordink-mic>` button to a web app | Merged and documented. Not published to npm yet. |
 | **Gateway** (`packages/server`) | Anyone who wants an OpenAI-compatible transcription endpoint with provider fallback and per-device tokens | Merged and documented. Not published to npm yet. |
-| **iOS app** (`apps/ios`, `sdks/ios`) | Hold-to-talk on iPhone through a gateway | In progress; built from source. |
+| **iOS app** | Hold-to-talk on iPhone through a gateway | iOS: paused; the earlier app is preserved on branch `archive/ios-2026-11-03` and will be rebuilt later. |
 
-The web SDK, the gateway and the iOS app are separate products from the desktop app. They share the transcription protocol and a clean-up contract, not code.
+The web SDK and the gateway are separate products from the desktop app. They share the transcription protocol and a clean-up contract, not code.
 
 **Docs and live demo: <https://duketopceo.github.io/WordInk/>**
 
@@ -92,12 +92,11 @@ The docs demo in its idle state (static capture; a recording of dictation is sti
 | `sdks/python` | `wordink-dictd` (the interim desktop daemon for Linux, Windows and macOS), the `wordink` CLI and the `wordink-mcp` server |
 | `crates/wordink-core`, `crates/wordink-wasm` | Rust sans-I/O dictation core and its WebAssembly bindings (used by the web SDK) |
 | `packages/*` | Web SDK and gateway: `@wordink/core`, `web`, `react`, `local`, `server` |
-| `apps/ios`, `sdks/ios` | The iOS app and its Swift SDK |
 | `apps/docs` | The docs site and live demo (GitHub Pages) |
 | `examples/*` | Install scripts for `wordink-dictd` (Linux, Windows, macOS), a gateway systemd service, and web examples |
 | `docs/` | Decisions, research, solutions, and `docs/archive/` (superseded plans) |
 | `assets/brand/` | Logo, wordmark and glyph proposals |
-| `tests/fixtures/` | Cross-platform contract fixtures shared by the TypeScript, Python and Swift tests |
+| `tests/fixtures/` | Cross-platform contract fixtures shared by the TypeScript and Python tests |
 
 ## Develop
 
