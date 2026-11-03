@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use crate::audio::sources::{self, Device};
 
 /// How long a new capture stream has to appear in the sound server.
-const STREAM_DEADLINE: Duration = Duration::from_secs(2);
+const STREAM_DEADLINE: Duration = Duration::from_millis(3_000);
 const STREAM_POLL: Duration = Duration::from_millis(40);
 const PID_PROPERTY: &str = "hex.process.id";
 
@@ -66,7 +66,65 @@ pub(crate) trait SoundServer {
     /// The index of the source named `node`, if the server has it.
     fn source_index(&mut self, node: &str) -> Option<u32>;
     fn move_stream(&mut self, stream: u32, node: &str) -> bool;
+    /// The node name and owning application (when it says) of the source
+    /// with this index, to name whoever took the stream.
+    fn source_owner(&mut self, source: u32) -> Option<SourceOwner>;
     fn pause(&mut self, how_long: Duration);
+}
+
+/// What a source is, as far as naming it to the user goes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SourceOwner {
+    pub(crate) node: String,
+    pub(crate) application: Option<String>,
+}
+
+/// The sound server's marker for a stream not linked to any source yet.
+const UNLINKED: u32 = u32::MAX;
+/// A route counts as confirmed only after the stream stayed on the source
+/// for this many polls in a row, over at least this long: apps such as
+/// EasyEffects move every new capture stream into their own chain a moment
+/// after it is placed.
+const STABLE_POLLS: u32 = 3;
+const STABLE_FOR: Duration = Duration::from_millis(300);
+
+/// The message for a stream another program keeps taking off the chosen
+/// microphone, naming that program when it is a known one.
+pub(crate) fn culprit_message(owner: Option<&SourceOwner>, chosen: &str) -> String {
+    let named = owner.and_then(|owner| {
+        let text = format!(
+            "{} {}",
+            owner.node.to_lowercase(),
+            owner.application.as_deref().unwrap_or("").to_lowercase()
+        );
+        [
+            (
+                "easyeffects",
+                "EasyEffects",
+                "EasyEffects \u{203a} Input, or turn off Process All Inputs",
+            ),
+            (
+                "pulseeffects",
+                "PulseEffects",
+                "PulseEffects, or turn off its input processing",
+            ),
+            ("noisetorch", "NoiseTorch", "NoiseTorch, or turn it off"),
+        ]
+        .into_iter()
+        .find(|(key, _, _)| text.contains(key))
+    });
+    match (named, owner) {
+        (Some((_, name, fix)), _) => {
+            format!("{name} is capturing WordInk's microphone \u{2014} exclude WordInk in {fix}")
+        }
+        (None, Some(owner)) => format!(
+            "{} keeps moving WordInk's microphone away from {chosen} \u{2014} exclude WordInk from it",
+            owner.application.as_deref().unwrap_or(&owner.node)
+        ),
+        (None, None) => format!(
+            "something keeps moving WordInk's microphone away from {chosen}; the capture was stopped"
+        ),
+    }
 }
 
 /// How a routing wait went, for the debug log.
@@ -93,16 +151,39 @@ pub(crate) fn route_until_confirmed(
     let mut polls = 0;
     let mut moved = 0;
     let mut why = "no capture stream appeared in the sound server".to_owned();
+    // Where the stream was last seen after our move, if not on the target.
+    let mut bounced_to: Option<u32> = None;
+    // Whether the server ever listed the stream on the target.
+    let mut seen_on_target = false;
+    let mut stable_polls = 0;
+    let mut stable_since = Duration::ZERO;
     loop {
         polls += 1;
         match server.source_index(node) {
-            None => why = format!("the sound server has no source {node}"),
+            None => {
+                why = format!("the sound server has no source {node}");
+                stable_polls = 0;
+            }
             Some(target) => {
                 let streams = server.own_streams();
                 let mut refused = false;
+                let mut moved_now = false;
                 for stream in streams.iter().filter(|stream| stream.source != target) {
+                    if seen_on_target && stream.source != UNLINKED {
+                        // Placed there by us earlier and found elsewhere now.
+                        bounced_to = Some(stream.source);
+                        crate::debug_log::dlog!(
+                            Info,
+                            "audio.route",
+                            "rerouted",
+                            stream = stream.index,
+                            now_on_source = stream.source,
+                            polls = polls,
+                        );
+                    }
                     if server.move_stream(stream.index, node) {
                         moved += 1;
+                        moved_now = true;
                         crate::debug_log::dlog!(
                             Debug,
                             "audio.route",
@@ -126,30 +207,141 @@ pub(crate) fn route_until_confirmed(
                         );
                     }
                 }
-                // A move is confirmed by listing again, not by its exit code.
-                let after = if moved > 0 {
+                // A move is confirmed by listing again, not by its exit code,
+                // and only a placement that holds counts.
+                let after = if moved_now {
                     server.own_streams()
                 } else {
                     streams
                 };
-                if !after.is_empty() && after.iter().all(|stream| stream.source == target) {
-                    return Ok(Routed {
-                        moved,
-                        polls,
-                        waited,
-                    });
-                }
-                if !after.is_empty() && !refused {
-                    why = "the stream is not on the chosen source after the move".to_owned();
+                let on_target =
+                    !after.is_empty() && after.iter().all(|stream| stream.source == target);
+                seen_on_target |= on_target;
+                if on_target && !moved_now {
+                    if stable_polls == 0 {
+                        stable_since = waited;
+                    }
+                    stable_polls += 1;
+                    if stable_polls >= STABLE_POLLS && waited - stable_since >= STABLE_FOR {
+                        return Ok(Routed {
+                            moved,
+                            polls,
+                            waited,
+                        });
+                    }
+                } else {
+                    stable_polls = 0;
+                    if !on_target && !after.is_empty() && !refused {
+                        why = "the stream is not on the chosen source after the move".to_owned();
+                    }
+                    if seen_on_target
+                        && !on_target
+                        && let Some(other) = after
+                            .iter()
+                            .find(|s| s.source != target && s.source != UNLINKED)
+                    {
+                        bounced_to = Some(other.source);
+                    }
                 }
             }
         }
         if waited >= deadline {
-            return Err(why);
+            return Err(match bounced_to {
+                Some(source) => {
+                    let owner = server.source_owner(source);
+                    crate::debug_log::dlog!(
+                        Info,
+                        "audio.route",
+                        "another program keeps rerouting the stream",
+                        node = node,
+                        owner_node = owner.as_ref().map(|o| o.node.clone()),
+                        owner_app = owner.as_ref().and_then(|o| o.application.clone()),
+                    );
+                    culprit_message(owner.as_ref(), node)
+                }
+                None => why,
+            });
         }
         server.pause(poll);
         waited += poll;
     }
+}
+
+/// While a capture runs: whether this process's streams are still on the
+/// source `node`. A stream found elsewhere means another program took it, and
+/// the error names that program. No stream at all is not a failure (the
+/// capture just closed).
+pub(crate) fn check_still_routed(server: &mut impl SoundServer, node: &str) -> Result<(), String> {
+    let Some(target) = server.source_index(node) else {
+        return Err(format!("the sound server no longer has {node}"));
+    };
+    let Some(stray) = server
+        .own_streams()
+        .into_iter()
+        .find(|stream| stream.source != target)
+    else {
+        return Ok(());
+    };
+    let owner = (stray.source != UNLINKED)
+        .then(|| server.source_owner(stray.source))
+        .flatten();
+    crate::debug_log::dlog!(
+        Info,
+        "audio.route",
+        "rerouted",
+        stream = stray.index,
+        now_on_source = stray.source,
+        node_name = owner.as_ref().map(|o| o.node.clone()),
+        owner_app = owner.as_ref().and_then(|o| o.application.clone()),
+    );
+    Err(culprit_message(owner.as_ref(), node))
+}
+
+/// Checks every second that the capture stream stays on `node`; on a drift it
+/// fails `gate` with the culprit message, which ends the capture loudly.
+pub(crate) fn watch_route(
+    node: String,
+    gate: crate::audio::capture_gate::CaptureGate,
+) -> crate::audio::capture_gate::StopOnDrop {
+    let (guard, stop) = crate::audio::capture_gate::StopOnDrop::new();
+    let spawned = std::thread::Builder::new()
+        .name("route-watch".into())
+        .spawn(move || {
+            'watching: loop {
+                for _ in 0..10 {
+                    if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    return;
+                }
+                if let Err(message) = check_still_routed(&mut Pactl, &node) {
+                    set_route_problem(message.clone());
+                    gate.fail_with(message);
+                    break 'watching;
+                }
+            }
+        });
+    if let Err(error) = spawned {
+        tracing::warn!(%error, "could not start watching the capture route");
+    }
+    guard
+}
+
+static ROUTE_PROBLEM: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn set_route_problem(message: String) {
+    *ROUTE_PROBLEM.lock().unwrap_or_else(|e| e.into_inner()) = Some(message);
+}
+
+/// The reason the last capture stream was taken off its microphone, once.
+pub(crate) fn take_route_problem() -> Option<String> {
+    ROUTE_PROBLEM
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
 }
 
 /// [`route_until_confirmed`] against the real sound server. Blocks up to
@@ -202,6 +394,32 @@ impl SoundServer for Pactl {
 
     fn move_stream(&mut self, stream: u32, node: &str) -> bool {
         pactl(&["move-source-output", &stream.to_string(), node]).is_some()
+    }
+
+    fn source_owner(&mut self, source: u32) -> Option<SourceOwner> {
+        #[derive(serde::Deserialize)]
+        struct Source {
+            index: u32,
+            name: String,
+            #[serde(default)]
+            properties: std::collections::HashMap<String, serde_json::Value>,
+        }
+        let sources: Vec<Source> =
+            serde_json::from_str(&pactl(&["-f", "json", "list", "sources"])?).ok()?;
+        let found = sources
+            .into_iter()
+            .find(|candidate| candidate.index == source)?;
+        let text = |key: &str| {
+            found
+                .properties
+                .get(key)
+                .and_then(|value| value.as_str())
+                .map(str::to_owned)
+        };
+        Some(SourceOwner {
+            application: text("application.name").or_else(|| text("node.description")),
+            node: found.name,
+        })
     }
 
     fn pause(&mut self, how_long: Duration) {
@@ -259,6 +477,10 @@ mod tests {
         polls: u32,
         refuse_moves: bool,
         move_does_nothing: bool,
+        /// EasyEffects-style: takes the stream back this many polls after
+        /// it is placed on the earbuds.
+        bounce_after: Option<u32>,
+        on_target_polls: u32,
         moves: Vec<(u32, String)>,
         slept: Duration,
     }
@@ -266,12 +488,18 @@ mod tests {
     impl Fake {
         fn new() -> Self {
             Self {
-                sources: vec![("default.monitor", 1), (NODE, 7)],
+                sources: vec![
+                    ("default.monitor", 1),
+                    (NODE, 7),
+                    ("easyeffects_source", 123),
+                ],
                 stream_on: Some(1),
                 appears_after: 0,
                 polls: 0,
                 refuse_moves: false,
                 move_does_nothing: false,
+                bounce_after: None,
+                on_target_polls: 0,
                 moves: Vec::new(),
                 slept: Duration::ZERO,
             }
@@ -282,6 +510,15 @@ mod tests {
         fn own_streams(&mut self) -> Vec<OwnStream> {
             if self.polls <= self.appears_after {
                 return Vec::new();
+            }
+            if let Some(after) = self.bounce_after
+                && self.stream_on == Some(7)
+            {
+                self.on_target_polls += 1;
+                if self.on_target_polls > after {
+                    self.stream_on = Some(123);
+                    self.on_target_polls = 0;
+                }
             }
             self.stream_on
                 .map(|source| OwnStream { index: 42, source })
@@ -304,6 +541,15 @@ mod tests {
                 self.stream_on = self.sources.iter().find(|s| s.0 == node).map(|s| s.1);
             }
             true
+        }
+        fn source_owner(&mut self, source: u32) -> Option<SourceOwner> {
+            self.sources
+                .iter()
+                .find(|(_, index)| *index == source)
+                .map(|(name, _)| SourceOwner {
+                    node: (*name).to_owned(),
+                    application: None,
+                })
         }
         fn pause(&mut self, how_long: Duration) {
             self.slept += how_long;
@@ -397,5 +643,78 @@ mod tests {
             }]
         );
         assert!(streams_of("not json", "100").is_empty());
+    }
+
+    #[test]
+    fn a_stream_that_bounces_back_is_not_falsely_confirmed() {
+        // The regression: the stream is listed on the earbuds for a poll or
+        // two after each move, then another program takes it back.
+        let mut server = Fake::new();
+        server.bounce_after = Some(2);
+        let error = route(&mut server).unwrap_err();
+        assert!(error.contains("EasyEffects"), "{error}");
+        assert!(error.contains("exclude WordInk"), "{error}");
+        assert!(
+            server.moves.len() > 1,
+            "it kept trying: {}",
+            server.moves.len()
+        );
+    }
+
+    #[test]
+    fn a_placement_must_hold_for_three_polls_over_three_hundred_milliseconds() {
+        let mut server = Fake::new();
+        server.bounce_after = Some(20);
+        // Holds far longer than the stability window, so it confirms.
+        let routed = route(&mut server).unwrap();
+        assert!(routed.polls > STABLE_POLLS);
+        let held = routed.waited;
+        assert!(held >= STABLE_FOR, "{held:?}");
+        // One that drifts back after a single poll never reaches it.
+        let mut quick = Fake::new();
+        quick.bounce_after = Some(1);
+        assert!(route(&mut quick).is_err());
+    }
+
+    #[test]
+    fn a_stream_rerouted_mid_capture_is_caught_and_names_the_culprit() {
+        let mut server = Fake::new();
+        server.stream_on = Some(7);
+        assert_eq!(check_still_routed(&mut server, NODE), Ok(()));
+        // The other program takes it during the capture.
+        server.stream_on = Some(123);
+        let error = check_still_routed(&mut server, NODE).unwrap_err();
+        assert!(
+            error.starts_with("EasyEffects is capturing WordInk's microphone"),
+            "{error}"
+        );
+        // No stream (the capture just closed) is not a failure.
+        server.stream_on = None;
+        assert_eq!(check_still_routed(&mut server, NODE), Ok(()));
+        // The chosen source vanishing is.
+        server.sources.retain(|(name, _)| *name != NODE);
+        assert!(check_still_routed(&mut server, NODE).is_err());
+    }
+
+    #[test]
+    fn the_culprit_message_names_known_programs_and_falls_back_for_others() {
+        let owner = |node: &str, app: Option<&str>| SourceOwner {
+            node: node.to_owned(),
+            application: app.map(str::to_owned),
+        };
+        assert_eq!(
+            culprit_message(Some(&owner("easyeffects_source", None)), NODE),
+            "EasyEffects is capturing WordInk's microphone \u{2014} exclude WordInk in EasyEffects \u{203a} Input, or turn off Process All Inputs"
+        );
+        assert!(
+            culprit_message(Some(&owner("x", Some("NoiseTorch"))), NODE)
+                .starts_with("NoiseTorch is capturing")
+        );
+        let other = culprit_message(Some(&owner("filter_chain_source", Some("Chain"))), NODE);
+        assert!(
+            other.starts_with("Chain keeps moving WordInk's microphone"),
+            "{other}"
+        );
+        assert!(culprit_message(None, NODE).contains("something keeps moving"));
     }
 }

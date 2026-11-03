@@ -29,6 +29,24 @@ pub enum GateState {
 struct Shared {
     state: AtomicU8,
     dropped_frames: AtomicU64,
+    /// Why the gate failed, for the capture's error.
+    reason: std::sync::Mutex<Option<String>>,
+}
+
+/// Stops a background watcher when the stream it watches goes away.
+pub struct StopOnDrop(Arc<std::sync::atomic::AtomicBool>);
+
+impl StopOnDrop {
+    pub fn new() -> (Self, Arc<std::sync::atomic::AtomicBool>) {
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        (Self(stop.clone()), stop)
+    }
+}
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
 }
 
 /// Shared between the stream callback and whoever confirms the route.
@@ -64,6 +82,22 @@ impl CaptureGate {
     /// The stream will never reach its device.
     pub fn fail(&self) {
         self.0.state.store(FAILED, Ordering::Release);
+    }
+
+    /// The stream was taken off its device mid-capture: audio stops and the
+    /// capture ends with `reason`.
+    pub fn fail_with(&self, reason: String) {
+        *self.0.reason.lock().unwrap_or_else(|e| e.into_inner()) = Some(reason);
+        self.fail();
+    }
+
+    /// Why the gate failed, if it said.
+    pub fn failure(&self) -> Option<String> {
+        self.0
+            .reason
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Called per callback with its frame count; whether to pass the audio on.
@@ -114,6 +148,24 @@ mod tests {
         let gate = CaptureGate::open();
         assert!(gate.passes(1));
         assert_eq!(gate.dropped_frames(), 0);
+    }
+
+    #[test]
+    fn a_failure_carries_its_reason_to_the_capture() {
+        let gate = CaptureGate::open();
+        assert_eq!(gate.failure(), None);
+        gate.fail_with("EasyEffects is capturing WordInk's microphone".into());
+        assert_eq!(gate.state(), GateState::Failed);
+        assert!(!gate.passes(10));
+        assert!(gate.failure().unwrap().contains("EasyEffects"));
+    }
+
+    #[test]
+    fn dropping_the_guard_stops_the_watcher() {
+        let (guard, stop) = StopOnDrop::new();
+        assert!(!stop.load(Ordering::Relaxed));
+        drop(guard);
+        assert!(stop.load(Ordering::Relaxed));
     }
 
     #[test]

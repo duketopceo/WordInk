@@ -230,6 +230,11 @@ pub struct AudioInput {
     /// be opened again.
     pub selection: Selection,
     stream_errors: Receiver<String>,
+    /// Drops audio until the stream is on its device, and ends the capture
+    /// with a reason if another program takes it off later.
+    gate: capture_gate::CaptureGate,
+    /// Keeps the route watcher running while this stream lives.
+    _route_watch: Option<capture_gate::StopOnDrop>,
     watch_service_restarts: bool,
     restart_generation: u64,
     hex_microphone: crate::audio::hex_microphone::CaptureFeedSwitch,
@@ -431,6 +436,8 @@ impl AudioInput {
                 _stream: None,
                 chunks,
                 stream_errors,
+                gate: capture_gate::CaptureGate::open(),
+                _route_watch: None,
                 sample_rate: 48_000,
                 device_name: "Test microphone".into(),
                 device_label: "Test microphone".into(),
@@ -553,6 +560,8 @@ impl AudioInput {
             device_name,
             selection: Selection::InUse,
             stream_errors,
+            gate,
+            _route_watch: None,
             watch_service_restarts: true,
             restart_generation,
             hex_microphone,
@@ -571,6 +580,10 @@ impl AudioInput {
             && audio_service_restart_generation() != self.restart_generation
         {
             return AudioInputEvent::StreamFailed("CoreAudio service restarted".into());
+        }
+        // Another program took the stream off its microphone.
+        if let Some(reason) = self.gate.failure() {
+            return AudioInputEvent::StreamFailed(reason);
         }
         // A stream failure reported before or during the wait outranks any
         // chunk delivered alongside it.
@@ -1400,7 +1413,11 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
             // Hex records through ALSA's default; the sound server moves the
             // stream to the chosen source, and nothing is kept until it has.
             match crate::linux::pulse::route_confirmed(&node) {
-                Ok(()) => gate.confirm(),
+                Ok(()) => {
+                    gate.confirm();
+                    input._route_watch =
+                        Some(crate::linux::pulse::watch_route(node.clone(), gate.clone()));
+                }
                 Err(error) => {
                     gate.fail();
                     tracing::warn!(source = %node, %error, "could not put the capture stream on the chosen microphone");
@@ -2712,6 +2729,26 @@ mod tests {
             open(SelectedFallback::Immediate, 1),
             (Ok("automatic"), 1, 0)
         );
+    }
+
+    #[test]
+    fn a_stream_taken_off_its_microphone_ends_the_capture_with_the_reason() {
+        let (input, sender) = AudioInput::channel_for_test();
+        sender
+            .send((vec![0.1; 480], CaptureInstant::from_nanos(1)))
+            .unwrap();
+        assert!(matches!(
+            input.recv_timeout(Duration::from_millis(10)),
+            AudioInputEvent::Chunk { .. }
+        ));
+        input
+            .gate
+            .fail_with("EasyEffects is capturing WordInk's microphone".into());
+        let AudioInputEvent::StreamFailed(reason) = input.recv_timeout(Duration::from_millis(10))
+        else {
+            panic!("the stream fails");
+        };
+        assert!(reason.contains("EasyEffects"), "{reason}");
     }
 
     #[test]

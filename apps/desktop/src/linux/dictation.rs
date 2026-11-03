@@ -957,11 +957,15 @@ pub(crate) fn run(
             }
             RecoveringAudioInputEvent::Timeout => {}
             RecoveringAudioInputEvent::Interrupted => {
+                // Another program (EasyEffects, say) taking the stream off its
+                // microphone says so; anything else is a plain interruption.
+                let route_problem = crate::linux::pulse::take_route_problem();
                 crate::debug_log::dlog!(
                     Info,
                     "audio.stream",
                     "microphone stream interrupted",
                     recording = capture.is_recording(),
+                    route_problem = route_problem,
                 );
                 timeline.restart();
                 // A release still in its tail finishes with the audio it has.
@@ -976,7 +980,10 @@ pub(crate) fn run(
                     events.dictation(DictationPhase::Cancelled, "")?;
                 }
                 events.dictation(
-                    DictationPhase::Failed("microphone stream interrupted; reopening".into()),
+                    DictationPhase::Failed(
+                        route_problem
+                            .unwrap_or_else(|| "microphone stream interrupted; reopening".into()),
+                    ),
                     "",
                 )?;
                 emit_state(
