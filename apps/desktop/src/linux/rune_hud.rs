@@ -22,7 +22,7 @@ use crate::rune_hud::{HudEvent, HudSender};
 /// The newest listener's generation: an older listener's reports stop counting.
 static GENERATION: Mutex<u64> = Mutex::new(0);
 /// Where the newest listener wants the HUD, for an `install` after it starts.
-static POSITION: Mutex<IndicatorPosition> = Mutex::new(IndicatorPosition::Top);
+static POSITION: Mutex<IndicatorPosition> = Mutex::new(IndicatorPosition::Bottom);
 static HUD: OnceLock<HudSender> = OnceLock::new();
 
 /// A listener's handle on the HUD; dropping it hides what it reported.

@@ -545,7 +545,7 @@ const KEYS: &[Key] = &[
     key(
         "indicator_position",
         Kind::Choice(&["top", "bottom", "hidden"]),
-        "Where the dictation HUD appears",
+        "Where the dictation HUD appears: bottom (default), top or hidden",
     ),
     optional(
         "updates.channel",
@@ -1674,6 +1674,24 @@ mod tests {
             vec![Effect::HistoryRetention(
                 crate::history::HistoryRetention::Month
             )]
+        );
+    }
+
+    #[test]
+    fn the_indicator_position_defaults_to_the_bottom_and_is_set_from_the_cli() {
+        let settings = AppSettings::default();
+        let value = get(&settings, "indicator_position").unwrap();
+        assert_eq!(value[0].value, Value::String("bottom".into()));
+        for position in ["top", "bottom", "hidden"] {
+            let change = apply(&settings, "indicator_position", position, &rules()).unwrap();
+            let value = get(&change.settings, "indicator_position").unwrap();
+            assert_eq!(value[0].value, Value::String(position.into()));
+        }
+        assert_eq!(
+            apply(&settings, "indicator_position", "left", &rules())
+                .unwrap_err()
+                .code,
+            "invalid-value"
         );
     }
 

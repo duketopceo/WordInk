@@ -38,7 +38,7 @@ static MEETING_PROVIDERS: OnceLock<RwLock<Vec<MeetingProviderChoice>>> = OnceLoc
 static CALENDAR_SETTINGS: OnceLock<RwLock<CalendarSettings>> = OnceLock::new();
 static MICROPHONE_POLICY: AtomicU8 = AtomicU8::new(0);
 static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
-static INDICATOR_POSITION: AtomicU8 = AtomicU8::new(0);
+static INDICATOR_POSITION: AtomicU8 = AtomicU8::new(IndicatorPosition::Bottom as u8);
 static INDICATOR_STYLE: AtomicU8 = AtomicU8::new(0);
 static HOTKEYS: OnceLock<RwLock<RuntimeHotkeys>> = OnceLock::new();
 #[cfg(target_os = "macos")]
@@ -1573,8 +1573,8 @@ pub enum TranscriptionDevice {
 #[serde(rename_all = "snake_case")]
 #[repr(u8)]
 pub enum IndicatorPosition {
-    #[default]
     Top = 0,
+    #[default]
     Bottom = 1,
     Hidden = 2,
 }
@@ -3476,6 +3476,30 @@ mod tests {
         assert!(settings.hotkey_in_use(HotkeySlot::SecondDictation, &dictation));
         settings.second_dictation_hotkey = Some(dictation);
         assert_eq!(settings.runtime_hotkeys().second_dictation, None);
+    }
+
+    #[test]
+    fn the_indicator_position_defaults_to_the_bottom_and_round_trips() {
+        assert_eq!(IndicatorPosition::default(), IndicatorPosition::Bottom);
+        let fresh: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(fresh.indicator_position, IndicatorPosition::Bottom);
+        for (position, name) in [
+            (IndicatorPosition::Top, "top"),
+            (IndicatorPosition::Bottom, "bottom"),
+            (IndicatorPosition::Hidden, "hidden"),
+        ] {
+            let settings = AppSettings {
+                indicator_position: position,
+                ..AppSettings::default()
+            };
+            let json = serde_json::to_value(&settings).unwrap();
+            assert_eq!(json["indicator_position"], name);
+            let decoded: AppSettings = serde_json::from_value(json).unwrap();
+            assert_eq!(decoded.indicator_position, position);
+        }
+        // A saved Top stays Top: only an unset position moves to the bottom.
+        let saved: AppSettings = serde_json::from_str(r#"{"indicator_position":"top"}"#).unwrap();
+        assert_eq!(saved.indicator_position, IndicatorPosition::Top);
     }
 
     #[test]

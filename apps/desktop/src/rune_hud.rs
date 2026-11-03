@@ -374,7 +374,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
             model,
             drawn: None,
             layout: Layout::default(),
-            position: IndicatorPosition::Top,
+            position: IndicatorPosition::Bottom,
             this: None,
             shown: false,
             reduce: false,
