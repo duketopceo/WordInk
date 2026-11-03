@@ -40,6 +40,10 @@ fail() {
   exit 1
 }
 
+if [ "$(id -u)" -eq 0 ]; then
+  fail "run this as your normal user, not root; it installs into ~/Applications and never needs sudo."
+fi
+
 mode=install
 force=0
 purge=0
@@ -89,13 +93,12 @@ check_base() {
     127.0.0.1 | localhost) ;;
     *) fail "WORDINK_INSTALL_BASE must be https (http only to 127.0.0.1 or localhost); unset it to use GitHub Releases." ;;
   esac
-  case "$port" in
-    '' | :[0-9]*) ;;
-    *) fail "WORDINK_INSTALL_BASE has an invalid port; unset it to use GitHub Releases." ;;
-  esac
-  case "$port" in
-    *[!0-9:]*) fail "WORDINK_INSTALL_BASE has an invalid port; unset it to use GitHub Releases." ;;
-  esac
+  if [ -n "$port" ]; then
+    digits=${port#:}
+    case "$digits" in
+      '' | *[!0-9]*) fail "WORDINK_INSTALL_BASE has an invalid port; unset it to use GitHub Releases." ;;
+    esac
+  fi
 }
 
 fetch() { # fetch <name> <dest> [progress]
@@ -175,6 +178,7 @@ quit_app() {
 # Starts the installed app and runs `wordink launch-at-login <on|off>` once it
 # answers. Prints the app's reply on stdout; empty when it never answered.
 login_item() {
+  [ -x "$app/Contents/MacOS/wordink" ] || return 0
   open "$app" >/dev/null 2>&1 || return 0
   tries=0
   while [ "$tries" -lt 20 ]; do

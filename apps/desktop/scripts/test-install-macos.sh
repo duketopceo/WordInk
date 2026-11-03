@@ -8,9 +8,14 @@ set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 installer="$root/packaging/macos/install-macos.sh"
-for command in curl python3 sha256sum; do
+for command in curl python3; do
   command -v "$command" >/dev/null 2>&1 || { echo "Installer test requires $command." >&2; exit 1; }
 done
+if command -v sha256sum >/dev/null 2>&1; then
+  real_sha='sha256sum "$@"'
+else
+  real_sha='/usr/bin/shasum -a 256 "$@"'
+fi
 
 temporary=$(mktemp -d)
 server_pid=
@@ -41,8 +46,9 @@ fake pgrep 'exit 1'
 fake pkill 'exit 1'
 fake sleep 'exit 0'
 fake sudo 'echo "sudo $*" >>"$FAKE_LOG"; exit 1'
-fake shasum 'shift 2; exec sha256sum "$@"'
-fake defaults 'sed -n "/CFBundleShortVersionString/{n;s/.*<string>\(.*\)<\/string>.*/\1/p;}" "$2.plist"'
+fake shasum "shift 2; exec $real_sha"
+fake id 'echo "${FAKE_UID:-1000}"'
+fake defaults 'python3 -I -c "import plistlib, sys; print(plistlib.load(open(sys.argv[1] + \".plist\", \"rb\"))[sys.argv[2]])" "$2" "$3"'
 fake ditto 'python3 -I -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$3" "$4"'
 PATH="$bin:$PATH"
 export PATH FAKE_LOG="$log"
@@ -100,10 +106,13 @@ out="$temporary/out"
 err="$temporary/err"
 failures=0
 
-# run <args...>: runs the installer in the temp HOME; sets $status, $out, $err.
+# run <args...>: runs the installer in the temp HOME; records the exit status, $out and $err.
 run() {
-  status=0
-  HOME="$home" sh "$installer" "$@" >"$out" 2>"$err" || status=$?
+  # Callers set per-run variables in a subshell, `(VAR=x run ...)`: a
+  # prefix assignment on a function call persists in some shells (macOS sh).
+  code=0
+  HOME="$home" sh "$installer" "$@" >"$out" 2>"$err" || code=$?
+  echo "$code" >"$temporary/status"
 }
 check() { # check <description> <command...>
   description=$1
@@ -117,7 +126,7 @@ check() { # check <description> <command...>
     failures=$((failures + 1))
   fi
 }
-status_is() { [ "$status" -eq "$1" ]; }
+status_is() { [ "$(cat "$temporary/status")" -eq "$1" ]; }
 contains() { grep -q -F -- "$1" "$out" "$err"; }
 logged() { grep -q -F -- "$1" "$log"; }
 not_logged() { ! grep -q -F -- "$1" "$log"; }
@@ -134,23 +143,37 @@ release bad 1.0.2 bad
 
 # Refusals.
 export WORDINK_INSTALL_BASE="$base/v100"
-FAKE_UNAME_M=x86_64 run
+(FAKE_UNAME_M=x86_64 run)
 check "Intel Mac is refused with the supported-platform line" status_is 1
 check "  names the releases page" contains "https://github.com/duketopceo/WordInk/releases"
 check "  prints one line" lines_at_most 1
 check "  installs nothing" no_app
-FAKE_OSVER=14.6 run
+(FAKE_OSVER=14.6 run)
 check "macOS 14 is refused" status_is 1
 check "  names Apple silicon and macOS 15" contains "macOS 15 or newer"
-FAKE_UNAME_S=Linux run
+(FAKE_UNAME_S=Linux run)
 check "a non-Mac is refused" status_is 1
-WORDINK_INSTALL_BASE=http://example.com/releases run
+(WORDINK_INSTALL_BASE=http://example.com/releases run)
 check "a non-loopback http base is refused" status_is 1
 check "  says why in one line" lines_at_most 1
-WORDINK_INSTALL_BASE=http://127.0.0.1@example.com/releases run
+(WORDINK_INSTALL_BASE=http://127.0.0.1@example.com/releases run)
 check "a base with userinfo is refused" status_is 1
-WORDINK_INSTALL_BASE=http://127.0.0.1.example.com/releases run
+(WORDINK_INSTALL_BASE=http://127.0.0.1.example.com/releases run)
 check "a lookalike loopback host is refused" status_is 1
+check "  installs nothing" no_app
+
+# Base host parsing: loopback with a port is accepted, malformed authorities are not.
+for bad in http://localhost: http://127.0.0.1: 'http://127.0.0.1:80:80' 'http://[::1]:8080' http://127.0.0.1:8x; do
+  (WORDINK_INSTALL_BASE="$bad/releases" run)
+  check "base $bad is refused" status_is 1
+  check "  installs nothing" no_app
+done
+(WORDINK_INSTALL_BASE="http://localhost:$port/v100" run)
+check "http://localhost:<port> is accepted" status_is 0
+rm -rf "$app"
+(FAKE_UID=0 run)
+check "running as root is refused in one line" status_is 1
+check "  says not root" contains "not root"
 check "  installs nothing" no_app
 
 # Fresh install.
@@ -181,29 +204,29 @@ check "  replaces the app" marker_gone
 check "  keeps the right version" installed_is 1.0.0
 
 # Newer replaces, older does not.
-WORDINK_INSTALL_BASE="$base/v101" run
+(WORDINK_INSTALL_BASE="$base/v101" run)
 check "a newer release replaces the app" status_is 0
 check "  now at 1.0.1" installed_is 1.0.1
 touch "$app/marker"
-WORDINK_INSTALL_BASE="$base/v090" run
+(WORDINK_INSTALL_BASE="$base/v090" run)
 check "an older release is a no-op" status_is 0
 check "  keeps 1.0.1" installed_is 1.0.1
 check "  leaves the app untouched" marker_kept
 
 # Hash mismatch fails without touching the installed app.
-WORDINK_INSTALL_BASE="$base/bad" run
+(WORDINK_INSTALL_BASE="$base/bad" run)
 check "a hash mismatch fails" status_is 1
 check "  names SHA256SUMS in one line" contains "does not match SHA256SUMS"
 check "  keeps the installed app" marker_kept
 check "  keeps its version" installed_is 1.0.1
 check "  leaves no staging folders" [ -z "$(find "$home/Applications" -maxdepth 1 -name '.*' ! -name . | head -1)" ]
-WORDINK_INSTALL_BASE="$base/missing" run
+(WORDINK_INSTALL_BASE="$base/missing" run)
 check "an unreachable release fails in one line" status_is 1
 check "  keeps the installed app" marker_kept
 
 # Launch at login held for approval: last line says to approve it.
 rm -rf "$app"
-FAKE_APPROVAL=1 run
+(FAKE_APPROVAL=1 run)
 check "an approval-held login item still installs" status_is 0
 check "  last line says to approve it in System Settings" sh -c 'tail -n 1 "$1" | grep -q "System Settings"' _ "$out"
 check "  prints at most five lines" lines_at_most 5
@@ -220,19 +243,25 @@ check "  keeps settings and models" [ -e "$support/settings.json" ]
 
 run install
 printf 'n\n' >"$temporary/answer"
-WORDINK_TTY="$temporary/answer" run uninstall --purge
+(WORDINK_TTY="$temporary/answer" run uninstall --purge)
 check "--purge declined removes nothing" status_is 0
 check "  keeps the app" [ -d "$app" ]
 check "  keeps settings" [ -e "$support/settings.json" ]
 printf 'y\n' >"$temporary/answer"
-WORDINK_TTY="$temporary/answer" run uninstall --purge
+(WORDINK_TTY="$temporary/answer" run uninstall --purge)
 check "--purge confirmed succeeds" status_is 0
 check "  removes the app" no_app
 check "  removes the support folder" [ ! -e "$support" ]
+mkdir -p "$app/Contents/MacOS"
+: >"$log"
+run uninstall
+check "uninstall of a bundle with no executable succeeds quietly" status_is 0
+check "  does not try to open it" not_logged "open "
+check "  removes it" no_app
 run uninstall
 check "uninstall with nothing installed succeeds" status_is 0
 check "  says so" contains "not installed"
-WORDINK_TTY="$temporary/no-such-tty" run --purge
+(WORDINK_TTY="$temporary/no-such-tty" run --purge)
 check "--purge with no terminal asks for --yes" status_is 1
 
 if [ "$failures" -ne 0 ]; then
