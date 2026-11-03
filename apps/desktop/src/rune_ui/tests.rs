@@ -2400,3 +2400,71 @@ fn the_trust_prompt_lists_what_a_config_reaches_until_it_is_allowed() {
     );
     assert!(rt.find("allow-transformations").is_none());
 }
+
+/// The picker lists cloud models above the local ones, marks only the
+/// model that transcribes as Active, and picking moves dictation there.
+#[test]
+fn the_picker_offers_cloud_models_and_one_active_choice() {
+    use crate::transcription::cloud::{EngineChoice, Provider, force_keys, force_route};
+    force_route(Some(Provider::Groq));
+    force_keys(&[Provider::Groq]);
+    let mut rt = runtime("picker", true, PANE_SIZE);
+    rt.state.settings.engine = EngineChoice::Auto;
+    rt.invalidate();
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.contains(&"Speech model".to_owned()), "{shown:?}");
+    assert!(shown.contains(&"Cloud".to_owned()), "{shown:?}");
+    // Groq's default model is the one Active card; no local card is.
+    assert!(rt.find("cloud0/top/actions/active").is_some());
+    assert!(rt.find("cloud1/top/actions/active").is_none());
+    let local_active = rt.elements().iter().any(|e| {
+        e.path.ends_with("/top/actions/active")
+            && e.path.split('/').any(|part| {
+                part.strip_prefix("model")
+                    .is_some_and(|n| n.parse::<usize>().is_ok())
+            })
+    });
+    assert!(!local_active, "a cloud model is transcribing");
+    // A provider without a key offers no Use, only how to add one.
+    let openai = rt
+        .elements()
+        .iter()
+        .filter(|e| e.path.ends_with("/top/actions/choose-cloud-model"))
+        .count();
+    assert_eq!(openai, 1, "only Groq's other model can be chosen");
+    assert!(
+        shown
+            .iter()
+            .any(|line| line.contains("Set the key with `wordink keys set openai`")),
+        "{shown:?}"
+    );
+    // Picking Groq's other model keeps Auto (its local fallback) and saves the model.
+    tap(&mut rt, "cloud1/top/actions/choose-cloud-model");
+    assert_eq!(rt.state.settings.engine, EngineChoice::Auto);
+    assert_eq!(
+        rt.state.settings.engine_model.as_deref(),
+        Some("whisper-large-v3")
+    );
+    assert!(!rt.state.picker.open);
+    // Picking a local model moves dictation off the cloud.
+    rt.state.picker.open = true;
+    rt.invalidate();
+    settle(&mut rt);
+    scroll_into_view(&mut rt, "model3");
+    tap(&mut rt, "model3/top/actions/choose-model");
+    assert_eq!(rt.state.settings.engine, EngineChoice::Local);
+}
+
+/// Wheels the model picker until `key` sits inside its list.
+fn scroll_into_view(rt: &mut Runtime<Ui>, key: &str) {
+    for _ in 0..40 {
+        let list = element(rt, "model-scroll").rect;
+        let target = element(rt, key).rect;
+        if target[1] >= list[1] && target[1] + 40.0 <= list[1] + list[3] {
+            return;
+        }
+        wheel_down(rt, list[0] + list[2] / 2.0, list[1] + list[3] / 2.0, true);
+    }
+    panic!("{key} never scrolled into view");
+}

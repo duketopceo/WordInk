@@ -134,14 +134,22 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         }
         rows.extend(configure_shortcuts_row(ui, p).map(CardRow::from));
     }
+    // With a cloud engine active the row names the model that actually
+    // transcribes; the local model only matters when it's used.
+    let cloud_model = super::cloud_engine::active_cloud_model(ui);
     let picker_button = value_button(
         p,
         "transcription-control",
-        model.name,
+        cloud_model.as_ref().map_or(model.name, String::as_str),
         &rune_theme_opencode::icons::CHEVRON_RIGHT,
         super::picker::open,
     );
-    let (description, control) = match missing_model(ui) {
+    let local_missing = if cloud_model.is_some() {
+        None
+    } else {
+        missing_model(ui)
+    };
+    let (description, control) = match local_missing {
         // Hex can't listen without the selected model: say so, with the
         // download's progress, or a Download button when none runs.
         Some(progress) => {
@@ -187,7 +195,13 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                     .child(picker_button),
             )
         }
-        None => (s::transcription_status(ui, p), picker_button),
+        None => match &cloud_model {
+            Some(_) => (
+                Some((tr_fill("Local model: {}", model.name), p.muted())),
+                picker_button,
+            ),
+            None => (s::transcription_status(ui, p), picker_button),
+        },
     };
     rows.push(
         icon_described_row(
