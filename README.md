@@ -17,7 +17,7 @@ WordInk is one desktop app plus the pieces developers need to put dictation in t
 
 | Product | For | State |
 |---|---|---|
-| **WordInk desktop app** (`apps/desktop`) | Anyone who wants system-wide dictation on Linux (any Wayland desktop), Windows, and macOS on Apple silicon | In progress. It is built on [Hex](https://github.com/kitlangton/Hex) (MIT) and arrives in a pull request; it is not on `master` yet. Groq is the default engine; Parakeet v3 runs locally with no key. See [ROADMAP.md](ROADMAP.md). |
+| **WordInk desktop app** (`apps/desktop`) | Anyone who wants system-wide dictation on Linux, Windows, and macOS on Apple silicon | 1.0. Install with one command below. Built on [Hex](https://github.com/kitlangton/Hex) (MIT). Groq, OpenRouter or a local model (Parakeet v3). See [ROADMAP.md](ROADMAP.md). |
 | **`wordink-dictd`** (`sdks/python`) | The interim dictation daemon for Linux, Windows and macOS | Works today (Groq Whisper, then clean-up, then typed into the focused window). Kept until the desktop app reaches parity on each OS. See [examples](examples/). |
 | **Web SDK** (`packages/*`) | Developers adding a `<wordink-mic>` button to a web app | Merged and documented. Not published to npm yet. |
 | **Gateway** (`packages/server`) | Anyone who wants an OpenAI-compatible transcription endpoint with provider fallback and per-device tokens | Merged and documented. Not published to npm yet. |
@@ -26,6 +26,42 @@ WordInk is one desktop app plus the pieces developers need to put dictation in t
 The web SDK, the gateway and the iOS app are separate products from the desktop app. They share the transcription protocol and a clean-up contract, not code.
 
 **Docs and live demo: <https://duketopceo.github.io/WordInk/>**
+
+## Install the desktop app
+
+WordInk runs on Linux (x86_64 or aarch64), macOS 15+ on Apple silicon, and 64-bit Windows.
+
+**Linux**
+
+```sh
+curl -fsSL https://github.com/duketopceo/WordInk/releases/latest/download/install.sh | sh
+```
+
+Needs glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40, Arch and newer) and OpenSSL 3. The installer checks the release's ed25519 signature, starts WordInk as a user service, and keeps it updated from signed releases.
+
+**macOS**
+
+```sh
+curl -fsSL https://github.com/duketopceo/WordInk/releases/latest/download/install-macos.sh | sh
+```
+
+Installs `WordInk.app` into `~/Applications` and starts it at login. WordInk for macOS is not notarized yet: macOS asks you to allow microphone and accessibility access, and updates are shown in the app as a download link.
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://github.com/duketopceo/WordInk/releases/latest/download/install.ps1 | iex
+```
+
+Installs per user (no admin) and starts at login. WordInk for Windows is not code-signed yet, so SmartScreen may warn the first time you open it from Explorer (More info › Run anyway).
+
+**Uninstall**
+
+- Linux: `curl -fsSL https://github.com/duketopceo/WordInk/releases/latest/download/install.sh | sh -s -- uninstall` (add `--purge` to delete settings, history and models)
+- macOS: `curl -fsSL https://github.com/duketopceo/WordInk/releases/latest/download/install-macos.sh | sh -s -- uninstall`
+- Windows: `& ([scriptblock]::Create((irm https://github.com/duketopceo/WordInk/releases/latest/download/install.ps1))) -Uninstall`
+
+**Release candidates** install the same way with `WORDINK_INSTALL_BASE=https://github.com/duketopceo/WordInk/releases/download/desktop-v1.0.0-rc.N` set before the command.
 
 ## Web SDK quickstart
 
