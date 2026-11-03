@@ -268,7 +268,8 @@ do_install() {
 confirm_purge() {
   [ "$assume_yes" -eq 0 ] || return 0
   tty=${WORDINK_TTY:-/dev/tty}
-  { : <"$tty"; } 2>/dev/null || fail "--purge needs a confirmation; run it in a terminal or add --yes."
+  # `true`, not `:`: a failed redirection on a special built-in exits dash.
+  { true <"$tty"; } 2>/dev/null || fail "--purge needs a confirmation; run it in a terminal or add --yes."
   printf 'Delete WordInk settings, history and models in ~/Library/Application Support/wordink? [y/N] ' >&2
   answer=
   read -r answer <"$tty" || answer=
