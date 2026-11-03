@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # make-tarball.sh <dist> <arch>: packs wordink-<version>-linux-<arch>.tar.gz
-# in <dist> from the executable there, plus the installer and desktop files
-# from this checkout. It runs BEFORE signing, in a job with no secrets, so the
+# in <dist> from the executable there, plus install-release.sh (the installer
+# the bootstrap, install.sh, runs after verifying the tarball) and the desktop
+# files from this checkout. It runs BEFORE signing, in a job with no secrets, so the
 # tarball carries no wordink.sig: SHA256SUMS lists the tarball and
 # SHA256SUMS.sig signs that list (sign-linux.sh --sums), which is how a
 # download of the tarball is verified. The bare executable's own signature is
@@ -22,7 +23,7 @@ trap 'rm -rf "$stage"' EXIT
 root="$stage/$name"
 mkdir -p "$root"
 install -m 755 "$dist/$name" "$root/wordink"
-install -m 755 "$here/install-release.sh" "$root/install.sh"
+install -m 755 "$here/install-release.sh" "$root/install-release.sh"
 install -m 644 "$here/wordink-signing.pub" "$root/wordink-signing.pub"
 install -m 644 "$desktop/packaging/wordink.service" "$desktop/packaging/io.github.duketopceo.wordink.desktop" "$root/"
 cp -R "$here/icons" "$root/icons"
