@@ -15,6 +15,7 @@ mod brand;
 pub(crate) mod capture_capsule;
 mod cloud_engine;
 mod controls;
+mod debug_logs;
 #[cfg(target_os = "macos")]
 pub(crate) mod deep_link;
 mod explainer;
@@ -36,6 +37,7 @@ mod list_detail;
 mod lists;
 mod live_notes;
 pub(crate) mod live_text;
+mod log_view;
 pub(crate) mod meeting_capsules;
 mod meetings;
 mod meetings_host;
@@ -74,6 +76,7 @@ use rune::{
 };
 
 use crate::app_settings::{AppSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
+use crate::debug_log;
 use crate::desktop::host::{
     DesktopAction, DesktopGrantedShortcut, DesktopListenerSnapshot, DesktopShortcuts,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
@@ -836,6 +839,10 @@ pub(crate) struct Ui {
     advanced: Vec<Pane>,
     /// Privacy's Copy diagnostics row.
     diagnostics: privacy::DiagnosticsRow,
+    /// General › Advanced › Debug logs: what its last button did.
+    debug_logs: debug_logs::DebugLogsRow,
+    /// The live debug log view, which replaces General while open.
+    log_view: log_view::LogView,
     /// The Labs page shows in place of a pane.
     labs_open: bool,
     /// The Labs row a link just opened, pulsing until it is cleared.
@@ -952,6 +959,8 @@ impl Ui {
             show_all_microphones: false,
             advanced: Vec::new(),
             diagnostics: Default::default(),
+            debug_logs: Default::default(),
+            log_view: Default::default(),
             labs_open: false,
             lab_flash: None,
             build_preview: None,
@@ -1028,6 +1037,13 @@ impl Ui {
             Service::Pending(_) => {}
         }
         self.error = None;
+        // The names of what changed, never their values.
+        debug_log::dlog!(
+            Info,
+            "settings.saved",
+            "settings saved from the window",
+            keys = changed_keys(&self.settings, &candidate),
+        );
         self.settings = candidate;
         self.draft_since = None;
         self.settings_changed();
@@ -1269,6 +1285,8 @@ impl Ui {
         // The summary is made when the row opens; leaving Privacy drops it so
         // the next visit reads the engine and errors as they are then.
         self.diagnostics = Default::default();
+        self.debug_logs = Default::default();
+        self.log_view.close();
         self.output.prompt_copied = false;
         if pane == Pane::Replacements {
             replacements::open(self);
@@ -1410,6 +1428,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     let now = Instant::now();
     let mut changed = ui.save_drafts(now);
     changed |= labs::poll_flash(ui, now);
+    changed |= ui.log_view.poll();
     // The OpenCode catalog is read only while the pane that uses it shows.
     changed |= ui.models.poll(
         ui.live()
@@ -1525,6 +1544,21 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
 // ---------------------------------------------------------------------------
 // View
 
+/// The top-level setting names that differ between two settings.
+fn changed_keys(before: &AppSettings, after: &AppSettings) -> String {
+    let (Ok(serde_json::Value::Object(before)), Ok(serde_json::Value::Object(after))) =
+        (serde_json::to_value(before), serde_json::to_value(after))
+    else {
+        return String::new();
+    };
+    after
+        .iter()
+        .filter(|(key, value)| before.get(*key) != Some(*value))
+        .map(|(key, _)| key.as_str())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     let p = Paint::new(cx.system_dark(), cx.env().scale);
     // The native title bar takes the window's background, so it follows a
@@ -1535,6 +1569,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     let mut layer = Vec::new();
     let (actions, body) = match ui.pane {
         _ if ui.labs_open => (Vec::new(), labs::page(ui, p)),
+        Pane::General if ui.log_view.open => (Vec::new(), log_view::page(ui, p, &mut layer)),
         Pane::General => (Vec::new(), general::pane(ui, p, &mut layer)),
         Pane::Output => (Vec::new(), output::pane(ui, p, cx.is_reduced_motion())),
         Pane::Modes => modes::pane(ui, p, &mut layer),
@@ -2947,8 +2982,18 @@ fn bluetooth_microphones() -> crate::audio::InputDevices {
     crate::audio::InputDevices {
         names: vec!["alsa_input.builtin".into(), BLUETOOTH_FIXTURE_ID.into()],
         devices: vec![
-            device("alsa_input.builtin", "Laptop Mic", DeviceKind::BuiltIn, false),
-            device(BLUETOOTH_FIXTURE_ID, "Test Buds", DeviceKind::Bluetooth, true),
+            device(
+                "alsa_input.builtin",
+                "Laptop Mic",
+                DeviceKind::BuiltIn,
+                false,
+            ),
+            device(
+                BLUETOOTH_FIXTURE_ID,
+                "Test Buds",
+                DeviceKind::Bluetooth,
+                true,
+            ),
         ],
         system_default: Some("alsa_input.builtin".into()),
         ..Default::default()

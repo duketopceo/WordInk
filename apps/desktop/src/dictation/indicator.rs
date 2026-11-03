@@ -25,7 +25,7 @@ const PROCESSING_MIN_DURATION: Duration = Duration::from_millis(200);
 /// How long done shows before the HUD collapses: a third into done's
 /// 0.3 s wipe, so the collapse and the wipe end together.
 const COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(100);
-const FAILED_VISIBLE_DURATION: Duration = Duration::from_millis(600);
+const FAILED_VISIBLE_DURATION: Duration = Duration::from_millis(4_000);
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Copy, Debug)]
@@ -797,13 +797,16 @@ mod tests {
         model.handle(DictationIndicatorEvent::Failed, at(start, 0.5), false);
         let failed = run(&mut model, start, 0.5, 0.5);
         assert!(failed.last().unwrap().pose.fail > 0.9);
+        // The failure stays on screen for about four seconds, long enough to read.
         run(&mut model, start, 1.0, 1.5);
+        assert!(model.active(), "still showing the failure");
+        run(&mut model, start, 2.5, 3.0);
         assert!(!model.active());
 
-        model.handle(DictationIndicatorEvent::Started, at(start, 3.0), false);
-        run(&mut model, start, 3.0, 0.5);
-        model.handle(DictationIndicatorEvent::Cancelled, at(start, 3.5), false);
-        let cancelled = run(&mut model, start, 3.5, 1.5);
+        model.handle(DictationIndicatorEvent::Started, at(start, 6.0), false);
+        run(&mut model, start, 6.0, 0.5);
+        model.handle(DictationIndicatorEvent::Cancelled, at(start, 6.5), false);
+        let cancelled = run(&mut model, start, 6.5, 1.5);
         assert!(cancelled.iter().all(|frame| frame.pose.fail < 0.01));
         assert!(lit(cancelled.last().unwrap()) == 0 || !model.active());
         assert!(!model.active());

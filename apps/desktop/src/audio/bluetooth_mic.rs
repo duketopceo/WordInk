@@ -9,7 +9,9 @@
 //! drives it with `pactl`.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use crate::debug_log::dlog;
 
 use crate::app_settings::BluetoothMic;
 use crate::audio::sources::{Device, is_music_profile};
@@ -37,6 +39,19 @@ pub trait Controller {
     fn set_profile(&mut self, card: &str, profile: &str) -> Result<(), String>;
     /// Whether the earbuds' microphone exists now.
     fn source_present(&mut self, device_id: &str) -> bool;
+    /// The sound server's node name of the earbuds' microphone, when it has
+    /// one: what the default source is set to while dictating. Capture then
+    /// follows the default and needs no stream move, which linking
+    /// apps and Bluetooth profile changes can defeat.
+    fn source_node(&mut self, _device_id: &str) -> Option<String> {
+        None
+    }
+    fn default_source(&mut self) -> Option<String> {
+        None
+    }
+    fn set_default_source(&mut self, _node: &str) -> Result<(), String> {
+        Ok(())
+    }
     fn pause(&mut self, how_long: Duration);
 }
 
@@ -45,6 +60,9 @@ pub trait Controller {
 pub struct Marker {
     pub card: String,
     pub previous: String,
+    /// The default source before the earbuds' microphone took its place for
+    /// the dictation; `None` when it was never changed.
+    pub previous_source: Option<String>,
 }
 
 /// Remembers a switch outside the process, so a crash cannot leave the
@@ -87,6 +105,38 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
     /// Puts the earbuds in headset mode and waits for their microphone.
     /// `device_id` is the earbuds' `bluez_input.<address>` id.
     pub fn begin(&mut self, card: &str, device_id: &str) -> Result<Begun, String> {
+        let started = Instant::now();
+        let mut result = self.begin_inner(card, device_id);
+        if matches!(result, Ok(Begun::Switched | Begun::AlreadyHeadset))
+            && let Err(error) = self.claim_default(card, device_id)
+        {
+            self.restore();
+            result = Err(error);
+        }
+        match &result {
+            Ok(begun) => dlog!(
+                Info,
+                "bluetooth.begin",
+                "headset flow ready",
+                card = card,
+                device = device_id,
+                outcome = format!("{begun:?}"),
+                total_ms = started.elapsed().as_millis() as u64,
+            ),
+            Err(error) => dlog!(
+                Info,
+                "bluetooth.begin",
+                "headset flow failed",
+                card = card,
+                device = device_id,
+                error = error,
+                total_ms = started.elapsed().as_millis() as u64,
+            ),
+        }
+        result
+    }
+
+    fn begin_inner(&mut self, card: &str, device_id: &str) -> Result<Begun, String> {
         if self
             .active
             .as_ref()
@@ -96,6 +146,14 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
             return Ok(Begun::Reused);
         }
         let state = self.controller.card(card)?;
+        dlog!(
+            Debug,
+            "bluetooth.card",
+            "card profile before",
+            card = card,
+            active = state.active,
+            headset_profiles = state.headset_profiles.join(","),
+        );
         let Some(active) = state.active.clone() else {
             return Err("the earbuds are not connected".into());
         };
@@ -115,12 +173,30 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
         let marker = Marker {
             card: card.to_owned(),
             previous: active,
+            previous_source: None,
         };
         self.marker.save(&marker);
+        dlog!(
+            Debug,
+            "bluetooth.marker",
+            "marker saved",
+            card = card,
+            previous = marker.previous,
+        );
         self.active = Some(marker);
         let mut last_error = String::from("the earbuds' microphone did not appear");
         for (attempt, profile) in state.headset_profiles.iter().enumerate() {
+            let switching = Instant::now();
             if let Err(error) = self.controller.set_profile(card, profile) {
+                dlog!(
+                    Info,
+                    "bluetooth.switch",
+                    "profile switch failed",
+                    card = card,
+                    profile = profile,
+                    attempt = attempt + 1,
+                    error = error,
+                );
                 last_error = error;
                 continue;
             }
@@ -129,13 +205,68 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
             } else {
                 FALLBACK_WAIT
             };
-            if self.wait_for_source(device_id, wait) {
+            let appeared = self.wait_for_source(device_id, wait);
+            dlog!(
+                Debug,
+                "bluetooth.wait",
+                "waited for the earbuds' microphone",
+                profile = profile,
+                attempt = attempt + 1,
+                appeared = appeared,
+                limit_ms = wait.as_millis() as u64,
+                ms = switching.elapsed().as_millis() as u64,
+            );
+            if appeared {
                 return Ok(Begun::Switched);
             }
             last_error = format!("the earbuds' microphone did not appear in {profile}");
         }
         self.restore();
         Err(last_error)
+    }
+
+    /// Makes the earbuds' microphone the default source for the dictation,
+    /// remembering the one it replaces so [`Self::restore`] puts it back.
+    fn claim_default(&mut self, card: &str, device_id: &str) -> Result<(), String> {
+        let Some(node) = self.controller.source_node(device_id) else {
+            return Ok(());
+        };
+        let previous = self.controller.default_source();
+        if previous.as_deref() == Some(node.as_str()) {
+            return Ok(());
+        }
+        let started = Instant::now();
+        let mut marker = match self.active.take() {
+            Some(marker) => marker,
+            // Already in headset mode: nothing to switch back, but the
+            // default still has to be.
+            None => Marker {
+                card: card.to_owned(),
+                previous: self
+                    .controller
+                    .card(card)?
+                    .active
+                    .unwrap_or_else(|| "off".into()),
+                previous_source: None,
+            },
+        };
+        marker.previous_source = previous.clone();
+        // Recorded before the change, like the profile switch.
+        self.marker.save(&marker);
+        self.active = Some(marker);
+        let result = self.controller.set_default_source(&node);
+        dlog!(
+            Info,
+            "bluetooth.default_source",
+            "default source switched to the earbuds",
+            node = node,
+            previous = previous,
+            ok = result.is_ok(),
+            error = result.as_ref().err(),
+            ms = started.elapsed().as_millis() as u64,
+        );
+        result
+            .map_err(|error| format!("could not make the earbuds the default microphone: {error}"))
     }
 
     fn wait_for_source(&mut self, device_id: &str, limit: Duration) -> bool {
@@ -159,24 +290,73 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
         let Some(marker) = self.active.clone() else {
             return;
         };
+        let started = Instant::now();
         if self.put_back(&marker) {
             self.active = None;
             self.marker.clear();
+            dlog!(
+                Info,
+                "bluetooth.restore",
+                "earbuds back in their previous profile",
+                card = marker.card,
+                profile = marker.previous,
+                ms = started.elapsed().as_millis() as u64,
+            );
+        } else {
+            dlog!(
+                Info,
+                "bluetooth.restore",
+                "restore FAILED; the marker stays for the next start",
+                card = marker.card,
+                profile = marker.previous,
+                ms = started.elapsed().as_millis() as u64,
+            );
         }
         // On failure the switch stays recorded: `is_active` remains true, a
         // later restore retries, and the marker covers the next start.
     }
 
     fn put_back(&mut self, marker: &Marker) -> bool {
+        // The default source first, then the profile (the caller resumes
+        // media after both).
+        if let Some(previous) = &marker.previous_source {
+            let started = Instant::now();
+            let mut restored = Err(String::new());
+            for attempt in 0..RESTORE_ATTEMPTS {
+                if attempt > 0 {
+                    self.controller.pause(RESTORE_RETRY);
+                }
+                restored = self.controller.set_default_source(previous);
+                if restored.is_ok() {
+                    break;
+                }
+            }
+            dlog!(
+                Info,
+                "bluetooth.default_source",
+                "default source restored",
+                node = previous,
+                ok = restored.is_ok(),
+                error = restored.as_ref().err(),
+                ms = started.elapsed().as_millis() as u64,
+            );
+        }
         for attempt in 0..RESTORE_ATTEMPTS {
             if attempt > 0 {
                 self.controller.pause(RESTORE_RETRY);
             }
-            if self
-                .controller
-                .set_profile(&marker.card, &marker.previous)
-                .is_ok()
-            {
+            let result = self.controller.set_profile(&marker.card, &marker.previous);
+            dlog!(
+                Debug,
+                "bluetooth.restore",
+                "restore attempt",
+                card = marker.card,
+                profile = marker.previous,
+                attempt = attempt + 1,
+                ok = result.is_ok(),
+                error = result.as_ref().err(),
+            );
+            if result.is_ok() {
                 return true;
             }
         }
@@ -188,6 +368,17 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
         let Some(marker) = self.marker.load() else {
             return;
         };
+        dlog!(
+            Info,
+            "bluetooth.marker",
+            "stale marker from an earlier run",
+            card = marker.card,
+            previous = marker.previous,
+        );
+        // The default source goes back whatever state the card is in.
+        if let Some(previous) = &marker.previous_source {
+            let _ = self.controller.set_default_source(previous);
+        }
         match self.controller.card(&marker.card) {
             // The card is in a headset mode we put it in, or never left music mode.
             Ok(state) => {
@@ -243,6 +434,8 @@ mod tests {
 
     const CARD: &str = "bluez_card.00_11_22_33_44_55";
     const ID: &str = "bluez_input.00:11:22:33:44:55";
+    const NODE: &str = "bluez_input.00_11_22_33_44_55.0";
+    const MAC_MIC: &str = "alsa_input.mac_mic";
 
     #[derive(Default)]
     struct World {
@@ -256,6 +449,11 @@ mod tests {
         marker: Option<Marker>,
         gone: bool,
         slept: Duration,
+        /// The default source, and whether the sound server has a node for
+        /// the earbuds' microphone to point it at.
+        default: String,
+        offers_node: bool,
+        fail_default: bool,
     }
 
     #[derive(Clone, Default)]
@@ -269,6 +467,8 @@ mod tests {
                 world.profiles.insert(CARD.into(), profile.into());
                 world.offered = vec!["headset-head-unit".into(), "headset-head-unit-cvsd".into()];
                 world.mic_in = vec![("headset-head-unit".into(), 3)];
+                world.default = MAC_MIC.into();
+                world.offers_node = false;
             }
             fake
         }
@@ -309,6 +509,21 @@ mod tests {
                 .mic_in
                 .iter()
                 .any(|(wanted, delay)| *wanted == profile && world.polls_since_switch > *delay)
+        }
+        fn source_node(&mut self, _: &str) -> Option<String> {
+            self.0.borrow().offers_node.then(|| NODE.to_owned())
+        }
+        fn default_source(&mut self) -> Option<String> {
+            Some(self.0.borrow().default.clone())
+        }
+        fn set_default_source(&mut self, node: &str) -> Result<(), String> {
+            let mut world = self.0.borrow_mut();
+            world.calls.push(format!("default {node}"));
+            if world.fail_default {
+                return Err("refused".into());
+            }
+            world.default = node.to_owned();
+            Ok(())
         }
         fn pause(&mut self, how_long: Duration) {
             self.0.borrow_mut().slept += how_long;
@@ -467,11 +682,98 @@ mod tests {
     }
 
     #[test]
+    fn the_default_source_follows_the_earbuds_and_goes_back_before_the_profile() {
+        let (fake, marker) = (Fake::earbuds("a2dp-sink"), FakeMarker::default());
+        fake.0.borrow_mut().offers_node = true;
+        let mut machine = machine(&fake, &marker);
+        assert_eq!(machine.begin(CARD, ID), Ok(Begun::Switched));
+        assert_eq!(fake.0.borrow().default, NODE);
+        assert_eq!(
+            marker
+                .0
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .previous_source
+                .as_deref(),
+            Some(MAC_MIC)
+        );
+        machine.restore();
+        let calls = fake.calls();
+        assert_eq!(
+            &calls[calls.len() - 2..],
+            [format!("default {MAC_MIC}"), "set a2dp-sink".to_owned()],
+            "default source first, then the profile: {calls:?}"
+        );
+        assert_eq!(fake.0.borrow().default, MAC_MIC);
+        assert_eq!(fake.profile(), "a2dp-sink");
+        assert!(marker.0.borrow().is_none());
+    }
+
+    #[test]
+    fn a_default_source_that_will_not_switch_fails_the_start_and_restores_everything() {
+        let (fake, marker) = (Fake::earbuds("a2dp-sink"), FakeMarker::default());
+        fake.0.borrow_mut().offers_node = true;
+        fake.0.borrow_mut().fail_default = true;
+        let error = machine(&fake, &marker).begin(CARD, ID).unwrap_err();
+        assert!(error.contains("default microphone"), "{error}");
+        assert_eq!(fake.profile(), "a2dp-sink");
+        assert_eq!(fake.0.borrow().default, MAC_MIC);
+        assert!(marker.0.borrow().is_none());
+    }
+
+    #[test]
+    fn earbuds_already_in_headset_mode_still_get_and_give_back_the_default() {
+        let (fake, marker) = (Fake::earbuds("headset-head-unit"), FakeMarker::default());
+        fake.0.borrow_mut().offers_node = true;
+        fake.0.borrow_mut().polls_since_switch = 10;
+        let mut machine = machine(&fake, &marker);
+        assert_eq!(machine.begin(CARD, ID), Ok(Begun::AlreadyHeadset));
+        assert_eq!(fake.0.borrow().default, NODE);
+        machine.restore();
+        assert_eq!(fake.0.borrow().default, MAC_MIC);
+        assert_eq!(
+            fake.profile(),
+            "headset-head-unit",
+            "its profile was never ours"
+        );
+    }
+
+    #[test]
+    fn no_node_for_the_microphone_leaves_the_default_alone() {
+        let (fake, marker) = (Fake::earbuds("a2dp-sink"), FakeMarker::default());
+        fake.0.borrow_mut().offers_node = false;
+        assert_eq!(machine(&fake, &marker).begin(CARD, ID), Ok(Begun::Switched));
+        assert_eq!(fake.0.borrow().default, MAC_MIC);
+    }
+
+    #[test]
+    fn a_crash_marker_with_a_default_source_restores_it_then_the_profile() {
+        let (fake, marker) = (Fake::earbuds("headset-head-unit"), FakeMarker::default());
+        fake.0.borrow_mut().offers_node = true;
+        fake.0.borrow_mut().default = NODE.into();
+        *marker.0.borrow_mut() = Some(Marker {
+            card: CARD.into(),
+            previous: "a2dp-sink".into(),
+            previous_source: Some(MAC_MIC.into()),
+        });
+        machine(&fake, &marker).recover_stale();
+        let calls = fake.calls();
+        assert_eq!(
+            &calls[calls.len() - 2..],
+            [format!("default {MAC_MIC}"), "set a2dp-sink".to_owned()]
+        );
+        assert_eq!(fake.0.borrow().default, MAC_MIC);
+        assert!(marker.0.borrow().is_none());
+    }
+
+    #[test]
     fn a_marker_left_by_a_crash_is_undone_on_the_next_start() {
         let (fake, marker) = (Fake::earbuds("headset-head-unit"), FakeMarker::default());
         *marker.0.borrow_mut() = Some(Marker {
             card: CARD.into(),
             previous: "a2dp-sink".into(),
+            previous_source: None,
         });
         machine(&fake, &marker).recover_stale();
         assert_eq!(fake.profile(), "a2dp-sink");
@@ -484,6 +786,7 @@ mod tests {
         *marker.0.borrow_mut() = Some(Marker {
             card: CARD.into(),
             previous: "a2dp-sink".into(),
+            previous_source: None,
         });
         machine(&fake, &marker).recover_stale();
         assert!(fake.calls().is_empty());
@@ -493,6 +796,7 @@ mod tests {
         *marker.0.borrow_mut() = Some(Marker {
             card: CARD.into(),
             previous: "a2dp-sink".into(),
+            previous_source: None,
         });
         fake.0.borrow_mut().gone = true;
         machine(&fake, &marker).recover_stale();

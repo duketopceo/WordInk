@@ -321,6 +321,14 @@ impl Pump {
                 None
             }
             ControlCommand::HistoryClear => Some(reply_with(clear_history(&runtime))),
+            ControlCommand::DebugLogs {
+                after,
+                filter,
+                limit,
+            } => {
+                let (events, next) = crate::debug_log::since(after, &filter, limit.clamp(1, 5_000));
+                Some(ControlReply::DebugLogs { events, next })
+            }
             ControlCommand::LaunchAtLogin { enabled } => {
                 background(reply, move || launch_at_login(enabled));
                 None
@@ -333,7 +341,9 @@ impl Pump {
                     ControlReply::error("unavailable", "this WordInk build doesn't update itself")
                 }
                 _ => match crate::macos_rune::update_action(&DesktopAction::CheckForUpdates) {
-                    Ok(()) => ControlReply::done("Checking for updates; WordInk shows what it finds"),
+                    Ok(()) => {
+                        ControlReply::done("Checking for updates; WordInk shows what it finds")
+                    }
                     Err(error) => ControlReply::error("unavailable", format!("{error:#}")),
                 },
             }),

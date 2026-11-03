@@ -326,6 +326,29 @@ and short taps never do; Hex restores only what it changed.
 Cancelling shortcut capture preserves the old binding unless the new binding
 has already been saved; listening resumes only if it was previously running.
 
+### Diagnosing a microphone that records nothing
+
+Hex records through ALSA's default device, then has PipeWire move its capture
+stream to the microphone you chose. Audio is dropped, not buffered, until the
+sound server confirms the move, and a move that never confirms fails the open
+instead of recording the wrong source. A capture that comes back all zeros ends
+as "<microphone> is silent, check the microphone" (with a notification) rather
+than a quiet discard. Every end of a dictation, including a discard, a silent
+input, a cancel and shutdown, puts Bluetooth earbuds back in their previous
+profile. For the details of a failure, turn on Developer mode (General,
+Advanced) or run `wordink logs --debug` (see `docs/cli.md`, Debug logs).
+
+Bluetooth earbuds' microphone is captured by making it the PipeWire default
+source for the dictation (`pactl set-default-source`), so the stream links to it
+on its own; the previous default source is restored first on every end, then the
+profile, then your media. A dictation that can't use its chosen microphone fails
+rather than recording from another one, and every failure plays the error tone,
+shows the HUD failure state, raises a desktop notification with the device and
+one next step, and carries a code in the log and in `wordink diagnostics`:
+`E-EARBUDS-PROFILE`, `E-EARBUDS-NOSOURCE`, `E-STREAM-LINK`, `E-STREAM-HIJACKED`,
+`E-MIC-GONE`, `E-MIC-SILENT`, `E-RELEASED-EARLY`, `E-ENGINE-HTTP`, `E-ENGINE-AUTH`,
+`E-ENGINE-RATE`, `E-ENGINE-CREDIT`, `E-ENGINE`, `E-PASTE`.
+
 ### Bluetooth headsets
 
 A Bluetooth headset can't play high-quality audio (A2DP) and use its

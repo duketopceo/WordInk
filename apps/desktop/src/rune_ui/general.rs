@@ -62,6 +62,12 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 "application",
                 tr("Application"),
                 application(ui, p, layer),
+            ))
+            .child(section(
+                p,
+                "debug-logs",
+                tr("Debug logs"),
+                super::debug_logs::rows(ui, p, layer),
             ));
     }
     super::scroll_body("scroll", content)

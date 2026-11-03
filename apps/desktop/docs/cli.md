@@ -78,7 +78,7 @@ hex
 ├── check-for-updates              check for an update now
 ├── launch-at-login [on|off]       report or change Launch at Login (macOS: installed Hex.app only; Windows Run key; Linux XDG autostart)
 ├── diagnostics                    print a plain-text bug-report summary (version, channel, OS, architecture, engine, install method, recent errors); no running Hex needed, nothing sent
-└── logs [--process] [-n N] [-f]   tail live.ndjson (or process.log); no running Hex needed
+└── logs [--process | --debug [--level L] [--subsystem S,..] [--json]] [-n N] [-f]   tail live.ndjson, process.log, or the debug log (history, then live with -f, from the running WordInk)
 ```
 
 `dictation start` locks the recording, as a double tap would: `dictation stop`
@@ -458,7 +458,7 @@ default 0.2), applied on the next intentional capture when ducking is selected.
 
 Writable keys: `release_microphone_while_idle`,
 `sound_effects`, `sound_effect_volume`, `sound_theme`, `microphone`,
-`avoid_bluetooth_microphone`, `recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
+`avoid_bluetooth_microphone`, `developer_mode`, `debug_logging_level`, `debug_logging_transcripts`, `recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
 `shortcut_mode`, `dictation_hotkey`, `paste_last_hotkey`, `raw_dictation_hotkey`,
 `second_dictation_hotkey`, `labs.second_dictation_shortcut`, `labs.standalone_special_keys`, `show_dock_icon`, `vocabulary_boost`,
 `dictation_processing.default_mode`, `dictation_processing.modes`,
@@ -493,3 +493,30 @@ removed `permissions.input_monitoring` from the status reply; version 3 removed
 `voice-action` and `features.voice_action`; version 4 removed `commands-retry`,
 `settings-set.confirm`, `window-show` `commands`, `capture.recording` `voice`,
 `features.commands`, and `features.command_model`.
+
+## Debug logs
+
+WordInk always keeps its last 5,000 debug events (about 2 MB) in memory: audio
+devices and routing, Bluetooth profile switches, speech-detection decisions,
+engine requests (route, model, sizes, timings, status; never keys, audio or, by
+default, transcripts), paste, media, hotkeys, settings (key names only) and
+update checks. Nothing is formatted or written until you look.
+
+- `wordink logs --debug` prints the buffer from the running WordInk; `-f`
+  keeps streaming new events (history first, then live) over the local control
+  socket. `--level info|debug|trace` shows that level and below,
+  `--subsystem audio,bluetooth` (audio, bluetooth, vad, engine, output, media,
+  hotkeys, settings, updater) narrows it, and `--json` prints one JSON object
+  per event. With WordInk stopped it tails `debug.log` (text only).
+- `wordink settings set developer_mode on` (Settings, General, Advanced,
+  Debug logs) opens the live log view in the window and also saves events to
+  `debug.log` in the logs folder (5 MB x 3, rotated). It works in release
+  builds. `debug_logging_level` (info, debug, trace) sets how much is saved,
+  and trace also captures per-chunk audio events.
+- `debug_logging_transcripts on` lets the log hold transcript text; it is off
+  unless you opt in. Copying from the window or the CLI scrubs home folders,
+  user names, paths and key-like tokens again.
+
+Each line is `2026-11-02T10:15:03.123Z +4821ms DEBUG audio.route moved the
+capture stream key=value`: wall time, milliseconds since the app started, level,
+`subsystem.event`, a message and fields (`ms=` is a duration).

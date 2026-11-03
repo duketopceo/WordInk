@@ -2506,3 +2506,152 @@ fn rename_can_be_cancelled_and_the_picker_can_show_every_device() {
     assert!(labels(&rt).contains(&"Effects".to_owned()));
     assert!(labels(&rt).contains(&"Show fewer devices".to_owned()));
 }
+
+// ---------------------------------------------------------------------------
+// Developer mode and the live debug log view.
+
+fn log_event(
+    level: crate::debug_log::DebugLevel,
+    stage: &str,
+    message: &str,
+) -> crate::debug_log::Event {
+    let (subsystem, name) = stage.split_once('.').unwrap();
+    crate::debug_log::Event {
+        seq: 1,
+        mono_ms: 10,
+        wall_ms: 1_700_000_000_000,
+        level,
+        subsystem: subsystem.into(),
+        name: name.into(),
+        message: message.into(),
+        fields: Vec::new(),
+    }
+}
+
+#[test]
+fn advanced_has_a_debug_logs_section_with_every_control() {
+    let mut rt = runtime("microphone-bluetooth", true, TALL_SIZE);
+    open_advanced(&mut rt, Pane::General);
+    let shown = texts(&rt);
+    for expected in [
+        "Debug logs",
+        "Developer mode",
+        "Detail",
+        "Open log viewer",
+        "Open logs folder",
+        "Copy recent debug log",
+        "Clear debug logs",
+        "logs/debug.log",
+    ] {
+        assert!(
+            shown.iter().any(|text| text == expected),
+            "{expected}: {shown:?}"
+        );
+    }
+    assert!(!rt.state.settings.developer_mode, "off by default");
+    pick(&mut rt, "debug-logging-level", 2);
+    assert_eq!(
+        rt.state.settings.debug_logging_level,
+        crate::debug_log::DebugLevel::Trace
+    );
+}
+
+#[test]
+fn copying_with_no_log_says_so_and_changes_nothing() {
+    let mut rt = runtime("microphone-bluetooth", true, TALL_SIZE);
+    open_advanced(&mut rt, Pane::General);
+    tap(&mut rt, "debug-logs-copy");
+    assert!(texts(&rt).contains(&"There is no debug log yet".to_owned()));
+}
+
+#[test]
+fn turning_developer_mode_on_opens_the_live_view_and_back_returns() {
+    let mut rt = runtime("microphone-bluetooth", true, TALL_SIZE);
+    open_advanced(&mut rt, Pane::General);
+    assert!(!rt.state.log_view.open);
+    tap(&mut rt, "developer-mode");
+    assert!(rt.state.settings.developer_mode);
+    assert!(rt.state.log_view.open, "the view opens with developer mode");
+    assert!(rt.find("log-view").is_some());
+    assert!(texts(&rt).contains(&"Developer log".to_owned()));
+    tap(&mut rt, "log-view-back");
+    assert!(!rt.state.log_view.open);
+    assert!(
+        rt.state.settings.developer_mode,
+        "closing the view keeps developer mode on"
+    );
+    // Turning it off keeps the view closed.
+    rt.invalidate();
+    settle(&mut rt);
+    tap(&mut rt, "developer-mode");
+    assert!(!rt.state.settings.developer_mode);
+    assert!(!rt.state.log_view.open);
+}
+
+#[test]
+fn the_view_shows_buffered_events_filters_them_and_pauses() {
+    use crate::debug_log::DebugLevel::{Debug, Info, Trace};
+    let mut rt = runtime("microphone-bluetooth", true, TALL_SIZE);
+    rt.state.log_view.show_for_test(vec![
+        log_event(Info, "audio.route", "capture moved to the earbuds"),
+        log_event(Debug, "audio.inventory", "devices listed"),
+        log_event(Trace, "audio.chunk", "chunk"),
+        log_event(Info, "bluetooth.restore", "profile restored"),
+    ]);
+    rt.invalidate();
+    settle(&mut rt);
+    let body = |rt: &Runtime<Ui>| element(rt, "log-view-text").text.unwrap_or_default();
+    let all = body(&rt);
+    assert_eq!(all.lines().count(), 4, "{all}");
+    assert!(all.contains("audio.route capture moved to the earbuds"));
+    assert!(all.contains("+10ms"), "monotonic time is shown: {all}");
+
+    // A subsystem chip narrows to it.
+    tap(&mut rt, "log-sub-bluetooth");
+    let shown = body(&rt);
+    assert_eq!(shown.lines().count(), 1, "{shown}");
+    assert!(shown.contains("bluetooth.restore"));
+    tap(&mut rt, "log-sub-bluetooth");
+    assert_eq!(body(&rt).lines().count(), 4);
+
+    // The level select hides trace, then debug.
+    pick(&mut rt, "log-view-level", 1);
+    assert_eq!(body(&rt).lines().count(), 3);
+    pick(&mut rt, "log-view-level", 0);
+    assert_eq!(body(&rt).lines().count(), 2);
+    pick(&mut rt, "log-view-level", 2);
+
+    // Search narrows by text, ignoring case.
+    rt.state.log_view.search = rune::TextEdit::new("EARBUDS".to_owned());
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(body(&rt).lines().count(), 1);
+    rt.state.log_view.search = rune::TextEdit::new(String::new());
+
+    // Streaming adds events; pausing holds them without losing any.
+    let sender = rt.state.log_view.stream_for_test();
+    sender
+        .send(log_event(Info, "engine.request", "first live"))
+        .unwrap();
+    assert!(rt.state.log_view.poll());
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(body(&rt).contains("first live"));
+    assert!(texts(&rt).contains(&"Streaming".to_owned()));
+    tap(&mut rt, "log-view-pause");
+    assert!(texts(&rt).contains(&"Paused".to_owned()));
+    sender
+        .send(log_event(Info, "engine.request", "while paused"))
+        .unwrap();
+    assert!(!rt.state.log_view.poll());
+    assert!(!body(&rt).contains("while paused"));
+    // Resuming shows what waited (the next frame polls it in).
+    tap(&mut rt, "log-view-pause");
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(body(&rt).contains("while paused"));
+
+    // Clear empties the view.
+    tap(&mut rt, "log-view-clear");
+    assert!(body(&rt).contains("No events match yet"));
+}
