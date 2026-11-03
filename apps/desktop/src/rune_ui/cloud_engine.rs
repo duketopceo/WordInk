@@ -141,5 +141,112 @@ pub(super) fn rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             );
         }
     }
+    rows.extend(meeting_rows(ui, p, layer));
+    rows
+}
+
+/// The engines a meeting can be given: the local model (the default, and no
+/// setting) or one cloud provider.
+const MEETING_ENGINES: [Option<EngineChoice>; 6] = [
+    None,
+    Some(EngineChoice::Groq),
+    Some(EngineChoice::Openrouter),
+    Some(EngineChoice::Openai),
+    Some(EngineChoice::Deepgram),
+    Some(EngineChoice::Gateway),
+];
+
+/// The models a meeting can use at `provider`: OpenRouter's transcription
+/// models (a meeting wants timestamps), else the provider's own list.
+fn meeting_models(provider: Provider) -> Vec<(String, String)> {
+    match provider {
+        Provider::OpenRouter => cloud::transcription_models()
+            .into_iter()
+            .map(|model| (model.id, model.name))
+            .collect(),
+        other => cloud::models_for(other),
+    }
+}
+
+/// The meeting engine row, and under it the model row when the provider has
+/// models to choose between. Meetings use the local model unless a cloud
+/// engine is chosen here, whatever dictation uses.
+fn meeting_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
+    let choice = ui.settings.meeting_engine.filter(|c| c.provider().is_some());
+    let labels: Vec<&'static str> = MEETING_ENGINES
+        .iter()
+        .map(|c| tr(c.unwrap_or(EngineChoice::Local).label()))
+        .collect();
+    let selected = MEETING_ENGINES
+        .iter()
+        .position(|c| *c == choice)
+        .unwrap_or(0);
+    let engine = quiet_select(
+        ui,
+        p,
+        Menu::Pick("meeting-engine"),
+        "meeting-engine-control".to_owned(),
+        labels,
+        selected,
+        |ui, index| {
+            let choice = MEETING_ENGINES[index];
+            if ui.settings.meeting_engine != choice {
+                ui.update(|settings| {
+                    settings.meeting_engine = choice;
+                    settings.meeting_engine_model = None;
+                });
+            }
+        },
+        layer,
+    );
+    let note = match choice.and_then(EngineChoice::provider) {
+        Some(Provider::Gateway) => {
+            tr("Set gateway_url in settings.json and the token with `wordink keys set gateway`")
+                .to_owned()
+        }
+        Some(provider) => tr_fill("Set the key with `wordink keys set {}`", provider.id()),
+        None => tr("Meetings stay on this computer unless you choose a cloud engine").to_owned(),
+    };
+    let mut rows: Vec<CardRow> = vec![
+        icon_row(
+            p,
+            "meeting-engine",
+            &WAVE,
+            tr("Meeting engine"),
+            Some(&note),
+            engine,
+        )
+        .into(),
+    ];
+    if let Some(provider) = choice.and_then(EngineChoice::provider) {
+        let models = meeting_models(provider);
+        if models.len() > 1 {
+            let current = cloud::meeting_model_for(provider, ui.settings.meeting_engine_model.as_deref());
+            let labels: Vec<&'static str> = models.iter().map(|(_, name)| interned(name)).collect();
+            let selected = models
+                .iter()
+                .position(|(id, _)| *id == current)
+                .unwrap_or(0);
+            let ids: Vec<String> = models.into_iter().map(|(id, _)| id).collect();
+            let model = quiet_select(
+                ui,
+                p,
+                Menu::Pick("meeting-model"),
+                "meeting-model-control".to_owned(),
+                labels,
+                selected,
+                move |ui, index| {
+                    if let Some(id) = ids.get(index) {
+                        let id = id.clone();
+                        ui.update(|settings| settings.meeting_engine_model = Some(id));
+                    }
+                },
+                layer,
+            );
+            rows.push(
+                icon_row(p, "meeting-model", &WAVE, tr("Meeting model"), None, model).into(),
+            );
+        }
+    }
     rows
 }

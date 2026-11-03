@@ -533,6 +533,24 @@ const KEYS: &[Key] = &[
         "The model the cloud engine uses: an OpenRouter audio model id, `whisper-1` for openai; none uses the provider's default",
     ),
     optional(
+        "meeting_engine",
+        Kind::Choice(&[
+            "auto",
+            "local",
+            "groq",
+            "openrouter",
+            "openai",
+            "deepgram",
+            "gateway",
+        ]),
+        "Which engine meetings use, apart from dictation: none (the local model, as before), or a cloud provider. A cloud engine sends each meeting chunk to that provider",
+    ),
+    optional(
+        "meeting_engine_model",
+        Kind::Text,
+        "The model the meeting engine uses, such as `microsoft/mai-transcribe-2` for openrouter; none uses the provider's default",
+    ),
+    optional(
         "gateway_url",
         Kind::Text,
         "The WordInk gateway's URL (https; http only for localhost). Its token is set with `wordink keys set gateway`",
@@ -843,6 +861,18 @@ pub fn apply(
             if let Some(model) = candidate.engine_model.as_deref().map(str::trim) {
                 let warning = engine_model_check(candidate.engine, model)
                     .map_err(|why| invalid(name, &why))?;
+                if let Some(warning) = warning {
+                    message = format!("Set {name} (warning: {warning})");
+                }
+            }
+        }
+        "meeting_engine_model" => {
+            if let Some(model) = candidate.meeting_engine_model.as_deref().map(str::trim) {
+                let engine = candidate
+                    .meeting_engine
+                    .unwrap_or(crate::transcription::cloud::EngineChoice::Local);
+                let warning =
+                    engine_model_check(engine, model).map_err(|why| invalid(name, &why))?;
                 if let Some(warning) = warning {
                     message = format!("Set {name} (warning: {warning})");
                 }
@@ -1834,6 +1864,53 @@ mod tests {
         base.cancel_hotkey = Some(base.capture.hotkey.clone());
         let refused = apply(&base, "capture.enabled", "true", &rules()).unwrap_err();
         assert_eq!(refused.code, "shortcut-in-use");
+    }
+
+    #[test]
+    fn the_meeting_engine_is_its_own_setting_that_leaves_dictation_alone() {
+        use crate::transcription::cloud::EngineChoice;
+        let defaults = AppSettings::default();
+        assert_eq!(defaults.meeting_engine, None, "meetings stay local by default");
+        assert_eq!(defaults.meeting_engine_model, None);
+        let set = |settings: &AppSettings, key: &str, value: &str| {
+            apply(settings, key, value, &rules())
+        };
+        let groq = set(&defaults, "engine", "groq").unwrap().settings;
+        let meeting = set(&groq, "meeting_engine", "openrouter").unwrap().settings;
+        assert_eq!(meeting.meeting_engine, Some(EngineChoice::Openrouter));
+        assert_eq!(meeting.engine, EngineChoice::Groq, "dictation keeps its engine");
+        let meeting = set(&meeting, "meeting_engine_model", "microsoft/mai-transcribe-2")
+            .unwrap()
+            .settings;
+        assert_eq!(
+            meeting.meeting_engine_model.as_deref(),
+            Some("microsoft/mai-transcribe-2")
+        );
+        assert_eq!(meeting.engine_model, None, "dictation keeps its model");
+        // The model is checked against the meeting engine, not the dictation one.
+        assert_eq!(
+            set(&meeting, "meeting_engine_model", "not-an-id").unwrap_err().code,
+            "invalid-value"
+        );
+        let on_groq = set(&meeting, "meeting_engine", "groq").unwrap().settings;
+        assert!(set(&on_groq, "meeting_engine_model", "whisper-large-v3").is_ok());
+        assert_eq!(
+            set(&on_groq, "meeting_engine_model", "microsoft/mai-transcribe-2")
+                .unwrap_err()
+                .code,
+            "invalid-value"
+        );
+        // Both can be cleared, and a bad engine is refused.
+        let cleared = set(&meeting, "meeting_engine", "none").unwrap().settings;
+        assert_eq!(cleared.meeting_engine, None);
+        assert_eq!(set(&meeting, "meeting_engine", "bogus").unwrap_err().code, "invalid-value");
+        // Saved settings written before the setting existed still read.
+        let json = serde_json::to_string(&defaults).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        value.as_object_mut().unwrap().remove("meeting_engine");
+        value.as_object_mut().unwrap().remove("meeting_engine_model");
+        let old: AppSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(old.meeting_engine, None);
     }
 
     #[test]

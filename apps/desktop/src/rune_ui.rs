@@ -2085,6 +2085,11 @@ const SCENES: &[Scene] = &[
         ui.usage = usage::UsagePane::fixture();
         ui.pane = Pane::Usage;
     }),
+    ("usage-engines", |ui| {
+        *ui = portal_fixture();
+        ui.usage = usage::UsagePane::fixture_engines();
+        ui.pane = Pane::Usage;
+    }),
     ("usage-empty", |ui| {
         *ui = portal_fixture();
         ui.usage = usage::UsagePane::fixture_empty();

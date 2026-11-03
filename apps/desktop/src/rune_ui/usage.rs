@@ -16,7 +16,7 @@ use crate::history::History;
 use crate::history::stats::{AppCount, HistoryStats};
 use crate::history::usage::{
     DictationStats, ModelLatency, TYPING_WPM, UsageSummary, Window, cost_label, duration_label,
-    hour_range_label, latency_label,
+    factor_label, hour_range_label, latency_label, percent_label,
 };
 
 /// How often the open pane adds the records up again.
@@ -102,6 +102,18 @@ impl UsagePane {
         }
     }
 
+    /// Only the engine timings, so the section shows at the top of the pane:
+    /// p50, p95, real time, errors and cost per audio hour per engine.
+    pub(super) fn fixture_engines() -> Self {
+        let mut pane = Self::fixture();
+        pane.stats.history = HistoryStats::default();
+        pane.stats.history.dictations = 157;
+        pane.stats.average_words = 0;
+        pane.stats.longest_words = 0;
+        pane.stats.busiest_hour = None;
+        pane
+    }
+
     pub(super) fn fixture_empty() -> Self {
         Self {
             loaded: Some(Instant::now()),
@@ -117,11 +129,26 @@ fn fixture_stats() -> DictationStats {
         application: application.into(),
         dictations,
     };
-    let latency = |provider: &str, model: &str, dictations, average_ms| ModelLatency {
+    // Provider, model, dictations, p50, p95, real-time factor, requests,
+    // failed, and dollars paid per audio hour.
+    #[allow(clippy::too_many_arguments)]
+    let latency = |provider: &str,
+                   model: &str,
+                   dictations,
+                   (p50, p95),
+                   real_time_factor,
+                   (requests, failed),
+                   cost_per_hour| ModelLatency {
         provider: provider.into(),
         model: model.into(),
         dictations,
-        average_ms,
+        average_ms: p50,
+        p50_ms: Some(p50),
+        p95_ms: Some(p95),
+        real_time_factor: Some(real_time_factor),
+        requests,
+        failed,
+        cost_per_hour,
     };
     DictationStats {
         history: HistoryStats {
@@ -144,11 +171,59 @@ fn fixture_stats() -> DictationStats {
         longest_words: 412,
         busiest_hour: Some(9),
         latency: vec![
-            latency("groq", "whisper-large-v3-turbo", 96, 380),
-            latency("openai", "gpt-4o-mini-transcribe", 12, 940),
-            latency("local", "parakeet_v3", 41, 1_450),
+            latency(
+                "groq",
+                "whisper-large-v3-turbo",
+                96,
+                (380, 720),
+                0.07,
+                (97, 1),
+                Some(0.04),
+            ),
+            latency(
+                "openai",
+                "gpt-4o-mini-transcribe",
+                12,
+                (940, 1_900),
+                0.18,
+                (12, 0),
+                Some(0.18),
+            ),
+            latency(
+                "openrouter",
+                "microsoft/mai-transcribe-2",
+                8,
+                (4_100, 6_800),
+                0.95,
+                (9, 1),
+                Some(0.1),
+            ),
+            latency("local", "parakeet_v3", 41, (1_450, 2_300), 0.35, (0, 0), None),
         ],
     }
+}
+
+/// The line under an engine's median: how many dictations, the p95, how it
+/// compares with real time, its error rate, and what an audio hour cost.
+/// Each part is left out when there is nothing to say.
+fn latency_detail(row: &ModelLatency) -> String {
+    let mut parts = Vec::new();
+    if row.dictations > 0 {
+        parts.push(counted(row.dictations, "{} dictation", "{} dictations"));
+    }
+    if let Some(p95) = row.p95_ms {
+        parts.push(tr_fill("p95 {}", &latency_label(p95)));
+    }
+    if let Some(factor) = row.real_time_factor {
+        parts.push(tr_fill("{} real time", &factor_label(factor)));
+    }
+    if let Some(rate) = row.error_rate() {
+        parts.push(tr_fill("{} errors", &percent_label(rate)));
+    }
+    if let Some(cost) = row.cost_per_hour {
+        parts.push(tr_fill("${} / hour", &format!("{cost:.3}")));
+    }
+    parts.join(" \u{b7} ")
 }
 
 /// `1 day` or `3 days`.
@@ -358,11 +433,12 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
                 p,
                 &format!("usage-latency{index}"),
                 &format!("{provider} · {}", row.model),
-                Some((
-                    counted(row.dictations, "{} dictation", "{} dictations"),
-                    p.muted(),
-                )),
-                value(p, latency_label(row.average_ms)),
+                Some((latency_detail(row), p.muted())),
+                value(
+                    p,
+                    row.p50_ms
+                        .map_or_else(|| "\u{2014}".to_owned(), |ms| tr_fill("p50 {}", &latency_label(ms))),
+                ),
             )
             .into()
         })
@@ -417,7 +493,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             section(
                 p,
                 "usage-latency",
-                &tr_fill("Average transcription time · {}", current),
+                &tr_fill("Transcription time · {}", current),
                 latency,
             )
         }))

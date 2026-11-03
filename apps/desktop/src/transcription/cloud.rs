@@ -2,13 +2,17 @@
 //!
 //! One OpenAI-compatible `/audio/transcriptions` client over Hex's `net`
 //! layer, for Groq (`whisper-large-v3-turbo`, the default), OpenAI, and the
-//! WordInk gateway; Deepgram's `/v1/listen`; and OpenRouter's audio models
-//! through chat completions. A dictation whose engine resolves here sends
+//! WordInk gateway; Deepgram's `/v1/listen`; and OpenRouter's audio models,
+//! either through chat completions (audio-capable chat models) or at its
+//! dedicated `/audio/transcriptions` endpoint (transcription models such as
+//! MAI-Transcribe 2). Every request is timed and recorded (see
+//! [`request_log`]). A dictation whose engine resolves here sends
 //! its 16 kHz clip as a mono WAV, never loads a local model, and records its
 //! usage and estimated cost (KTD5).
 
 pub mod gateway;
 pub mod openrouter;
+pub mod request_log;
 
 use std::fs;
 use std::io::{Cursor, Write};
@@ -297,6 +301,34 @@ pub fn models_for(provider: Provider) -> Vec<(String, String)> {
     }
 }
 
+/// OpenRouter's transcription models (the dedicated `/audio/transcriptions`
+/// ones), cache or bundled; never the network.
+pub fn transcription_models() -> Vec<openrouter::Model> {
+    openrouter_models()
+        .into_iter()
+        .filter(|model| model.kind == openrouter::Kind::Transcription)
+        .collect()
+}
+
+/// The audio-hour price of `provider`'s `model`: OpenRouter's catalogue
+/// price or the bundled table. `None` when neither lists one, as for a model
+/// billed by token.
+pub fn usd_per_hour(provider: Provider, model: &str) -> Option<f64> {
+    if let Some(price) = PRICES
+        .iter()
+        .find(|price| price.provider == provider.id() && price.model == model)
+    {
+        return Some(price.usd_per_hour);
+    }
+    if provider == Provider::OpenRouter {
+        return openrouter_models()
+            .into_iter()
+            .find(|entry| entry.id == model)
+            .and_then(|entry| entry.usd_per_hour);
+    }
+    None
+}
+
 fn catalogue_path() -> Option<PathBuf> {
     crate::app_paths::support_dir()
         .ok()
@@ -307,7 +339,24 @@ fn catalogue_path() -> Option<PathBuf> {
 /// model list never reads the file again.
 static CATALOGUE_READ: Mutex<Option<(Instant, Vec<openrouter::Model>)>> = Mutex::new(None);
 
+#[cfg(test)]
+thread_local! {
+    /// The catalogue this test thread reads, in place of the bundled one.
+    static CATALOGUE_OVERRIDE: std::cell::RefCell<Option<Vec<openrouter::Model>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Gives this test thread a fake catalogue.
+#[cfg(test)]
+pub(crate) fn force_catalogue(models: Vec<openrouter::Model>) {
+    CATALOGUE_OVERRIDE.with(|forced| *forced.borrow_mut() = Some(models));
+}
+
 fn openrouter_models() -> Vec<openrouter::Model> {
+    #[cfg(test)]
+    if let Some(forced) = CATALOGUE_OVERRIDE.with(|forced| forced.borrow().clone()) {
+        return forced;
+    }
     let Some(path) = catalogue_path().filter(|_| !cfg!(test)) else {
         return openrouter::bundled();
     };
@@ -337,7 +386,7 @@ pub fn refresh_catalogue_in_background() {
         .name("openrouter-catalogue".into())
         .spawn(move || {
             let (_, source) = openrouter::load(&path, crate::history::now_ms(), || {
-                openrouter::fetch(openrouter::MODELS_URL)
+                openrouter::fetch_all(openrouter::MODELS_URL, openrouter::TRANSCRIPTION_MODELS_URL)
             });
             tracing::debug!(?source, "OpenRouter catalogue loaded");
         });
@@ -497,10 +546,11 @@ fn resolve_key(provider: Provider) -> Resolution {
 /// one the engine setting names.
 fn warm_providers() -> Vec<Provider> {
     let mut providers = vec![Provider::Groq];
-    if let Some(chosen) = engine_choice().provider()
-        && chosen != Provider::Groq
-    {
-        providers.push(chosen);
+    let meeting = meeting_chosen().choice.and_then(EngineChoice::provider);
+    for chosen in [engine_choice().provider(), meeting].into_iter().flatten() {
+        if !providers.contains(&chosen) {
+            providers.push(chosen);
+        }
     }
     providers
 }
@@ -582,6 +632,8 @@ pub enum CloudError {
     BadReply,
     TooLong,
     OutOfCredit,
+    /// HTTP 404: the provider has no endpoint for the model right now.
+    ModelUnavailable,
     NoGateway,
     BadGatewayUrl,
     GatewayNotSecure,
@@ -590,6 +642,36 @@ pub enum CloudError {
 impl CloudError {
     pub fn message(&self, provider: Provider) -> String {
         self.message_isolated(provider, !crate::keys::system_keys_allowed())
+    }
+
+    /// A short stable class for the request log and debug log.
+    pub const fn class(&self) -> &'static str {
+        match self {
+            Self::NoKey => "no_key",
+            Self::KeyRejected => "key_rejected",
+            Self::RateLimited => "rate_limited",
+            Self::Unavailable => "unavailable",
+            Self::Unreachable => "unreachable",
+            Self::Rejected(_) => "rejected",
+            Self::BadReply => "bad_reply",
+            Self::TooLong => "too_long",
+            Self::OutOfCredit => "out_of_credit",
+            Self::ModelUnavailable => "model_unavailable",
+            Self::NoGateway | Self::BadGatewayUrl | Self::GatewayNotSecure => "gateway_setup",
+        }
+    }
+
+    /// Whether the failure came from a request that reached the network, as
+    /// opposed to one refused before anything was sent.
+    const fn was_requested(&self) -> bool {
+        !matches!(
+            self,
+            Self::NoKey
+                | Self::TooLong
+                | Self::NoGateway
+                | Self::BadGatewayUrl
+                | Self::GatewayNotSecure
+        )
     }
 
     /// [`Self::message`], with the key-isolation hint on a "no key" message
@@ -621,6 +703,7 @@ impl CloudError {
             Self::BadReply => format!("{name} sent an unreadable reply"),
             Self::TooLong => format!("Recording too long for {name} (about 13 min max)"),
             Self::OutOfCredit => format!("{name} account is out of credit"),
+            Self::ModelUnavailable => format!("{name} has no provider for this model right now"),
             Self::NoGateway => {
                 "no gateway URL set \u{2014} add `gateway_url` to settings.json".to_string()
             }
@@ -723,6 +806,11 @@ pub struct Price {
 ///   estimate, since the model bills by token).
 /// - Deepgram nova-3 pre-recorded: $0.0043/minute, billed per second
 ///   (deepgram.com/pricing).
+/// - OpenRouter microsoft/mai-transcribe-2: $0.10 per audio hour, billed per
+///   second (openrouter.ai/microsoft/mai-transcribe-2; its catalogue lists
+///   `pricing.prompt` 0.1 per hour, and live calls returned `usage.cost`
+///   0.000139 for 5 s, 2026-11-02). Other OpenRouter transcription models are
+///   priced from the catalogue's hourly price instead.
 pub const PRICES: &[Price] = &[
     Price {
         provider: "groq",
@@ -754,6 +842,12 @@ pub const PRICES: &[Price] = &[
         usd_per_hour: 0.0043 * 60.0,
         minimum_seconds: 0.0,
     },
+    Price {
+        provider: "openrouter",
+        model: "microsoft/mai-transcribe-2",
+        usd_per_hour: 0.10,
+        minimum_seconds: 0.0,
+    },
 ];
 
 /// Estimated cost of one request of `audio_seconds`, or `None` for a model
@@ -765,14 +859,22 @@ pub fn estimate_cost(provider: &str, model: &str, audio_seconds: f64) -> Option<
     Some(audio_seconds.max(price.minimum_seconds) * price.usd_per_hour / 3600.0)
 }
 
+/// What an HTTP status means to a person.
+fn status_error(status: u16) -> CloudError {
+    match status {
+        401 | 403 => CloudError::KeyRejected,
+        402 => CloudError::OutOfCredit,
+        404 => CloudError::ModelUnavailable,
+        429 => CloudError::RateLimited,
+        status if status >= 500 => CloudError::Unavailable,
+        status => CloudError::Rejected(status),
+    }
+}
+
 /// What a provider's HTTP failure means.
 fn map_error(error: ureq::Error) -> CloudError {
     match error {
-        ureq::Error::StatusCode(401 | 403) => CloudError::KeyRejected,
-        ureq::Error::StatusCode(402) => CloudError::OutOfCredit,
-        ureq::Error::StatusCode(429) => CloudError::RateLimited,
-        ureq::Error::StatusCode(status) if status >= 500 => CloudError::Unavailable,
-        ureq::Error::StatusCode(status) => CloudError::Rejected(status),
+        ureq::Error::StatusCode(status) => status_error(status),
         // The URL is not in the message, and the key never was.
         other => {
             tracing::warn!(reason = %crate::net::reason(&other), "cloud transcription request failed");
@@ -781,21 +883,74 @@ fn map_error(error: ureq::Error) -> CloudError {
     }
 }
 
-fn read_json(
-    mut response: ureq::http::Response<ureq::Body>,
-) -> Result<serde_json::Value, CloudError> {
-    response
-        .body_mut()
-        .read_to_string()
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .ok_or(CloudError::BadReply)
-}
-
 fn agent_for(endpoint: &str) -> ureq::Agent {
     crate::net::agent(endpoint, |config| {
-        config.timeout_global(Some(REQUEST_TIMEOUT))
+        // Statuses are read from the response, so a failure still gives its
+        // headers (request and generation ids) to the request log.
+        config
+            .timeout_global(Some(REQUEST_TIMEOUT))
+            .http_status_as_error(false)
     })
+}
+
+/// What one request learned about the exchange, for the request log. Never
+/// holds the key, a header sent, audio or text.
+#[derive(Clone, Debug, Default)]
+pub struct Attempt {
+    pub request_bytes: u64,
+    pub status: Option<u16>,
+    pub request_id: Option<String>,
+    pub generation_id: Option<String>,
+    pub routed_provider: Option<String>,
+    /// Extra attempts after the first.
+    pub retries: u32,
+}
+
+/// A response header's value when it is short printable ASCII, so a log
+/// line can never carry anything else.
+fn header_text(response: &ureq::http::Response<ureq::Body>, name: &str) -> Option<String> {
+    let value = response.headers().get(name)?.to_str().ok()?.trim();
+    (!value.is_empty() && value.len() <= 120 && value.bytes().all(|b| b.is_ascii_graphic() || b == b' '))
+        .then(|| value.to_owned())
+}
+
+/// `POST`s `body` and reads the JSON reply. `attempt` learns the status and
+/// ids even when the status is a failure.
+fn post(
+    endpoint: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+    attempt: &mut Attempt,
+) -> Result<serde_json::Value, CloudError> {
+    attempt.request_bytes = body.len() as u64;
+    let mut request = agent_for(endpoint).post(endpoint);
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
+    let response = request.send(body).map_err(map_error)?;
+    let status = response.status().as_u16();
+    attempt.status = Some(status);
+    attempt.request_id = header_text(&response, "request-id")
+        .or_else(|| header_text(&response, "x-request-id"));
+    attempt.generation_id = header_text(&response, "x-generation-id");
+    attempt.routed_provider = header_text(&response, "x-provider-name");
+    if status >= 400 {
+        return Err(status_error(status));
+    }
+    let mut response = response;
+    let text = response
+        .body_mut()
+        .read_to_string()
+        .map_err(|_| CloudError::BadReply)?;
+    // OpenRouter can answer an upstream failure as `200 {"error": {..}}`:
+    // that is the error the body names, not a transcript.
+    if let Some(error) = openrouter::parse_error(&text) {
+        tracing::debug!(code = error.code, "the provider replied with an error body");
+        return Err(status_error(
+            error.code.and_then(|code| u16::try_from(code).ok()).unwrap_or(502),
+        ));
+    }
+    serde_json::from_str(&text).map_err(|_| CloudError::BadReply)
 }
 
 /// Transcribes `samples` at an OpenAI-style `/audio/transcriptions`
@@ -806,24 +961,27 @@ pub fn transcribe_at(
     model: &str,
     language: Option<&str>,
     samples: &[f32],
+    attempt: &mut Attempt,
 ) -> Result<String, CloudError> {
     check_size(samples)?;
     let boundary = format!("wordink-{:016x}", boundary_nonce());
     let body = multipart_body(&boundary, model, language, &wav_bytes(samples));
-    let response = agent_for(endpoint)
-        .post(endpoint)
-        .header("Authorization", &format!("Bearer {key}"))
-        .header(
-            "Content-Type",
-            &format!("multipart/form-data; boundary={boundary}"),
-        )
-        .send(&body[..])
-        .map_err(map_error)?;
-    read_json(response)?
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .map(|text| text.trim().to_string())
-        .ok_or(CloudError::BadReply)
+    post(
+        endpoint,
+        &[
+            ("Authorization", &format!("Bearer {key}")),
+            (
+                "Content-Type",
+                &format!("multipart/form-data; boundary={boundary}"),
+            ),
+        ],
+        &body,
+        attempt,
+    )?
+    .get("text")
+    .and_then(serde_json::Value::as_str)
+    .map(|text| text.trim().to_string())
+    .ok_or(CloudError::BadReply)
 }
 
 /// The Deepgram `/v1/listen` URL for `model`: smart formatting, and the
@@ -847,20 +1005,23 @@ pub fn transcribe_deepgram(
     model: &str,
     language: Option<&str>,
     samples: &[f32],
+    attempt: &mut Attempt,
 ) -> Result<String, CloudError> {
     check_size(samples)?;
     let url = deepgram_url(endpoint, model, language);
-    let response = agent_for(&url)
-        .post(&url)
-        .header("Authorization", &format!("Token {key}"))
-        .header("Content-Type", "audio/wav")
-        .send(&wav_bytes(samples)[..])
-        .map_err(map_error)?;
-    read_json(response)?
-        .pointer("/results/channels/0/alternatives/0/transcript")
-        .and_then(serde_json::Value::as_str)
-        .map(|text| text.trim().to_string())
-        .ok_or(CloudError::BadReply)
+    post(
+        &url,
+        &[
+            ("Authorization", &format!("Token {key}")),
+            ("Content-Type", "audio/wav"),
+        ],
+        &wav_bytes(samples),
+        attempt,
+    )?
+    .pointer("/results/channels/0/alternatives/0/transcript")
+    .and_then(serde_json::Value::as_str)
+    .map(|text| text.trim().to_string())
+    .ok_or(CloudError::BadReply)
 }
 
 /// Transcribes with an OpenRouter audio model through chat completions.
@@ -870,16 +1031,77 @@ pub fn transcribe_openrouter(
     key: &str,
     model: &str,
     samples: &[f32],
+    attempt: &mut Attempt,
 ) -> Result<(String, openrouter::Tokens), CloudError> {
     check_size(samples)?;
     let body = openrouter::chat_body(model, &wav_bytes(samples)).to_string();
-    let response = agent_for(endpoint)
-        .post(endpoint)
-        .header("Authorization", &format!("Bearer {key}"))
-        .header("Content-Type", "application/json")
-        .send(body.as_bytes())
-        .map_err(map_error)?;
-    openrouter::parse_reply(&read_json(response)?).ok_or(CloudError::BadReply)
+    let reply = post(
+        endpoint,
+        &[
+            ("Authorization", &format!("Bearer {key}")),
+            ("Content-Type", "application/json"),
+        ],
+        body.as_bytes(),
+        attempt,
+    )?;
+    openrouter::parse_reply(&reply).ok_or(CloudError::BadReply)
+}
+
+/// The wait before the one retry of a request the provider could not take.
+const RETRY_DELAY: Duration = if cfg!(test) {
+    Duration::ZERO
+} else {
+    Duration::from_millis(500)
+};
+
+/// Transcribes with an OpenRouter transcription model at
+/// `/audio/transcriptions`. A rate limit or a 5xx is retried up to
+/// `max_retries` times; a `verbose_json` request the provider refuses (HTTP
+/// 400) is sent again as plain JSON.
+#[allow(clippy::too_many_arguments)]
+pub fn transcribe_openrouter_stt(
+    endpoint: &str,
+    key: &str,
+    model: &str,
+    language: Option<&str>,
+    samples: &[f32],
+    detail: openrouter::Detail,
+    max_retries: u32,
+    attempt: &mut Attempt,
+) -> Result<openrouter::Transcription, CloudError> {
+    check_size(samples)?;
+    let wav = wav_bytes(samples);
+    let authorization = format!("Bearer {key}");
+    let mut detail = detail;
+    let mut transient = 0;
+    loop {
+        let body = openrouter::transcription_body(model, &wav, language, detail).to_string();
+        let result = post(
+            endpoint,
+            &[
+                ("Authorization", &authorization),
+                ("Content-Type", "application/json"),
+            ],
+            body.as_bytes(),
+            attempt,
+        )
+        .and_then(|reply| openrouter::parse_transcription(&reply).ok_or(CloudError::BadReply));
+        let error = match result {
+            Ok(transcription) => return Ok(transcription),
+            Err(error) => error,
+        };
+        if detail == openrouter::Detail::Verbose && attempt.status == Some(400) {
+            detail = openrouter::Detail::Plain;
+        } else if matches!(error, CloudError::RateLimited | CloudError::Unavailable)
+            && transient < max_retries
+        {
+            transient += 1;
+            std::thread::sleep(RETRY_DELAY);
+        } else {
+            return Err(error);
+        }
+        attempt.retries += 1;
+    }
 }
 
 fn boundary_nonce() -> u64 {
@@ -905,6 +1127,15 @@ pub struct Call<'a> {
     pub language: Option<&'a str>,
     /// The model's catalogue prices, for OpenRouter.
     pub catalogue: Option<&'a openrouter::Model>,
+    /// Which OpenRouter API the model is called through.
+    pub kind: openrouter::Kind,
+    /// Whether a transcription request asks for timestamps.
+    pub detail: openrouter::Detail,
+    /// Retries after a rate limit or 5xx (OpenRouter transcription only).
+    pub max_retries: u32,
+    pub origin: request_log::Origin,
+    /// Where the finished request is recorded, if anywhere.
+    pub request_log: Option<&'a Path>,
 }
 
 impl<'a> Call<'a> {
@@ -916,13 +1147,47 @@ impl<'a> Call<'a> {
             key: None,
             language: None,
             catalogue: None,
+            kind: openrouter::Kind::Chat,
+            detail: openrouter::Detail::Plain,
+            max_retries: 0,
+            origin: request_log::Origin::Dictation,
+            request_log: None,
+        }
+    }
+
+    /// The API this call goes through: OpenRouter's `kind`, and for every
+    /// other provider its one transcription endpoint.
+    fn endpoint_kind(&self) -> &'static str {
+        if self.provider == Provider::OpenRouter {
+            self.kind.name()
+        } else {
+            openrouter::Kind::Transcription.name()
+        }
+    }
+}
+
+/// What a finished call returned.
+struct Sent {
+    text: String,
+    cost: Option<f64>,
+    segments: Vec<openrouter::Timed>,
+    words: Vec<openrouter::Timed>,
+}
+
+impl Sent {
+    fn plain(text: String, cost: Option<f64>) -> Self {
+        Self {
+            text,
+            cost,
+            segments: Vec::new(),
+            words: Vec::new(),
         }
     }
 }
 
 /// Makes `call` and returns the text and its cost (`None` when the model
 /// has no listed price).
-fn send(call: &Call<'_>, samples: &[f32]) -> Result<(String, Option<f64>), CloudError> {
+fn send(call: &Call<'_>, samples: &[f32], attempt: &mut Attempt) -> Result<Sent, CloudError> {
     check_size(samples)?;
     let key = call
         .key
@@ -930,49 +1195,147 @@ fn send(call: &Call<'_>, samples: &[f32]) -> Result<(String, Option<f64>), Cloud
         .ok_or(CloudError::NoKey)?;
     let audio_seconds = samples.len() as f64 / f64::from(SAMPLE_RATE);
     let priced = |text| {
-        (
+        Sent::plain(
             text,
             estimate_cost(call.provider.id(), call.model, audio_seconds),
         )
     };
     match call.provider {
-        Provider::Groq | Provider::OpenAi | Provider::Gateway => {
-            transcribe_at(call.endpoint, key, call.model, call.language, samples).map(priced)
-        }
-        Provider::Deepgram => {
-            transcribe_deepgram(call.endpoint, key, call.model, call.language, samples).map(priced)
-        }
-        Provider::OpenRouter => {
-            transcribe_openrouter(call.endpoint, key, call.model, samples).map(|(text, tokens)| {
-                (
-                    text,
-                    call.catalogue.map(|model| openrouter::cost(model, tokens)),
-                )
+        Provider::Groq | Provider::OpenAi | Provider::Gateway => transcribe_at(
+            call.endpoint,
+            key,
+            call.model,
+            call.language,
+            samples,
+            attempt,
+        )
+        .map(priced),
+        Provider::Deepgram => transcribe_deepgram(
+            call.endpoint,
+            key,
+            call.model,
+            call.language,
+            samples,
+            attempt,
+        )
+        .map(priced),
+        Provider::OpenRouter if call.kind == openrouter::Kind::Transcription => {
+            let reply = transcribe_openrouter_stt(
+                call.endpoint,
+                key,
+                call.model,
+                call.language,
+                samples,
+                call.detail,
+                call.max_retries,
+                attempt,
+            )?;
+            // What the provider charged, else the catalogue's hourly price,
+            // else the bundled table.
+            let seconds = reply.billed_seconds.unwrap_or(audio_seconds);
+            let cost = reply
+                .cost_usd
+                .or_else(|| {
+                    call.catalogue
+                        .and_then(|model| openrouter::transcription_cost(model, seconds))
+                })
+                .or_else(|| estimate_cost(call.provider.id(), call.model, seconds));
+            Ok(Sent {
+                text: reply.text,
+                cost,
+                segments: reply.segments,
+                words: reply.words,
             })
         }
+        Provider::OpenRouter => {
+            transcribe_openrouter(call.endpoint, key, call.model, samples, attempt).map(
+                |(text, tokens)| {
+                    Sent::plain(
+                        text,
+                        call.catalogue.map(|model| openrouter::cost(model, tokens)),
+                    )
+                },
+            )
+        }
     }
+}
+
+/// What a transcription returned, with the timings a meeting uses.
+pub struct Outcome {
+    pub text: String,
+    pub usage: UsageRecord,
+    /// Segment timings, when the request asked for them and the provider
+    /// gave them.
+    pub segments: Vec<openrouter::Timed>,
+    pub words: Vec<openrouter::Timed>,
 }
 
 /// Transcribes with `call` (tests point its endpoint at a mock), and on
 /// failure keeps the clip under `keep` so history can offer a retry. A clip
 /// too long to send is not kept, and neither is one when `keep` is `None`.
+#[cfg(test)]
 pub fn run_at(
     call: &Call<'_>,
     samples: &[f32],
     keep: Option<KeepClips<'_>>,
 ) -> Result<(String, UsageRecord), String> {
+    run_outcome_at(call, samples, keep).map(|outcome| (outcome.text, outcome.usage))
+}
+
+/// Transcribes like [`run_origin`] for a prepared call, keeping the segment
+/// and word timings.
+pub fn run_outcome_at(
+    call: &Call<'_>,
+    samples: &[f32],
+    keep: Option<KeepClips<'_>>,
+) -> Result<Outcome, String> {
     let provider = call.provider;
-    match send(call, samples) {
-        Ok((text, cost)) => {
-            let audio_seconds = samples.len() as f64 / f64::from(SAMPLE_RATE);
+    let audio_seconds = samples.len() as f64 / f64::from(SAMPLE_RATE);
+    let started = Instant::now();
+    let mut attempt = Attempt::default();
+    let result = send(call, samples, &mut attempt);
+    let latency_ms = started.elapsed().as_millis() as u64;
+    let requested = result.as_ref().err().is_none_or(CloudError::was_requested);
+    if requested {
+        let record = request_log::RequestRecord {
+            timestamp_ms: crate::history::now_ms(),
+            origin: call.origin,
+            provider: provider.id().to_owned(),
+            endpoint_kind: call.endpoint_kind().to_owned(),
+            model: call.model.to_owned(),
+            audio_ms: (audio_seconds * 1000.0).round() as u64,
+            request_bytes: attempt.request_bytes,
+            status: attempt.status,
+            request_id: attempt.request_id.clone(),
+            generation_id: attempt.generation_id.clone(),
+            routed_provider: attempt.routed_provider.clone(),
+            latency_ms,
+            cost_usd: result.as_ref().ok().and_then(|sent| sent.cost),
+            retries: attempt.retries,
+            error_class: result.as_ref().err().map(|error| error.class().to_owned()),
+        };
+        record.emit();
+        if let Some(path) = call.request_log
+            && let Err(error) = request_log::append(path, &record)
+        {
+            tracing::debug!(%error, "could not write the cloud request log");
+        }
+    }
+    match result {
+        Ok(sent) => {
             let usage = UsageRecord {
                 provider: provider.id().into(),
                 model: call.model.into(),
                 audio_seconds,
-                words: text.split_whitespace().count() as u32,
-                cost_usd: cost.unwrap_or(0.0),
+                words: sent.text.split_whitespace().count() as u32,
+                cost_usd: sent.cost.unwrap_or(0.0),
             };
-            Ok((text, usage))
+            Ok(Outcome {
+                text: sent.text,
+                usage,
+                segments: sent.segments,
+                words: sent.words,
+            })
         }
         Err(error) => {
             if error != CloudError::TooLong {
@@ -1035,12 +1398,50 @@ pub fn run_with(
     language: Option<&str>,
     keep_failed: bool,
 ) -> Result<(String, UsageRecord), String> {
+    run_origin(
+        provider,
+        model,
+        gateway_url,
+        samples,
+        language,
+        keep_failed,
+        request_log::Origin::Dictation,
+    )
+    .map(|outcome| (outcome.text, outcome.usage))
+}
+
+fn run_origin(
+    provider: Provider,
+    model: &str,
+    gateway_url: Option<&str>,
+    samples: &[f32],
+    language: Option<&str>,
+    keep_failed: bool,
+    origin: request_log::Origin,
+) -> Result<Outcome, String> {
     let dir = failed_clips_dir().filter(|_| keep_failed);
     let keep = dir.as_deref().map(|dir| KeepClips {
         dir,
         retention: clip_retention(),
     });
+    let catalogue = (provider == Provider::OpenRouter)
+        .then(|| {
+            openrouter_models()
+                .into_iter()
+                .find(|entry| entry.id == model)
+        })
+        .flatten();
+    let kind = catalogue
+        .as_ref()
+        .map_or(openrouter::Kind::Chat, |entry| entry.kind);
     let endpoint = match endpoint_for(provider, gateway_url) {
+        // A transcription model is called at its own endpoint, not chat.
+        Ok(_) if provider == Provider::OpenRouter && kind == openrouter::Kind::Transcription => {
+            Ok(openrouter::TRANSCRIPTION_URL.to_owned())
+        }
+        other => other,
+    };
+    let endpoint = match endpoint {
         Ok(endpoint) => endpoint,
         Err(error) => {
             if let Some(keep) = keep
@@ -1052,18 +1453,106 @@ pub fn run_with(
         }
     };
     let key = key_for_request(provider);
-    let catalogue = (provider == Provider::OpenRouter)
-        .then(|| {
-            openrouter_models()
-                .into_iter()
-                .find(|entry| entry.id == model)
-        })
-        .flatten();
+    // The log is history's: not written while history is off.
+    let log = request_log::default_path()
+        .filter(|_| !cfg!(test) && !clip_retention().is_off());
     let mut call = Call::new(provider, &endpoint, model);
     call.key = key.as_deref();
     call.language = language;
     call.catalogue = catalogue.as_ref();
-    run_at(&call, samples, keep)
+    call.request_log = log.as_deref();
+    tune(&mut call, kind, origin);
+    run_outcome_at(&call, samples, keep)
+}
+
+/// What differs between a dictation and a meeting chunk at OpenRouter's
+/// transcription endpoint: both retry once; a meeting also asks for
+/// timestamps, a dictation for the fastest reply.
+fn tune(call: &mut Call<'_>, kind: openrouter::Kind, origin: request_log::Origin) {
+    call.kind = kind;
+    call.origin = origin;
+    if kind == openrouter::Kind::Transcription {
+        call.max_retries = 1;
+        if origin == request_log::Origin::Meeting {
+            call.detail = openrouter::Detail::Verbose;
+        }
+    }
+}
+
+/// What the meeting engine setting is: its choice (`None` keeps meetings on
+/// the local model, as they were before) and model.
+#[derive(Default)]
+struct MeetingChosen {
+    choice: Option<EngineChoice>,
+    model: Option<String>,
+}
+
+static MEETING: Mutex<MeetingChosen> = Mutex::new(MeetingChosen {
+    choice: None,
+    model: None,
+});
+
+fn meeting_chosen() -> std::sync::MutexGuard<'static, MeetingChosen> {
+    MEETING.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+/// Applies the meeting engine settings.
+pub fn set_meeting_engine(choice: Option<EngineChoice>, model: Option<&str>) {
+    {
+        let mut chosen = meeting_chosen();
+        chosen.choice = choice;
+        chosen.model = model
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .map(str::to_owned);
+    }
+    if choice.and_then(EngineChoice::provider) == Some(Provider::OpenRouter) {
+        refresh_catalogue_in_background();
+    }
+}
+
+/// The cloud provider meeting chunks go to: `None` for the local model.
+pub fn meeting_route() -> Option<Provider> {
+    route_meeting(meeting_chosen().choice, cached_key(Provider::Groq).is_some())
+}
+
+/// The cloud provider a meeting engine setting names, given whether a Groq
+/// key resolves. Unset is the local model, and so is Auto without a key.
+pub fn route_meeting(choice: Option<EngineChoice>, groq_key_resolves: bool) -> Option<Provider> {
+    route_for(choice?, groq_key_resolves)
+}
+
+/// The model meeting chunks are sent: the meeting model when the provider
+/// takes it, else (for OpenRouter) MAI-Transcribe 2, the most accurate on
+/// meeting audio in WordInk's comparison, else the provider's default.
+pub fn meeting_model(provider: Provider) -> String {
+    meeting_model_for(provider, meeting_chosen().model.as_deref())
+}
+
+/// [`meeting_model`] for an explicit setting, for the window to show.
+pub fn meeting_model_for(provider: Provider, chosen_model: Option<&str>) -> String {
+    match provider {
+        Provider::OpenRouter => chosen_model
+            .filter(|model| provider.accepts_model(model))
+            .unwrap_or(openrouter::MEETING_MODEL)
+            .to_owned(),
+        _ => model_for(provider, chosen_model),
+    }
+}
+
+/// Transcribes one meeting chunk with the meeting engine's provider. Meeting
+/// clips are never kept, and a failure is the chunk's error.
+pub fn run_meeting(provider: Provider, samples: &[f32]) -> Result<Outcome, String> {
+    let gateway_url = chosen().gateway_url.clone();
+    run_origin(
+        provider,
+        &meeting_model(provider),
+        gateway_url.as_deref(),
+        samples,
+        None,
+        false,
+        request_log::Origin::Meeting,
+    )
 }
 
 /// The gateway URL setting, as applied.
@@ -1236,6 +1725,10 @@ fn keep_clip(
 }
 
 #[cfg(test)]
+#[path = "cloud/transcription_tests.rs"]
+mod transcription_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read};
@@ -1313,7 +1806,7 @@ mod tests {
     #[test]
     fn the_request_is_multipart_with_the_model_and_a_16khz_mono_wav_file() {
         let (url, received) = mock(200, r#"{"text":" hello world "}"#);
-        let text = transcribe_at(&url, "k-123", "whisper-large-v3-turbo", None, &speech()).unwrap();
+        let text = transcribe_at(&url, "k-123", "whisper-large-v3-turbo", None, &speech(), &mut Attempt::default()).unwrap();
         assert_eq!(text, "hello world");
         let (head, body) = received.recv().unwrap();
         let head = head.to_ascii_lowercase();
@@ -1352,7 +1845,7 @@ mod tests {
             (503, "Groq is unavailable"),
         ] {
             let (url, _received) = mock(status, "{}");
-            let error = transcribe_at(&url, "k", "m", None, &speech()).unwrap_err();
+            let error = transcribe_at(&url, "k", "m", None, &speech(), &mut Attempt::default()).unwrap_err();
             assert_eq!(error.message(Provider::Groq), expected, "HTTP {status}");
         }
     }
@@ -1365,7 +1858,7 @@ mod tests {
             .unwrap()
             .port();
         let url = format!("http://127.0.0.1:{port}/x");
-        let error = transcribe_at(&url, "k", "m", None, &speech()).unwrap_err();
+        let error = transcribe_at(&url, "k", "m", None, &speech(), &mut Attempt::default()).unwrap_err();
         assert_eq!(error.message(Provider::Groq), "can't reach Groq");
     }
 
@@ -1706,7 +2199,7 @@ mod tests {
         let (url, received) = mock(200, reply);
         let samples = speech();
         let (text, tokens) =
-            transcribe_openrouter(&url, "or-key", "google/gemini-2.5-flash", &samples).unwrap();
+            transcribe_openrouter(&url, "or-key", "google/gemini-2.5-flash", &samples, &mut Attempt::default()).unwrap();
         assert_eq!(text, "hello there");
         assert_eq!(
             tokens,
@@ -1763,6 +2256,8 @@ mod tests {
             prompt_usd: 1e-6,
             completion_usd: 4e-6,
             audio_usd: Some(1e-5),
+            kind: openrouter::Kind::Chat,
+            usd_per_hour: None,
         };
         let tokens = openrouter::Tokens {
             prompt: 120,

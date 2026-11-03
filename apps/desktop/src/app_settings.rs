@@ -1974,6 +1974,13 @@ pub struct AppSettings {
     /// The model the named cloud engine is sent (an OpenRouter id,
     /// `whisper-1`, ...). Unset, or not one the provider takes: its default.
     pub engine_model: Option<String>,
+    /// Which engine meetings use, apart from dictation. Unset keeps meeting
+    /// audio on the local model, as before; a cloud engine sends each meeting
+    /// chunk to that provider.
+    pub meeting_engine: Option<crate::transcription::cloud::EngineChoice>,
+    /// The model the meeting engine is sent (an OpenRouter id such as
+    /// `microsoft/mai-transcribe-2`). Unset: the provider's default.
+    pub meeting_engine_model: Option<String>,
     /// The WordInk gateway's URL. https, or http to localhost only. Its
     /// token is a key (`wordink keys set gateway`), never stored here.
     pub gateway_url: Option<String>,
@@ -2122,6 +2129,8 @@ impl Default for AppSettings {
             transcription_device: TranscriptionDevice::Auto,
             engine: crate::transcription::cloud::EngineChoice::default(),
             engine_model: None,
+            meeting_engine: None,
+            meeting_engine_model: None,
             gateway_url: None,
             transcription_recents: Vec::new(),
             keyboard_model_switching: KeyboardModelSwitching::default(),
@@ -2446,6 +2455,10 @@ impl AppSettings {
             self.engine,
             self.engine_model.as_deref(),
             self.gateway_url.as_deref(),
+        );
+        crate::transcription::cloud::set_meeting_engine(
+            self.meeting_engine,
+            self.meeting_engine_model.as_deref(),
         );
         crate::transcription::cloud::set_clip_retention(self.history_retention);
         RECORDING_DUCK_VOLUME.store(self.recording_duck_volume.to_bits(), Ordering::Relaxed);

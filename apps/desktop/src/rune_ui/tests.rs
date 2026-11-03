@@ -2345,6 +2345,9 @@ fn goldens() {
     }
     for dark in [true, false] {
         check_golden("vocabulary-suggestions", dark, PANE_SIZE);
+        // Tall enough to show every engine's p50, p95, real time, errors and
+        // cost per audio hour.
+        check_golden("usage-engines", dark, GOLDEN_SIZE);
     }
     check_golden("commands", true, GOLDEN_SIZE);
     check_golden("menus", false, GOLDEN_SIZE);
@@ -2628,6 +2631,61 @@ fn the_picker_offers_cloud_models_and_one_active_choice() {
     scroll_into_view(&mut rt, "model3");
     tap(&mut rt, "model3/top/actions/choose-model");
     assert_eq!(rt.state.settings.engine, EngineChoice::Local);
+}
+
+/// OpenRouter's transcription models are cards in the Cloud group with their
+/// price per audio hour, and choosing one makes it the dictation engine.
+#[test]
+fn the_picker_lists_openrouter_transcription_models_with_their_hourly_price() {
+    use crate::transcription::cloud::openrouter::{Kind, Model};
+    use crate::transcription::cloud::{
+        EngineChoice, Provider, force_catalogue, force_keys, force_route,
+    };
+    let stt = |id: &str, name: &str, usd_per_hour: Option<f64>| Model {
+        id: id.into(),
+        name: name.into(),
+        prompt_usd: 0.0,
+        completion_usd: 0.0,
+        audio_usd: None,
+        kind: Kind::Transcription,
+        usd_per_hour,
+    };
+    force_catalogue(vec![
+        stt("acme/cheap-stt", "Acme Cheap", Some(0.036)),
+        stt("acme/by-token-stt", "Acme By Token", None),
+        stt("microsoft/mai-transcribe-2", "MAI-Transcribe 2", Some(0.1)),
+    ]);
+    force_route(None);
+    force_keys(&[Provider::OpenRouter]);
+    let mut rt = runtime("picker", true, PANE_SIZE);
+    rt.state.settings.engine = EngineChoice::Local;
+    rt.invalidate();
+    settle(&mut rt);
+    // Groq has two cards (0, 1); OpenRouter's default chat model is the
+    // third, then its transcription models in catalogue order.
+    let metadata = |rt: &Runtime<Ui>, index: usize| -> String {
+        element(rt, &format!("cloud{index}/metadata")).text.clone().unwrap_or_default()
+    };
+    assert!(metadata(&rt, 3).contains("$0.036 / hour"), "{}", metadata(&rt, 3));
+    assert!(
+        !metadata(&rt, 4).contains("/ hour"),
+        "a model billed by token shows no hourly price: {}",
+        metadata(&rt, 4)
+    );
+    let mai = metadata(&rt, 5);
+    assert!(mai.contains("OpenRouter") && mai.contains("$0.100 / hour"), "{mai}");
+    assert!(mai.contains("Audio is sent to this provider"), "{mai}");
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|t| t == "microsoft/mai-transcribe-2"), "{shown:?}");
+    // Choosing it makes OpenRouter the dictation engine with that model.
+    scroll_into_view(&mut rt, "cloud5");
+    tap(&mut rt, "cloud5/top/actions/choose-cloud-model");
+    assert_eq!(rt.state.settings.engine, EngineChoice::Openrouter);
+    assert_eq!(
+        rt.state.settings.engine_model.as_deref(),
+        Some("microsoft/mai-transcribe-2")
+    );
+    assert!(!rt.state.picker.open);
 }
 
 /// Wheels the model picker until `key` sits inside its list.

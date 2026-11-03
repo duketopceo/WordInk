@@ -39,7 +39,14 @@ fn toggle_diagnostics(ui: &mut Ui) {
                 .flatten()
                 .map(|directory| directory.join("live.ndjson"))
         });
-        row.text = crate::diagnostics::Diagnostics::collect(provider, log.as_deref()).text();
+        let requests = if cfg!(test) {
+            Vec::new()
+        } else {
+            crate::diagnostics::recent_requests()
+        };
+        row.text = crate::diagnostics::Diagnostics::collect(provider, log.as_deref())
+            .with_requests(&requests)
+            .text();
     } else {
         row.text.clear();
     }
