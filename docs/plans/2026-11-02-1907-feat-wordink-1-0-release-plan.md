@@ -12,7 +12,7 @@ execution: code
 
 ## Goal Capsule
 
-- **Objective:** Anyone on Linux, macOS (Apple silicon) or Windows can install the released WordInk desktop app with one pasted command that prints a few lines, finish a short first run, and dictate; Linux installs then keep themselves up to date from a signed release feed.
+- **Objective:** Anyone on a supported Linux (x86_64 or aarch64, glibc 2.39 or newer), macOS 15+ on Apple silicon, or 64-bit Windows can install the released WordInk desktop app with one pasted command that prints a few lines, finish a short first run, and dictate; Linux installs then keep themselves up to date from a signed release feed.
 - **Means:** GitHub Releases is the only host (KTD1). Small per-OS bootstrap installers are published as release assets (KTD2, KTD4). The existing tag-driven release workflow gains a test gate, a staging feed and a post-publish install smoke (KTD3, KTD9).
 - **Authority:** the Product Contract wins on behavior; KTDs win on mechanism within it; units override neither.
 - **Stop conditions:**
@@ -436,12 +436,13 @@ flowchart LR
   - `.github/workflows/desktop-release.yml` (`smoke` matrix between draft and publish)
   - `docs/release-checklist.md` (new)
 - **Approach:**
-  1. Per KTD9, each smoke runner serves the draft's assets from a loopback server and runs that OS's installer with `WORDINK_INSTALL_BASE` pointed at it, then `wordink --version`, uninstall and re-install. Smoke jobs have read-only permissions and no secrets.
+  1. Per KTD9, each smoke runner serves the draft's assets from a loopback server and runs that OS's installer with `WORDINK_INSTALL_BASE` pointed at it, then checks that `wordink --version` prints exactly the tag's version, uninstalls and re-installs. Smoke jobs have read-only permissions and no secrets.
   2. GitHub runners have no user systemd session, so service autostart, the service-active check and source-build migration are covered by the U3 harness and the manual checklist, not by smoke.
   3. The checklist lists, per OS: install, first run, microphone, shortcut, paste into an editor and a terminal, cloud and local engines, update (Linux), uninstall. It uses generic machine roles (Linux laptop, Linux desktop, Mac, Windows PC).
 - **Test scenarios:**
   - A draft whose bare Linux binary is missing its `.sig`, or whose `SHA256SUMS.sig` does not verify, fails the smoke job and stays a draft.
   - A healthy draft passes on all four runners and is published.
+  - An installer that installs a binary whose version differs from the tag fails the smoke job.
 - **Verification:** rc.N runs green through smoke, and the checklist is completed for it.
 
 ### U10. README and download documentation
