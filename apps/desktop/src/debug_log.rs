@@ -313,6 +313,7 @@ pub fn enabled(level: DebugLevel) -> bool {
 
 /// `text` when transcripts are opted in, else a stand-in that says only how
 /// long it was.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn transcript(text: &str) -> String {
     if TRANSCRIPTS.load(Ordering::Relaxed) {
         text.to_owned()

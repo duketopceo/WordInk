@@ -80,6 +80,7 @@ pub enum Tone {
     /// A slow microphone (Bluetooth earbuds switching to headset mode) is
     /// confirmed and audio flows: speak now. The start tone itself plays at
     /// once only when the microphone was already live.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Ready,
     /// A dictation pasted at least [`DONE_MIN_AFTER_STOP`] after its stop
     /// sound, such as after a slow rewrite.

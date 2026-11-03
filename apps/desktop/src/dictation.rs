@@ -62,8 +62,10 @@ const SILENCE_WINDOW_SAMPLES: usize = 480;
 /// a stream that carries no signal at all: a muted or disconnected device, or
 /// the wrong source. A quiet room's noise floor sits far above it, so room
 /// noise is never mistaken for a dead input.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const DEAD_INPUT_PEAK: f32 = 0.000_1;
 /// Less audio than this (100 ms of 16 kHz) is too little to call dead.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const DEAD_INPUT_MIN_SAMPLES: usize = 1_600;
 /// Live audio is handed to a capture's stream in blocks of at least this many
 /// 16 kHz samples (160 ms), well under the model's chunk, to keep per-feed
@@ -71,6 +73,7 @@ const DEAD_INPUT_MIN_SAMPLES: usize = 1_600;
 const STREAM_FEED_SAMPLES: usize = 2_560;
 
 /// A finished capture's measured levels (16 kHz samples), for the debug log.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 #[derive(Clone, Copy, Debug)]
 pub struct AudioLevels {
     pub samples: usize,
@@ -80,6 +83,7 @@ pub struct AudioLevels {
     pub loudest_window_dbfs: f32,
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn peak_of(samples: &[f32]) -> f32 {
     samples
         .iter()
@@ -233,12 +237,14 @@ impl DictationClip {
     /// Whether the input delivered no signal at all (every sample at or near
     /// zero), which is a broken or wrong microphone rather than a quiet room
     /// and is reported as an error instead of being discarded as no speech.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub fn is_dead_input(&self) -> bool {
         let released = self.released();
         released.len() >= DEAD_INPUT_MIN_SAMPLES && peak_of(released) < DEAD_INPUT_PEAK
     }
 
     /// What the captured audio measured, for the debug log.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub fn levels(&self) -> AudioLevels {
         let released = self.released();
         let zeros = released.iter().filter(|&&sample| sample == 0.0).count();
