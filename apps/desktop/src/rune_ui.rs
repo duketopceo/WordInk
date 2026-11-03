@@ -52,8 +52,8 @@ mod platform_settings;
 pub(crate) mod playground;
 mod practice;
 mod privacy;
-mod replacements;
 mod recovery;
+mod replacements;
 #[cfg(hex_capture)]
 mod scrawl;
 mod settings;
@@ -860,6 +860,9 @@ pub(crate) struct Ui {
     explainer: explainer::Explainer,
     sound_sets: sound_sets::SoundSets,
     tour: Option<onboarding::Tour>,
+    /// "Finish later" was chosen: General shows "Set up dictation" until the
+    /// first missing piece is set up.
+    deferred: Option<onboarding::Deferred>,
     /// The new first run over the tour (Labs).
     first_run: Option<onboarding_kit::Onboard>,
     /// The first run's engine step: the pasted key, the probe, the choice.
@@ -919,7 +922,8 @@ impl Ui {
         ui.platform.developer =
             crate::dev_build::is_dev_build() && crate::DEVELOPER_FEATURES_ENABLED;
         ui.platform.hud.tuning = crate::rune_hud::dot_scope::lab();
-        ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
+        ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform, &ui.picker);
+        ui.deferred = onboarding::Deferred::at_launch(&ui);
         onboarding_kit::live::open(&mut ui);
         ui.platform.set_login_item(host::launch_at_login());
         ui
@@ -966,6 +970,7 @@ impl Ui {
             explainer: explainer::Explainer::default(),
             sound_sets: sound_sets::SoundSets::default(),
             tour: None,
+            deferred: None,
             first_run: None,
             engine_setup: onboarding_kit::EngineSetup::default(),
             platform: platform::PlatformState::new(platform::Capabilities::current()),
@@ -2307,6 +2312,47 @@ const SCENES: &[Scene] = &[
         ui.settings.double_tap_lock = true;
         explainer::fixture(ui, None);
     }),
+    // The short first run (Linux; Windows is the same window): welcome, the
+    // one demo with Skip, the test dictation in a plain field, and the main
+    // window's "Set up dictation" row after Finish later. macOS adds the
+    // permissions page with Finish later.
+    ("onboarding-welcome", |ui| {
+        short_first_run(ui, false);
+        onboarding_kit::live::fixture_resume(ui, Page::Download);
+    }),
+    ("onboarding-first-demo", |ui| {
+        short_first_run(ui, false);
+        onboarding_kit::live::begin_demo(ui);
+        onboarding_kit::live::fixture_resume(ui, Page::Playing);
+    }),
+    ("mac-onboarding-setup", |ui| {
+        short_first_run(ui, true);
+        onboarding_kit::live::begin_demo(ui);
+        onboarding_kit::live::skip_demo(ui);
+        onboarding_kit::live::fixture_resume(ui, Page::Permissions);
+    }),
+    ("onboarding-test-dictation", |ui| {
+        short_first_run(ui, false);
+        onboarding_kit::live::begin_demo(ui);
+        onboarding_kit::live::skip_demo(ui);
+        onboarding::input(
+            ui,
+            crate::desktop::onboarding::Input::ChooseEngine(
+                crate::desktop::onboarding::EngineKind::Cloud,
+            ),
+        );
+        onboarding::input(ui, crate::desktop::onboarding::Input::KeyStored);
+        onboarding::input(ui, crate::desktop::onboarding::Input::Continue);
+        onboarding::input(ui, crate::desktop::onboarding::Input::Continue);
+        onboarding_kit::live::fixture_resume(ui, Page::Try);
+    }),
+    ("onboarding-set-up-dictation", |ui| {
+        short_first_run(ui, false);
+        onboarding_kit::live::begin_demo(ui);
+        onboarding_kit::live::skip_demo(ui);
+        onboarding_kit::live::finish_later(ui);
+        ui.pane = Pane::General;
+    }),
     // The first run on Linux (Windows is the same window): setting up Hex
     // with nothing found, the model step with models found here, the demo,
     // waiting for the model, the practice game, and Hex is ready.
@@ -2778,6 +2824,36 @@ fn engine_step(ui: &mut Ui, probed: crate::hardware::Probed, then: impl FnOnce(&
     onboarding::engine_fixture(ui, probed);
     onboarding_kit::live::fixture(ui, Page::Permissions);
     then(ui);
+}
+
+/// The short first run at its welcome page with nothing installed and no
+/// key: Linux with its permissions on, or a Mac with none granted yet.
+fn short_first_run(ui: &mut Ui, mac: bool) {
+    use crate::desktop::onboarding::{PermissionState, SetupStatus};
+    *ui = if mac { mac_fixture() } else { portal_fixture() };
+    ui.platform.permissions = if mac {
+        SetupStatus {
+            microphone: PermissionState::NeedsRequest,
+            accessibility: PermissionState::NeedsSettings,
+            transcription_model: false,
+        }
+    } else {
+        SetupStatus {
+            microphone: PermissionState::Ready,
+            accessibility: PermissionState::Ready,
+            transcription_model: false,
+        }
+    };
+    if !mac {
+        ui.platform.caps = platform::Capabilities::LINUX;
+    }
+    ui.picker.installed = Some(Vec::new());
+    ui.tour = Some(onboarding::Tour::replay(
+        &ui.settings,
+        &ui.platform,
+        &ui.picker,
+    ));
+    onboarding_kit::live::open(ui);
 }
 
 fn first_run(ui: &mut Ui, state: FirstRun, page: Page) {

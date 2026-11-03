@@ -1903,7 +1903,11 @@ fn a_new_install_opens_the_first_run() {
     let mut ui = portal_fixture();
     ui.platform.permissions = fresh;
     ui.picker.installed = Some(Vec::new());
-    ui.tour = Some(onboarding::Tour::replay(&ui.settings, &ui.platform));
+    ui.tour = Some(onboarding::Tour::replay(
+        &ui.settings,
+        &ui.platform,
+        &ui.picker,
+    ));
     onboarding_kit::live::open(&mut ui);
     assert!(ui.first_run.is_some(), "the story opens over the tour");
 }
@@ -2353,6 +2357,7 @@ fn goldens() {
 }
 
 mod engine_step;
+mod first_run_flow;
 mod onboarding_check;
 mod panes;
 

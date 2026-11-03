@@ -36,6 +36,7 @@ use crate::transcription::models as transcription_models;
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     use super::platform_settings as os;
     let mut content = page("content")
+        .children(setup_dictation(ui, p))
         .children(os::permissions_section(ui, p))
         .children(os::error_section(ui, p));
     if ui.platform.caps.listener_control {
@@ -64,6 +65,48 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             ));
     }
     super::scroll_body("scroll", content)
+}
+
+/// "Set up dictation", while "Finish later" left setup unfinished: names the
+/// first missing piece (microphone, accessibility, or the engine). Pressing
+/// it, or the dictation shortcut, reopens the tour at that step.
+fn setup_dictation(ui: &Ui, p: Paint) -> Option<El> {
+    use crate::desktop::onboarding::SetupGap;
+    let why = match super::onboarding::setup_gap(ui)? {
+        SetupGap::Microphone => tr("Microphone access is off."),
+        SetupGap::Accessibility => {
+            return Some(setup_dictation_card(
+                p,
+                tr_fill(
+                    "{} access is off.",
+                    super::platform_settings::accessibility_name(ui.platform.accessibility_renamed),
+                ),
+            ));
+        }
+        SetupGap::Engine => tr("Choose how WordInk transcribes"),
+    };
+    Some(setup_dictation_card(p, why.to_owned()))
+}
+
+fn setup_dictation_card(p: Paint, why: String) -> El {
+    card(
+        p,
+        "setup-dictation",
+        vec![icon_described_row(
+            p,
+            "setup-dictation-row",
+            &WAVE,
+            tr("Set up dictation"),
+            Some((why, p.muted())),
+            button(
+                p,
+                "setup-dictation-open",
+                tr("Set up"),
+                ButtonKind::Primary,
+                |ui: &mut Ui, _| super::onboarding::reopen_setup(ui),
+            ),
+        )],
+    )
 }
 
 // ---------------------------------------------------------------------------

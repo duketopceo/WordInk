@@ -14,7 +14,8 @@ use super::Ui;
 use super::platform::{PlatformRequest, PlatformState};
 use crate::app_settings::AppSettings;
 use crate::desktop::onboarding::{
-    Effect, Flow, Input, ItemStatus, ModelProgress, PermissionState, SetupItem, Step,
+    Effect, Flow, Input, ItemStatus, ModelProgress, Observation, PermissionState, SetupGap,
+    SetupItem, Step,
 };
 
 /// How long the ready check shows before setup moves on.
@@ -57,9 +58,13 @@ impl Tour {
     }
 
     /// The tour from Welcome, as on a new install: Run setup again.
-    pub(super) fn replay(settings: &AppSettings, platform: &PlatformState) -> Tour {
+    pub(super) fn replay(
+        settings: &AppSettings,
+        platform: &PlatformState,
+        picker: &super::picker::Picker,
+    ) -> Tour {
         let cloud = key_already_set(settings);
-        let installed = super::picker::Picker::default().selected_installed(settings) || cloud;
+        let installed = picker.selected_installed(settings) || cloud;
         Tour::new(
             Flow::with_engine_setup(
                 Step::Welcome,
@@ -72,30 +77,155 @@ impl Tour {
         )
     }
 
-    /// The tour when this run still needs it.
-    pub(super) fn start(settings: &AppSettings, platform: &PlatformState) -> Option<Tour> {
-        let completed = crate::desktop::onboarding::completion_recorded();
-        // The keyring is asked only for a run that may still need the tour.
-        let cloud = !completed && key_already_set(settings);
-        let installed = super::picker::Picker::default().selected_installed(settings) || cloud;
-        let status = platform.setup_status(installed);
-        let resume = crate::desktop::onboarding::take_resume();
-        let saved = (!completed)
-            .then(crate::desktop::onboarding::saved_step)
-            .flatten();
-        (resume.is_some() || (!completed && (!status.ready() || saved.is_some()))).then(|| {
-            Tour::new(
-                Flow::with_engine_setup(
-                    resume.or(saved).unwrap_or(Step::Welcome),
-                    status,
-                    platform.caps.permissions,
-                    platform.caps.practice_dictation,
-                ),
-                completed,
-                cloud,
-            )
-        })
+    /// The tour when this run still needs it: a new install, or a run quit
+    /// part-way (resuming at its step). Never after "Finish later".
+    pub(super) fn start(
+        settings: &AppSettings,
+        platform: &PlatformState,
+        picker: &super::picker::Picker,
+    ) -> Option<Tour> {
+        let directory = crate::app_paths::support_dir().ok();
+        Self::start_at(directory.as_deref(), settings, platform, picker)
     }
+
+    /// [`Tour::start`] reading the markers in `directory` (none: a profile
+    /// whose data folder can't be found, which counts as new).
+    pub(super) fn start_at(
+        directory: Option<&std::path::Path>,
+        settings: &AppSettings,
+        platform: &PlatformState,
+        picker: &super::picker::Picker,
+    ) -> Option<Tour> {
+        let completed = directory.is_some_and(crate::desktop::onboarding::completion_recorded_at);
+        let step = match directory {
+            Some(directory) => crate::desktop::onboarding::launch_step_at(
+                directory,
+                completed,
+                crate::desktop::onboarding::unix_ms(),
+            ),
+            None => Some(Step::Welcome),
+        }?;
+        // The keyring is asked only for a run that opens the tour.
+        let cloud = key_already_set(settings);
+        let installed = picker.selected_installed(settings) || cloud;
+        Some(Tour::new(
+            Flow::with_engine_setup(
+                step,
+                platform.setup_status(installed),
+                platform.caps.permissions,
+                platform.caps.practice_dictation,
+            ),
+            completed,
+            cloud,
+        ))
+    }
+
+    /// The tour reopened at `step` from "Set up dictation".
+    fn reopen(
+        settings: &AppSettings,
+        platform: &PlatformState,
+        picker: &super::picker::Picker,
+        step: Step,
+    ) -> Tour {
+        let cloud = key_already_set(settings);
+        let installed = picker.selected_installed(settings) || cloud;
+        Tour::new(
+            Flow::with_engine_setup(
+                step,
+                platform.setup_status(installed),
+                platform.caps.permissions,
+                platform.caps.practice_dictation,
+            ),
+            true,
+            cloud,
+        )
+    }
+}
+
+/// "Finish later" was chosen and setup is still unfinished: the app opens
+/// with a "Set up dictation" row until microphone, accessibility and engine
+/// are all ready.
+pub(super) struct Deferred {
+    /// A Groq key was set (and the engine isn't Local) when the choice was
+    /// made or the app launched. The keyring is asked then, not every frame.
+    cloud_key: bool,
+}
+
+impl Deferred {
+    /// At launch: deferred setup from an earlier run, when no tour opens.
+    pub(super) fn at_launch(ui: &Ui) -> Option<Deferred> {
+        (ui.tour.is_none() && !ui.is_fixture() && crate::desktop::onboarding::deferred_recorded())
+            .then(|| Deferred {
+                cloud_key: key_already_set(&ui.settings),
+            })
+    }
+}
+
+/// What "Set up dictation" names: the first missing piece, while setup is
+/// deferred. None once microphone, accessibility and the engine are ready.
+pub(super) fn setup_gap(ui: &Ui) -> Option<SetupGap> {
+    let deferred = ui.deferred.as_ref()?;
+    if ui.tour.is_some() {
+        return None;
+    }
+    let installed = ui.picker.selected_installed(&ui.settings);
+    crate::desktop::onboarding::setup_gap(
+        ui.platform.setup_status(installed),
+        installed || deferred.cloud_key,
+    )
+}
+
+/// "Set up dictation" (or the dictation shortcut): the tour reopens at the
+/// step that fixes the first missing piece.
+pub(super) fn reopen_setup(ui: &mut Ui) {
+    let Some(gap) = setup_gap(ui) else {
+        return;
+    };
+    ui.deferred = None;
+    if !ui.is_fixture() {
+        crate::desktop::onboarding::clear_deferred();
+    }
+    ui.tour = Some(Tour::reopen(
+        &ui.settings,
+        &ui.platform,
+        &ui.picker,
+        gap.step(),
+    ));
+    ui.first_run = None;
+    super::onboarding_kit::live::open(ui);
+}
+
+/// Whether the listener's log shows a press of the dictation shortcut: a
+/// dictation began, or failed to start for want of an engine.
+fn pressed_shortcut(heard: &[Input]) -> bool {
+    heard.iter().any(|input| {
+        matches!(
+            input,
+            Input::Dictation(Observation::Started | Observation::Failed)
+        )
+    })
+}
+
+/// While setup is deferred: clears the row once it is complete, and reopens
+/// the tour when the dictation shortcut is pressed. True when it changed.
+fn poll_deferred(ui: &mut Ui) -> bool {
+    if ui.deferred.is_none() || ui.tour.is_some() {
+        return false;
+    }
+    if setup_gap(ui).is_none() {
+        ui.deferred = None;
+        if !ui.is_fixture() {
+            crate::desktop::onboarding::clear_deferred();
+        }
+        return true;
+    }
+    // The listener logs the press; the practice feed is how the window hears
+    // it. Anything it logs after the row appeared is the shortcut.
+    let pressed = pressed_shortcut(&ui.host.tour_inputs(true));
+    if pressed {
+        reopen_setup(ui);
+    }
+    pressed
 }
 
 /// A cloud key was set when the tour opened or saved on its engine step.
@@ -142,6 +272,9 @@ pub(super) fn progress(ui: &Ui) -> (bool, ModelProgress) {
 /// Feeds the flow fresh permission and model state; true when the tour
 /// changed.
 pub(super) fn poll(ui: &mut Ui) -> bool {
+    if ui.tour.is_none() {
+        return poll_deferred(ui);
+    }
     // Onboarding looks for models already on this computer once, and holds
     // its own download until the scan answers; with one found, the model
     // list (`found_choice`) starts the row the person picks.
@@ -241,14 +374,18 @@ pub(super) fn input(ui: &mut Ui, input: Input) {
     remember_step(ui, step);
 }
 
-/// Saves a new step so a run quit part-way resumes there. The story sounds
-/// the success chime itself, on Hex is ready.
+/// Saves a new step so a run quit part-way resumes there; the last page has
+/// nothing to resume. The story sounds the success chime itself, on
+/// WordInk is ready.
 fn remember_step(ui: &Ui, before: Step) {
     if let Some(tour) = &ui.tour
         && tour.flow.step() != before
-        && ui.live()
+        && !ui.is_fixture()
     {
-        crate::desktop::onboarding::record_step(tour.flow.step());
+        match tour.flow.step() {
+            Step::Done => crate::desktop::onboarding::clear_step(),
+            step => crate::desktop::onboarding::record_step(step),
+        }
     }
 }
 
@@ -284,6 +421,19 @@ fn apply(ui: &mut Ui, effect: Effect) {
         )),
         Effect::Relaunch => ui.ask(PlatformRequest::Relaunch),
         Effect::Finish => {
+            ui.tour = None;
+            ui.first_run = None;
+        }
+        Effect::Defer => {
+            // The key was set before this point (a saved one counts), so
+            // remember it: the keyring is not asked again every frame.
+            let cloud_key = cloud_ready(ui);
+            if !ui.is_fixture()
+                && let Err(error) = crate::desktop::onboarding::record_deferred()
+            {
+                tracing::warn!(%error, "could not record that setup was deferred");
+            }
+            ui.deferred = Some(Deferred { cloud_key });
             ui.tour = None;
             ui.first_run = None;
         }
@@ -326,7 +476,9 @@ pub(super) fn engine_fixture(ui: &mut Ui, probed: crate::hardware::Probed) {
         ui.platform.caps.practice_dictation,
     );
     ui.tour = Some(Tour::new(flow, false, false));
+    // Past the welcome and the demo.
     input(ui, Input::Continue);
+    input(ui, Input::Skip);
     // One poll hands the flow the recommendation.
     poll(ui);
 }
@@ -436,6 +588,17 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_logged_dictation_start_or_failure_is_the_shortcut_press() {
+        assert!(pressed_shortcut(&[Input::Dictation(Observation::Started)]));
+        assert!(pressed_shortcut(&[Input::Dictation(Observation::Failed)]));
+        assert!(!pressed_shortcut(&[Input::Dictation(
+            Observation::Cancelled
+        )]));
+        assert!(!pressed_shortcut(&[Input::Continue]));
+        assert!(!pressed_shortcut(&[]));
+    }
 
     #[test]
     fn mac_stale_fixture_marks_accessibility_stale_and_dispatches_reset() {

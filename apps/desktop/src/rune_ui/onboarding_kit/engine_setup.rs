@@ -288,6 +288,18 @@ fn engine_page(ui: &Ui, p: Paint) -> El {
     } else {
         el().key("none")
     }))
+    .child(finish_later(p))
+}
+
+/// "Finish later": on to the app, which keeps a "Set up dictation" row.
+fn finish_later(p: Paint) -> El {
+    row().key("later").h(32.0).center().child(
+        Button::new(tr("Finish later"))
+            .variant(ButtonVariant::Ghost)
+            .on_press(super::live::finish_later)
+            .build_push(p.k)
+            .key("finish-later"),
+    )
 }
 
 fn option_title(choice: Choice) -> String {

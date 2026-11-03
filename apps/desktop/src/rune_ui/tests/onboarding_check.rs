@@ -44,7 +44,15 @@ pub(super) const SCENES: &[&str] = &[
     "onboarding-engine-cloud",
     "onboarding-engine-local",
     "onboarding-hotkey",
-    // Hex is ready.
+    // The short first run: welcome, the one demo (with Skip), Setup with
+    // Finish later (macOS), the test dictation in a plain field, and the
+    // main window's "Set up dictation" row after Finish later.
+    "onboarding-welcome",
+    "onboarding-first-demo",
+    "mac-onboarding-setup",
+    "onboarding-test-dictation",
+    "onboarding-set-up-dictation",
+    // WordInk is ready.
     "onboarding-ready",
     "mac-onboarding-ready",
 ];
@@ -107,7 +115,7 @@ fn onboarding_walkthrough() {
     ui.picker.installed = Some(Vec::new());
     // As the window opens at launch.
     ui.tour = Some(
-        super::super::onboarding::Tour::start(&ui.settings, &ui.platform)
+        super::super::onboarding::Tour::start(&ui.settings, &ui.platform, &ui.picker)
             .expect("a new install opens onboarding"),
     );
     super::super::onboarding_kit::live::open(&mut ui);
@@ -116,21 +124,22 @@ fn onboarding_walkthrough() {
     let step = |rt: &Runtime<Ui>| rt.state.tour.as_ref().map(|tour| tour.flow.step());
     let shown = texts(&rt);
     assert!(
-        shown.contains(&"Setting up WordInk".to_owned()),
+        shown.contains(&"Welcome to WordInk".to_owned()),
         "{shown:?}"
     );
-    assert!(
-        !shown.contains(&"Choose a speech model".to_owned()),
-        "nothing found, so no model step"
-    );
+    assert_eq!(step(&rt), Some(Step::Welcome));
+    assert!(sent(&rt).is_empty(), "nothing downloads before the engine");
 
-    // Setting up Hex asks the service for the recommended model at once.
-    assert_eq!(step(&rt), Some(Step::Setup));
+    // Welcome, the one demo (skipped), then the engine choice: local.
+    tap(&mut rt, "continue");
+    assert_eq!(step(&rt), Some(Step::Demo));
+    tap(&mut rt, "skip-demo");
+    assert_eq!(step(&rt), Some(Step::Engine));
+    tap(&mut rt, "option-local");
     let (model, language) = match sent(&rt) {
         [Request::ChooseModel { model, language }] => (*model, language.clone()),
-        other => panic!("setup should choose a model, sent {other:?}"),
+        other => panic!("the local engine should choose a model, sent {other:?}"),
     };
-    assert_eq!(model, rt.state.settings.transcription.model);
 
     // The service's work, for real: download and verify into the clean folder.
     let definition = crate::transcription::models::definition(model);
@@ -155,14 +164,20 @@ fn onboarding_walkthrough() {
     );
     rt.state.picker.installed = Some(vec![model]);
 
-    // The story plays on: the demo, then the practice game once the model
-    // is ready, then Hex is ready.
+    // The download is verified and installed: the shortcut, the test
+    // dictation, then WordInk is ready.
+    rt.state.settings.engine = crate::transcription::cloud::EngineChoice::Local;
     settle(&mut rt);
+    tap(&mut rt, "continue");
+    assert_eq!(step(&rt), Some(Step::Hotkey));
+    tap(&mut rt, "continue");
+    assert_eq!(step(&rt), Some(Step::TryIt));
     rt.update(|ui, _| super::super::onboarding_kit::live::fixture_resume(ui, Page::Try));
     settle(&mut rt);
-    assert_eq!(step(&rt), Some(Step::TryIt));
-    assert!(texts(&rt).contains(&"Clear your messages".to_owned()));
-    tap(&mut rt, "done");
+    assert!(rt.find("try-live-editor").is_some(), "the plain test field");
+    tap(&mut rt, "skip-try");
+    rt.invalidate();
+    settle(&mut rt);
     assert!(texts(&rt).contains(&"WordInk is ready".to_owned()));
     tap(&mut rt, "start-using-hex");
     assert!(
@@ -171,7 +186,7 @@ fn onboarding_walkthrough() {
     );
     assert!(rt.state.first_run.is_none());
     println!(
-        "onboarding walkthrough: Setting up WordInk -> {} downloaded ({} bytes) -> Your turn -> WordInk is ready",
+        "onboarding walkthrough: Welcome -> demo -> engine -> {} downloaded ({} bytes) -> shortcut -> test dictation -> WordInk is ready",
         definition.name,
         downloaded.load(std::sync::atomic::Ordering::Relaxed)
     );

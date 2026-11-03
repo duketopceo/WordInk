@@ -112,6 +112,9 @@ pub fn permission_warnings(status: SetupStatus) -> Vec<PermissionWarning> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Step {
     Welcome,
+    /// One short demo of dictating with and without WordInk, with Skip. Only
+    /// in a flow built [`Flow::with_engine_setup`].
+    Demo,
     Setup,
     /// Cloud or local, from the hardware recommendation: a Groq key, or the
     /// Parakeet v3 download. Only in a flow built [`Flow::with_engine_setup`].
@@ -123,8 +126,9 @@ pub enum Step {
 }
 
 impl Step {
-    const TOUR: [Self; 6] = [
+    const TOUR: [Self; 7] = [
         Self::Welcome,
+        Self::Demo,
         Self::Setup,
         Self::Engine,
         Self::Hotkey,
@@ -220,8 +224,11 @@ pub enum Practice {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Input {
     Continue,
-    /// "Skip" on the practice step.
+    /// "Skip" on the demo and the practice step.
     Skip,
+    /// "Finish later" on Setup and Engine: leave the tour for the app, which
+    /// keeps a "Set up dictation" row until both steps are complete.
+    Defer,
     Grant(SetupItem),
     Status(SetupStatus, ModelProgress),
     Dictation(Observation),
@@ -259,6 +266,9 @@ pub enum Effect {
     Relaunch,
     /// Close the tour.
     Finish,
+    /// Close the tour for now (not resumable): the app opens with its "Set up
+    /// dictation" row.
+    Defer,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -409,8 +419,10 @@ impl Flow {
     pub fn on(&mut self, input: Input) -> Effect {
         match input {
             Input::Continue => self.primary(),
-            Input::Skip if self.step == Step::TryIt => self.advance(),
+            Input::Skip if matches!(self.step, Step::Demo | Step::TryIt) => self.advance(),
             Input::Skip => Effect::None,
+            Input::Defer if matches!(self.step, Step::Setup | Step::Engine) => Effect::Defer,
+            Input::Defer => Effect::None,
             Input::Grant(item) => self.grant(item),
             Input::Status(status, model) => self.update(status, model),
             Input::Dictation(observation) => {
@@ -641,7 +653,10 @@ impl Flow {
         match step {
             Step::Setup => self.setup_ready(),
             Step::TryIt => !self.practice_step,
-            Step::Engine | Step::Hotkey => self.engine.is_none_or(|engine| engine.returning),
+            // Without engine setup the demo and both engine pages are absent.
+            Step::Demo | Step::Hotkey => self.engine.is_none(),
+            // A ready engine skips only the engine choice; Hotkey always shows.
+            Step::Engine => self.engine.is_none_or(|engine| engine.returning),
             _ => false,
         }
     }
@@ -915,6 +930,7 @@ pub fn relaunch_allowed(now_ms: u64) -> bool {
 }
 
 /// The step a relaunched Hex resumes at, consumed once.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn take_resume() -> Option<Step> {
     let directory = crate::app_paths::support_dir().ok()?;
     take_resume_at(&directory, unix_ms())
@@ -954,6 +970,14 @@ fn relaunched_at_consumed(marker: &Path) -> Option<u64> {
     fs::read_to_string(marker).ok()?.trim().parse().ok()
 }
 
+/// The marker holding the tour's current step. Named apart from the
+/// `onboarding-step` file older releases left behind (never cleared, and
+/// still there on a finished profile), so a stale one cannot reopen the tour.
+const STEP_MARKER: &str = "onboarding-tour-step";
+/// "Finish later" was chosen: the app shows "Set up dictation" until setup is
+/// done, and the tour is not resumable.
+const DEFERRED_MARKER: &str = "onboarding-deferred";
+
 /// Remembers the tour's step, so a tour quit part-way (macOS's own "Quit &
 /// Reopen" after a grant, or ⌘Q) resumes there.
 pub fn record_step(step: Step) {
@@ -964,6 +988,7 @@ pub fn record_step(step: Step) {
     }
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn saved_step() -> Option<Step> {
     saved_step_at(&crate::app_paths::support_dir().ok()?)
 }
@@ -971,6 +996,7 @@ pub fn saved_step() -> Option<Step> {
 pub(crate) fn record_step_at(directory: &Path, step: Step) -> color_eyre::Result<()> {
     let name = match step {
         Step::Welcome => "welcome",
+        Step::Demo => "demo",
         Step::Setup => "setup",
         Step::Engine => "engine",
         Step::Hotkey => "hotkey",
@@ -978,15 +1004,14 @@ pub(crate) fn record_step_at(directory: &Path, step: Step) -> color_eyre::Result
         Step::Done => "done",
     };
     fs::create_dir_all(directory)?;
-    fs::write(directory.join("onboarding-step"), name)?;
+    fs::write(directory.join(STEP_MARKER), name)?;
     Ok(())
 }
 
 pub(crate) fn saved_step_at(directory: &Path) -> Option<Step> {
-    match fs::read_to_string(directory.join("onboarding-step"))
-        .ok()?
-        .trim()
-    {
+    match fs::read_to_string(directory.join(STEP_MARKER)).ok()?.trim() {
+        "welcome" => Some(Step::Welcome),
+        "demo" => Some(Step::Demo),
         "setup" => Some(Step::Setup),
         "engine" => Some(Step::Engine),
         "hotkey" => Some(Step::Hotkey),
@@ -994,6 +1019,101 @@ pub(crate) fn saved_step_at(directory: &Path) -> Option<Step> {
         "done" => Some(Step::Done),
         _ => None,
     }
+}
+
+fn remove_marker(directory: &Path, name: &str) -> color_eyre::Result<()> {
+    match fs::remove_file(directory.join(name)) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.into()),
+        _ => Ok(()),
+    }
+}
+
+/// The tour is over (Start using WordInk): nothing to resume.
+pub fn clear_step() {
+    let result = crate::app_paths::support_dir()
+        .and_then(|directory| remove_marker(&directory, STEP_MARKER));
+    if let Err(error) = result {
+        tracing::warn!(%error, "could not clear the onboarding step");
+    }
+}
+
+/// "Finish later": the tour is not resumable, and setup counts as begun so
+/// the shortcut listener starts and the app opens, not the tour.
+pub fn record_deferred() -> color_eyre::Result<()> {
+    record_deferred_at(&crate::app_paths::support_dir()?)
+}
+
+pub(crate) fn record_deferred_at(directory: &Path) -> color_eyre::Result<()> {
+    fs::create_dir_all(directory)?;
+    remove_marker(directory, STEP_MARKER)?;
+    write_owner_only_marker(&directory.join(DEFERRED_MARKER), false)?;
+    // The listener (and the app opening instead of the tour) waits on the
+    // completion marker; the deferred marker is what keeps "Set up
+    // dictation" showing.
+    record_completion_at(directory)
+}
+
+pub fn deferred_recorded() -> bool {
+    crate::app_paths::support_dir().is_ok_and(|directory| deferred_recorded_at(&directory))
+}
+
+pub(crate) fn deferred_recorded_at(directory: &Path) -> bool {
+    directory.join(DEFERRED_MARKER).is_file()
+}
+
+/// Setup is complete, or the tour reopened: "Set up dictation" goes away.
+pub fn clear_deferred() {
+    let result = crate::app_paths::support_dir()
+        .and_then(|directory| remove_marker(&directory, DEFERRED_MARKER));
+    if let Err(error) = result {
+        tracing::warn!(%error, "could not clear the deferred setup marker");
+    }
+}
+
+/// What the app's "Set up dictation" row names: the first missing piece.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SetupGap {
+    Microphone,
+    Accessibility,
+    Engine,
+}
+
+impl SetupGap {
+    /// The tour step that fixes it.
+    pub fn step(self) -> Step {
+        match self {
+            Self::Microphone | Self::Accessibility => Step::Setup,
+            Self::Engine => Step::Engine,
+        }
+    }
+}
+
+/// The first of microphone, accessibility, engine that is not ready, in the
+/// tour's order. `permissions` is false where the OS has no privacy grants
+/// (a Windows microphone switch still counts: it is its own `status`).
+pub fn setup_gap(status: SetupStatus, engine_ready: bool) -> Option<SetupGap> {
+    if status.microphone != PermissionState::Ready {
+        Some(SetupGap::Microphone)
+    } else if status.accessibility != PermissionState::Ready {
+        Some(SetupGap::Accessibility)
+    } else if !engine_ready {
+        Some(SetupGap::Engine)
+    } else {
+        None
+    }
+}
+
+/// Whether a launch opens the tour, and where: a relaunch's step, else the
+/// saved step of a tour quit part-way (not after "Finish later"), else
+/// Welcome for a profile that never finished the tour.
+pub(crate) fn launch_step_at(directory: &Path, completed: bool, now_ms: u64) -> Option<Step> {
+    if let Some(step) = take_resume_at(directory, now_ms) {
+        return Some(step);
+    }
+    if deferred_recorded_at(directory) {
+        return None;
+    }
+    saved_step_at(directory).or_else(|| (!completed).then_some(Step::Welcome))
 }
 
 /// Saves a pasted Groq key the way `wordink keys set groq` does (through
@@ -1035,7 +1155,11 @@ pub(crate) fn completion_recorded_at(directory: &Path) -> bool {
     if directory.join("onboarding-complete").is_file() {
         return true;
     }
-    if directory.join("onboarding-pending").is_file() || !directory.join("settings.json").is_file()
+    // A tour in progress writes settings (the engine choice) before it is
+    // done: that is not an older profile whose setup finished.
+    if directory.join("onboarding-pending").is_file()
+        || directory.join(STEP_MARKER).is_file()
+        || !directory.join("settings.json").is_file()
     {
         return false;
     }
@@ -1078,13 +1202,13 @@ pub(crate) fn recheck_after_identity_change_at(
     let reopen = !setup_ready;
     if reopen {
         record_pending_at(directory)?;
-        for marker in ["onboarding-complete", "onboarding-step"] {
-            match fs::remove_file(directory.join(marker)) {
-                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                    return Err(error.into());
-                }
-                _ => {}
-            }
+        for marker in [
+            "onboarding-complete",
+            "onboarding-step",
+            STEP_MARKER,
+            DEFERRED_MARKER,
+        ] {
+            remove_marker(directory, marker)?;
         }
         crate::durable::sync_directory(directory)?;
     }
@@ -1103,14 +1227,11 @@ pub(crate) fn reset_at(directory: &Path) -> color_eyre::Result<()> {
     for marker in [
         "onboarding-complete",
         "onboarding-step",
+        STEP_MARKER,
+        DEFERRED_MARKER,
         "onboarding-relaunch",
     ] {
-        match fs::remove_file(directory.join(marker)) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                return Err(error.into());
-            }
-            _ => {}
-        }
+        remove_marker(directory, marker)?;
     }
     crate::durable::sync_directory(directory)?;
     Ok(())
@@ -2159,7 +2280,7 @@ mod tests {
         record_step_at(&directory, Step::TryIt).unwrap();
         assert_eq!(saved_step_at(&directory), Some(Step::TryIt));
         record_step_at(&directory, Step::Welcome).unwrap();
-        assert_eq!(saved_step_at(&directory), None, "Welcome is the default");
+        assert_eq!(saved_step_at(&directory), Some(Step::Welcome));
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -2352,6 +2473,8 @@ mod tests {
     fn at_engine_step() -> Flow {
         let mut flow = Flow::with_engine_setup(Step::Welcome, permissions_granted(), true, true);
         assert_eq!(flow.on(Input::Continue), Effect::None);
+        assert_eq!(flow.step(), Step::Demo);
+        assert_eq!(flow.on(Input::Skip), Effect::None);
         // The tour no longer starts the download by itself.
         assert_eq!(
             flow.on(Input::Status(
@@ -2369,6 +2492,7 @@ mod tests {
     fn permissions_come_before_the_engine_step() {
         let mut flow = Flow::with_engine_setup(Step::Welcome, fresh_status(), true, true);
         flow.on(Input::Continue);
+        flow.on(Input::Skip);
         assert_eq!(flow.step(), Step::Setup);
         flow.on(Input::Status(
             permissions_granted(),
@@ -2480,11 +2604,16 @@ mod tests {
     }
 
     #[test]
-    fn a_computer_with_an_engine_skips_the_engine_and_hotkey_steps() {
+    fn a_computer_with_an_engine_skips_only_the_engine_step() {
         let mut flow = Flow::with_engine_setup(Step::Welcome, ready_status(), true, true);
         flow.on(Input::Continue);
-        assert_eq!(flow.step(), Step::TryIt);
+        assert_eq!(flow.step(), Step::Demo);
+        flow.on(Input::Skip);
+        // Permissions and the engine are ready: Hotkey still shows.
+        assert_eq!(flow.step(), Step::Hotkey);
         assert!(flow.view().engine.is_some());
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::TryIt);
     }
 
     #[test]
@@ -2508,5 +2637,226 @@ mod tests {
             flow.on(Input::Status(fresh_status(), ModelProgress::default())),
             Effect::DownloadModel
         );
+    }
+
+    fn walk(flow: &mut Flow) -> Vec<Step> {
+        let mut seen = vec![flow.step()];
+        while flow.step() != Step::Done {
+            match flow.step() {
+                Step::Demo => flow.on(Input::Skip),
+                Step::Engine => {
+                    flow.on(Input::Recommend(groq_recommended()));
+                    flow.on(Input::ChooseEngine(EngineKind::Cloud));
+                    flow.on(Input::KeyStored);
+                    flow.on(Input::Continue)
+                }
+                Step::TryIt => {
+                    flow.on(Input::Dictation(Observation::Started));
+                    flow.on(Input::Dictation(Observation::Pasted));
+                    flow.on(Input::Continue)
+                }
+                _ => flow.on(Input::Continue),
+            };
+            seen.push(flow.step());
+        }
+        seen
+    }
+
+    #[test]
+    fn a_fresh_profile_walks_welcome_demo_setup_engine_hotkey_try_done() {
+        let mut flow = Flow::with_engine_setup(Step::Welcome, permissions_granted(), true, true);
+        assert_eq!(
+            walk(&mut flow),
+            [
+                Step::Welcome,
+                Step::Demo,
+                Step::Engine,
+                Step::Hotkey,
+                Step::TryIt,
+                Step::Done
+            ],
+            "permissions already on pass Setup by themselves"
+        );
+        // Permissions to do: Setup shows, and the demo's Continue moves on
+        // like its Skip does.
+        let mut flow = Flow::with_engine_setup(Step::Welcome, fresh_status(), true, true);
+        assert_eq!(flow.on(Input::Continue), Effect::None);
+        assert_eq!(flow.step(), Step::Demo);
+        assert_eq!(flow.on(Input::Skip), Effect::None);
+        assert_eq!(flow.step(), Step::Setup, "Skip on the demo moves to Setup");
+        assert_eq!(flow.on(Input::Skip), Effect::None);
+        assert_eq!(flow.step(), Step::Setup, "Setup has no Skip");
+    }
+
+    #[test]
+    fn the_demo_and_welcome_cannot_be_skipped_from_setup_or_hotkey() {
+        let mut flow = Flow::with_engine_setup(Step::Welcome, permissions_granted(), true, true);
+        assert_eq!(flow.on(Input::Skip), Effect::None, "Welcome has no Skip");
+        assert_eq!(flow.step(), Step::Welcome);
+        assert_eq!(flow.on(Input::Defer), Effect::None);
+        flow.on(Input::Continue);
+        assert_eq!(
+            flow.on(Input::Defer),
+            Effect::None,
+            "no Finish later on the demo"
+        );
+        flow.on(Input::Skip);
+        assert_eq!(flow.step(), Step::Engine);
+        assert_eq!(flow.on(Input::Defer), Effect::Defer);
+    }
+
+    #[test]
+    fn finish_later_is_on_setup_and_engine_only() {
+        let mut flow = Flow::with_engine_setup(Step::Setup, fresh_status(), true, true);
+        assert_eq!(flow.step(), Step::Setup);
+        assert_eq!(flow.on(Input::Defer), Effect::Defer);
+        let mut flow = at_engine_step();
+        assert_eq!(flow.on(Input::Defer), Effect::Defer);
+        flow.on(Input::ChooseEngine(EngineKind::Cloud));
+        flow.on(Input::KeyStored);
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::Hotkey);
+        assert_eq!(flow.on(Input::Defer), Effect::None);
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::TryIt);
+        assert_eq!(flow.on(Input::Defer), Effect::None);
+    }
+
+    #[test]
+    fn a_flow_without_engine_setup_has_no_demo() {
+        let mut flow = Flow::new(Step::Welcome, ready_status(), true, true);
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::TryIt);
+        let flow = Flow::new(Step::Demo, fresh_status(), true, true);
+        assert_eq!(flow.step(), Step::Setup);
+    }
+
+    #[test]
+    fn an_interrupted_download_is_never_ready_and_restarts() {
+        let mut flow = at_engine_step();
+        assert_eq!(
+            flow.on(Input::ChooseEngine(EngineKind::Local)),
+            Effect::DownloadModel
+        );
+        flow.on(Input::Status(permissions_granted(), downloading(0.4)));
+        assert!(!flow.view().dictation_ready);
+        // The app quit mid-file: the model is not installed, nothing runs.
+        flow.on(Input::Status(
+            permissions_granted(),
+            ModelProgress::default(),
+        ));
+        let view = flow.view();
+        assert!(!view.dictation_ready, "a partial file is not an engine");
+        assert_ne!(view.model, ItemStatus::Ready);
+        // The next run starts the download again from the engine step.
+        let mut restarted = at_engine_step();
+        assert_eq!(
+            restarted.on(Input::ChooseEngine(EngineKind::Local)),
+            Effect::DownloadModel
+        );
+        // Only an installed (checksum-verified) model finishes it.
+        restarted.on(Input::Status(permissions_granted(), installed()));
+        assert_eq!(
+            restarted.on(Input::Status(
+                SetupStatus {
+                    transcription_model: true,
+                    ..permissions_granted()
+                },
+                installed()
+            )),
+            Effect::None
+        );
+        assert!(restarted.view().dictation_ready);
+    }
+
+    fn marker_directory(name: &str) -> std::path::PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "wordink-u7-{name}-{}-{}",
+            std::process::id(),
+            unix_ms()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    #[test]
+    fn a_new_profile_opens_at_welcome_and_a_finished_one_does_not() {
+        let directory = marker_directory("launch");
+        assert_eq!(launch_step_at(&directory, false, 0), Some(Step::Welcome));
+        assert_eq!(launch_step_at(&directory, true, 0), None);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn quitting_on_hotkey_resumes_on_hotkey() {
+        let directory = marker_directory("resume");
+        // Setup is ready by Hotkey, so completion was recorded too.
+        record_completion_at(&directory).unwrap();
+        fs::write(directory.join("settings.json"), b"{}").unwrap();
+        record_step_at(&directory, Step::Hotkey).unwrap();
+        assert!(completion_recorded_at(&directory));
+        assert_eq!(launch_step_at(&directory, true, 0), Some(Step::Hotkey));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_step_left_by_an_older_release_does_not_reopen_the_tour() {
+        let directory = marker_directory("legacy");
+        record_completion_at(&directory).unwrap();
+        fs::write(directory.join("onboarding-step"), "try-it").unwrap();
+        assert_eq!(launch_step_at(&directory, true, 0), None);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_tour_quit_before_completion_is_not_taken_for_a_finished_older_profile() {
+        let directory = marker_directory("midway");
+        fs::write(directory.join("settings.json"), b"{}").unwrap();
+        record_step_at(&directory, Step::Engine).unwrap();
+        assert!(!completion_recorded_at(&directory));
+        assert_eq!(launch_step_at(&directory, false, 0), Some(Step::Engine));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn finish_later_opens_the_app_not_the_tour_and_is_not_resumable() {
+        let directory = marker_directory("deferred");
+        record_step_at(&directory, Step::Engine).unwrap();
+        record_deferred_at(&directory).unwrap();
+        assert!(deferred_recorded_at(&directory));
+        assert_eq!(saved_step_at(&directory), None, "not resumable");
+        // The shortcut listener waits on completion; later launches open the app.
+        assert!(completion_recorded_at(&directory));
+        assert_eq!(launch_step_at(&directory, true, 0), None);
+        assert_eq!(launch_step_at(&directory, false, 0), None);
+        // Run setup again forgets it.
+        reset_at(&directory).unwrap();
+        assert!(!deferred_recorded_at(&directory));
+        assert_eq!(launch_step_at(&directory, false, 0), Some(Step::Welcome));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_setup_gap_names_the_first_missing_piece_in_tour_order() {
+        let ready = ready_status();
+        assert_eq!(setup_gap(ready, true), None);
+        assert_eq!(setup_gap(ready, false), Some(SetupGap::Engine));
+        let no_accessibility = SetupStatus {
+            accessibility: PermissionState::NeedsSettings,
+            ..ready
+        };
+        assert_eq!(
+            setup_gap(no_accessibility, false),
+            Some(SetupGap::Accessibility)
+        );
+        let no_microphone = SetupStatus {
+            microphone: PermissionState::NeedsSettings,
+            ..no_accessibility
+        };
+        assert_eq!(setup_gap(no_microphone, false), Some(SetupGap::Microphone));
+        assert_eq!(SetupGap::Microphone.step(), Step::Setup);
+        assert_eq!(SetupGap::Accessibility.step(), Step::Setup);
+        assert_eq!(SetupGap::Engine.step(), Step::Engine);
     }
 }
