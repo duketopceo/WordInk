@@ -62,6 +62,10 @@ const PATHS: &[(&str, &str)] = &[
         "Window/General/Vocabulary · empty",
     ),
     (
+        "vocabulary-suggestions",
+        "Window/General/Vocabulary · suggestions",
+    ),
+    (
         "vocabulary-unused",
         "Window/General/Vocabulary · not used by the model",
     ),

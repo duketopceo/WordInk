@@ -2335,6 +2335,9 @@ fn goldens() {
             check_golden(scene, dark, PANE_SIZE);
         }
     }
+    for dark in [true, false] {
+        check_golden("vocabulary-suggestions", dark, PANE_SIZE);
+    }
     check_golden("commands", true, GOLDEN_SIZE);
     check_golden("menus", false, GOLDEN_SIZE);
     // A list longer than the window fades at its scrolling edge (#840).
@@ -2395,6 +2398,172 @@ fn the_trust_prompt_lists_what_a_config_reaches_until_it_is_allowed() {
         Some("0".repeat(64).as_str())
     );
     assert!(rt.find("allow-transformations").is_none());
+}
+
+/// A fake for the Suggestions' key store and HTTP: canned reply, and a
+/// record of every request, so no test reaches a provider.
+struct FakeNet {
+    reply: String,
+    sent: std::sync::Mutex<Vec<(String, String)>>,
+}
+
+impl crate::dictation::vocabulary_suggestions::ai::Net for FakeNet {
+    fn key(&self, _: crate::transcription::cloud::Provider) -> Option<String> {
+        Some("test-key".into())
+    }
+
+    fn post_json(&self, url: &str, _key: &str, body: &str) -> Result<String, String> {
+        self.sent.lock().unwrap().push((url.into(), body.into()));
+        Ok(self.reply.clone())
+    }
+}
+
+fn dictated(text: &str, raw: &str) -> crate::history::HistoryEntry {
+    crate::history::HistoryEntry {
+        id: 0,
+        timestamp_ms: 0,
+        kind: crate::history::HistoryKind::Dictation,
+        raw_text: raw.into(),
+        final_text: text.into(),
+        application: None,
+        processing: None,
+        audio_ms: 0,
+        inference_ms: 0,
+        total_ms: 0,
+        usage: None,
+    }
+}
+
+/// The sheet open over a replacement ("omarky" → "Omarchy") and History that
+/// repeats a name three times.
+fn suggestions_runtime() -> Runtime<Ui> {
+    let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+    state
+        .settings
+        .dictation_processing
+        .default_mode
+        .replacements = vec![crate::app_settings::TextReplacement {
+        matched_phrase: "omarky".into(),
+        output: "Omarchy".into(),
+    }];
+    state.history.entries = (0..3)
+        .map(|_| dictated("ask Zorp about Omarchy", "ask Zorp about omarky"))
+        .collect();
+    super::vocabulary::open(&mut state);
+    runtime_for(state, true, GOLDEN_SIZE)
+}
+
+#[test]
+fn suggestions_list_proposals_and_add_moves_the_word_into_vocabulary() {
+    let mut rt = suggestions_runtime();
+    assert!(rt.find("suggestion0").is_some());
+    assert!(rt.find("suggestion1").is_some());
+    assert!(rt.find("suggestion2").is_none());
+    assert!(rt.state.settings.vocabulary.is_empty());
+    // The replacement's output ranks first and brings its spelling along.
+    tap(&mut rt, "add-suggestion0");
+    flush(&mut rt);
+    let saved = &rt.state.settings.vocabulary;
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].term, "Omarchy");
+    assert_eq!(saved[0].sounds_like, ["omarky"]);
+    assert!(
+        rt.state
+            .vocabulary
+            .project()
+            .iter()
+            .any(|entry| entry.term == "Omarchy")
+    );
+    // It leaves the list; the next proposal moves up.
+    assert!(rt.find("suggestion1").is_none());
+    assert!(rt.find("suggestion0").is_some());
+}
+
+#[test]
+fn dismissing_a_suggestion_remembers_it_and_adds_nothing() {
+    let mut rt = suggestions_runtime();
+    tap(&mut rt, "dismiss-suggestion1");
+    assert_eq!(rt.state.settings.vocabulary_dismissed, ["Zorp"]);
+    assert!(rt.state.settings.vocabulary.is_empty());
+    assert!(rt.find("suggestion1").is_none());
+    // Reopening the sheet doesn't bring it back.
+    super::vocabulary::close(&mut rt.state);
+    super::vocabulary::open(&mut rt.state);
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("suggestion1").is_none());
+    assert!(rt.find("suggestion0").is_some());
+}
+
+#[test]
+fn suggest_with_ai_is_disabled_without_a_key_and_says_why() {
+    let mut rt = suggestions_runtime();
+    assert_eq!(
+        super::vocabulary::suggestions::ai_status(&rt.state),
+        "missing"
+    );
+    assert!(rt.find("suggest-ai").is_some());
+    assert!(rt.find("suggestions-no-key").is_some());
+    tap(&mut rt, "suggest-ai");
+    assert_eq!(
+        super::vocabulary::suggestions::ai_status(&rt.state),
+        "missing"
+    );
+    assert!(rt.find("suggestions-error").is_none());
+}
+
+#[test]
+fn suggest_with_ai_asks_only_when_pressed_and_labels_the_guesses() {
+    use crate::transcription::cloud::Provider;
+    let mut rt = suggestions_runtime();
+    let net = Arc::new(FakeNet {
+        reply: serde_json::json!({"choices": [{"message": {"content":
+            "```json\n[{\"word\":\"Hyprland\",\"misheard_as\":\"Hyperland\",\"reason\":\"a window manager\"},{\"word\":\"Zorp\"}]\n```"
+        }}]})
+        .to_string(),
+        sent: Default::default(),
+    });
+    super::vocabulary::suggestions::install_fake(
+        &mut rt.state,
+        net.clone(),
+        Some(Provider::OpenRouter),
+    );
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("suggestions-privacy").is_some());
+    assert!(
+        net.sent.lock().unwrap().is_empty(),
+        "nothing is sent until asked"
+    );
+    tap(&mut rt, "suggest-ai");
+    for _ in 0..300 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        rt.frame(1.0 / 60.0);
+        if super::vocabulary::suggestions::ai_status(&rt.state) == "ready" {
+            break;
+        }
+    }
+    assert_eq!(
+        super::vocabulary::suggestions::ai_status(&rt.state),
+        "ready"
+    );
+    {
+        let sent = net.sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, crate::transcription::cloud::openrouter::CHAT_URL);
+        assert!(sent[0].1.contains("ask Zorp about Omarchy"));
+        assert!(!sent[0].1.contains("omarky"), "only the final text is sent");
+    }
+    // Zorp was a local proposal already, so only the new word is added.
+    assert_eq!(
+        super::vocabulary::suggestions::guess_words(&rt.state),
+        ["Hyprland", "Zorp"]
+    );
+    settle(&mut rt);
+    let rows = (0..4)
+        .filter(|i| rt.find(&format!("suggestion{i}")).is_some())
+        .count();
+    assert_eq!(rows, 3);
 }
 
 /// The picker lists cloud models above the local ones, marks only the
