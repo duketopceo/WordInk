@@ -601,6 +601,34 @@ run_bootstrap uninstall --purge --yes
 check "HOME is never purged" [ -d "$home" ]
 unset HEX_APPLICATION_SUPPORT_DIR
 
+echo "scenario: a release built by the real release scripts"
+# make-tarball.sh, sign-linux.sh (binaries, then --sums), write-sums.sh and
+# verify-release.sh, with the throwaway key, then the bootstrap against it.
+reset
+release="$temporary/release-dist"
+rm -rf "${release:?}" "${server:?}"/*
+mkdir -p "$release"
+openssl pkey -in "$temporary/signing.pem" -pubout -out "$temporary/signing.pub.pem" 2> /dev/null
+linux="$root/packaging/linux"
+for target in x64 arm64; do
+  mkbin "$release/wordink-1.0.0-rc.1-linux-$target" 1.0.0-rc.1
+  WORDINK_VERSION=1.0.0-rc.1 bash "$linux/make-tarball.sh" "$release" "$target" > /dev/null
+done
+printf 'zip\n' > "$release/wordink-1.0.0-rc.1-macos-arm64.zip"
+cp "$bootstrap" "$release/install.sh"
+export WORDINK_SIGNING_PUBLIC_KEY_FILE="$temporary/signing.pub.pem"
+WORDINK_LINUX_SIGNING_KEY=$(cat "$temporary/signing.pem") WORDINK_VERSION=1.0.0-rc.1 bash "$linux/sign-linux.sh" "$release" > /dev/null
+bash "$linux/write-sums.sh" "$release" > /dev/null
+WORDINK_LINUX_SIGNING_KEY=$(cat "$temporary/signing.pem") WORDINK_VERSION=1.0.0-rc.1 bash "$linux/sign-linux.sh" --sums "$release" > /dev/null
+check "verify-release.sh accepts the fixture release" bash "$linux/verify-release.sh" "$release"
+unset WORDINK_SIGNING_PUBLIC_KEY_FILE WORDINK_LINUX_SIGNING_KEY
+cp "$release"/* "$server/"
+run_bootstrap
+check "the bootstrap installs a release signed by the release scripts" status_is 0
+check "it installed the rc for this CPU" [ "$(installed_version)" = versions/1.0.0-rc.1 ]
+check "the service runs it" runs_binary "$support/versions/1.0.0-rc.1/wordink"
+check "output is at most five lines" line_count_at_most "$temporary/out" 5
+
 echo "scenario: tarball installer on its own"
 reset
 publish 1.0.0
