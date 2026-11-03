@@ -51,7 +51,8 @@ pub fn set_avoid_bluetooth_microphone(avoid: bool) {
 }
 
 fn avoid_bluetooth_microphone() -> bool {
-    // On Linux `bluetooth_mic` replaces the toggle.
+    // On Linux `bluetooth_mic` replaces the toggle (settings migrate the
+    // old value once); the stored flag is not read there.
     if cfg!(target_os = "linux") {
         return keep_bluetooth_quality();
     }
@@ -1327,7 +1328,7 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
             crate::linux::input_route::move_streams_off_bluetooth();
         }
         #[cfg(not(target_os = "linux"))]
-        let _ = route_to;
+        drop(route_to);
         Ok(Opened::Input(Box::new(input)))
     };
     let plan = resolve(request.selected_device.as_deref())?;

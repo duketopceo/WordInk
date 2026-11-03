@@ -568,7 +568,7 @@ Bluetooth earbuds selected, music mode (Linux, `bluetooth_mic = headset`)  // di
      └── None appears, or the switch is refused -> Restore profile, resume media, report the error
   -> Words pasted (or cancel, error, exit) -> Restore the saved profile, then resume media
   -> Crash while switched -> A marker file restores the profile at the next start
-  -> `keep_quality` -> Dictate with the built-in microphone; earbuds stay in music mode
+  -> `bluetooth_mic = keep_quality` -> Dictate with the built-in microphone; earbuds stay in music mode
 Microphone names: ids are PipeWire node names read with `pactl`; ALSA is the fallback.
 `wordink devices` lists them, `wordink devices rename` or Settings › Rename… sets `device_names`.
 ```

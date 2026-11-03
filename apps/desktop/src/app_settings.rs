@@ -2039,18 +2039,22 @@ const ANNOTATE_DEFAULT_MIGRATION: &str = "annotate-on-by-default";
 /// new identity; the macOS launch checks setup once
 /// (`onboarding::recheck_after_identity_change`).
 const ANOMALY_IDENTITY_MIGRATION: &str = "anomaly-hex-identity";
+/// Linux's `avoid_bluetooth_microphone` toggle became `bluetooth_mic`.
+const BLUETOOTH_MIC_MIGRATION: &str = "bluetooth-mic-choice";
 #[cfg(hex_capture)]
 const MIGRATIONS: &[&str] = &[
     STREAMING_ENGLISH_MIGRATION,
     ANNOTATE_DEFAULT_MIGRATION,
     ANOMALY_IDENTITY_MIGRATION,
     MEETING_RETENTION_DEFAULT_MIGRATION,
+    BLUETOOTH_MIC_MIGRATION,
 ];
 #[cfg(not(hex_capture))]
 const MIGRATIONS: &[&str] = &[
     STREAMING_ENGLISH_MIGRATION,
     ANOMALY_IDENTITY_MIGRATION,
     MEETING_RETENTION_DEFAULT_MIGRATION,
+    BLUETOOTH_MIC_MIGRATION,
 ];
 /// Scrawl's settings were read into `capture` once. Left out of
 /// `MIGRATIONS` so new settings import them too.
@@ -2564,6 +2568,14 @@ impl AppSettings {
             }
             self.migrations
                 .push(MEETING_RETENTION_DEFAULT_MIGRATION.into());
+        }
+        if !self.has_migration(BLUETOOTH_MIC_MIGRATION) {
+            // On Linux the old toggle (on by default) kept earbuds out of
+            // call-quality audio, which is what Keep music quality means now.
+            if cfg!(target_os = "linux") && self.avoid_bluetooth_microphone {
+                self.bluetooth_mic = BluetoothMic::KeepQuality;
+            }
+            self.migrations.push(BLUETOOTH_MIC_MIGRATION.into());
         }
         #[cfg(hex_capture)]
         if !self.has_migration(ANNOTATE_DEFAULT_MIGRATION) {
@@ -3286,6 +3298,35 @@ mod tests {
 
     /// Hex turned Annotate on for older settings files; WordInk never does,
     /// so a file without the migration keeps what the person chose.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_old_bluetooth_toggle_becomes_keep_quality_once() {
+        let mut old = AppSettings {
+            migrations: vec![STREAMING_ENGLISH_MIGRATION.into()],
+            ..AppSettings::default()
+        };
+        assert!(old.avoid_bluetooth_microphone);
+        old.apply_one_time_migrations();
+        assert_eq!(old.bluetooth_mic, BluetoothMic::KeepQuality);
+        old.bluetooth_mic = BluetoothMic::Headset;
+        old.apply_one_time_migrations();
+        assert_eq!(
+            old.bluetooth_mic,
+            BluetoothMic::Headset,
+            "a later choice sticks"
+        );
+        // The old toggle off meant following Bluetooth: headset mode.
+        let mut off = AppSettings {
+            migrations: vec![STREAMING_ENGLISH_MIGRATION.into()],
+            avoid_bluetooth_microphone: false,
+            ..AppSettings::default()
+        };
+        off.apply_one_time_migrations();
+        assert_eq!(off.bluetooth_mic, BluetoothMic::Headset);
+        // A fresh install starts on the default.
+        assert_eq!(AppSettings::default().bluetooth_mic, BluetoothMic::Headset);
+    }
+
     #[cfg(hex_capture)]
     #[test]
     fn older_settings_never_turn_annotate_on() {

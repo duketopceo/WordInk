@@ -62,10 +62,10 @@ pub enum DictationIndicatorEvent {
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     ModelReady,
     /// Bluetooth earbuds are switching to headset mode for the dictation.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    #[allow(dead_code)]
     EarbudsConnecting,
     /// The earbuds' microphone is ready.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    #[allow(dead_code)]
     EarbudsReady,
     /// The words were left on the clipboard instead of typed.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
@@ -527,6 +527,8 @@ impl IndicatorModel {
 
     fn finish_capture(&mut self, now: Instant, empty_phase: Phase) {
         self.capturing = false;
+        // A capture that ends while earbuds connect never gets EarbudsReady.
+        self.earbuds = false;
         if !matches!(empty_phase, Phase::Hidden) {
             self.phase_started = now;
         }
@@ -972,6 +974,16 @@ mod tests {
         );
         model.handle(DictationIndicatorEvent::Reset, at(start, 2.1), false);
         assert_eq!(model.label(at(start, 2.1)), None, "a reset forgets it");
+        // A cancel without EarbudsReady must not leave the next dictation stuck.
+        model.handle(
+            DictationIndicatorEvent::EarbudsConnecting,
+            at(start, 3.0),
+            false,
+        );
+        model.handle(DictationIndicatorEvent::Cancelled, at(start, 3.1), false);
+        assert_ne!(model.label(at(start, 3.1)), Some(Label::ConnectingEarbuds));
+        model.handle(DictationIndicatorEvent::Started, at(start, 3.3), false);
+        assert_eq!(model.label(at(start, 3.3)), Some(Label::Ready));
     }
 
     #[test]

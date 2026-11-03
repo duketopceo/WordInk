@@ -156,12 +156,15 @@ impl<C: Controller, M: MarkerStore> Machine<C, M> {
     /// nothing was switched. A failed restore keeps the marker, so the next
     /// start tries again.
     pub fn restore(&mut self) {
-        let Some(marker) = self.active.take() else {
+        let Some(marker) = self.active.clone() else {
             return;
         };
         if self.put_back(&marker) {
+            self.active = None;
             self.marker.clear();
         }
+        // On failure the switch stays recorded: `is_active` remains true, a
+        // later restore retries, and the marker covers the next start.
     }
 
     fn put_back(&mut self, marker: &Marker) -> bool {
@@ -443,7 +446,18 @@ mod tests {
         fake.0.borrow_mut().fail_set = vec!["a2dp-sink".into()];
         machine.restore();
         assert_eq!(fake.profile(), "headset-head-unit");
+        assert!(machine.is_active(), "still switched, so still restorable");
         assert!(marker.0.borrow().is_some(), "kept for recover_stale");
+        // A retry in the same run works once the server answers.
+        fake.0.borrow_mut().fail_set.clear();
+        machine.restore();
+        assert_eq!(fake.profile(), "a2dp-sink");
+        assert!(!machine.is_active());
+        assert!(marker.0.borrow().is_none());
+        // And a later start recovers a restore that never succeeded.
+        machine.begin(CARD, ID).unwrap();
+        fake.0.borrow_mut().fail_set = vec!["a2dp-sink".into()];
+        machine.restore();
         // Next start: the card is still stranded, and now it can be restored.
         fake.0.borrow_mut().fail_set.clear();
         let mut next = self::machine(&fake, &marker);
