@@ -168,6 +168,22 @@ fn channel(method: &Method, setting: Option<UpdateChannel>, home: &str) -> Strin
     }
 }
 
+/// The update channel this install follows and how it was installed, in
+/// words, for the diagnostics summary. Reads the install, never the network.
+pub fn install_summary() -> (String, String) {
+    let method = update_method(platform::method(), cfg!(target_os = "linux"));
+    let home = home_channel(&method, BUILD_CHANNEL, crate::VERSION);
+    let channel = channel(&method, AppSettings::saved_update_channel(), &home);
+    let install = match &method {
+        Method::Direct { .. } => "direct".to_owned(),
+        Method::DownloadOnly => "direct (download only)".to_owned(),
+        Method::Package(kind) => (*kind).to_owned(),
+        Method::Source => "source build".to_owned(),
+        Method::Unknown => "unknown (run in place)".to_owned(),
+    };
+    (channel, install)
+}
+
 /// Dev builds are `0.0.0-dev-<run>` (`X.Y.Z-dev.N` before 2026-10-27).
 fn is_dev_version(version: &str) -> bool {
     version.contains("-dev")

@@ -33,7 +33,7 @@ No other tag suffix is accepted.
 
    ```text
    prepare -> gate -> build (x4), sbom -> package-linux -> sign-linux
-           -> draft -> [smoke, once added] -> publish
+           -> draft -> fetch-draft -> smoke (x4) -> publish
    ```
 
    - `prepare` checks the tag name and extracts the release notes.
@@ -45,15 +45,26 @@ No other tag suffix is accepted.
      same commit.
    - `build` builds Linux x86_64 and aarch64, Windows x64 and macOS arm64;
      `sbom` writes the CycloneDX SBOM; `package-linux` packs the two Linux
-     tarballs. None of these has a secret.
+     tarballs and gathers the three installers. None of these has a secret. The
+     macOS build is the unsigned `WordInk.app` from `scripts/build-app.sh`,
+     zipped with `ditto` so the zip root is `WordInk.app/`.
    - `sign-linux` waits for approval (next step), signs the bare Linux
      executables, writes `stable.json` (final tags only), lists every file in
      `SHA256SUMS`, signs that list, and verifies the result.
    - `draft` attests every file, creates the GitHub Release as a **draft** and
      checks the draft holds exactly the files in `SHA256SUMS`.
-   - `smoke` is not there yet (it arrives with the install smoke test). It will
-     sit between `draft` and `publish`, and a failed smoke keeps the release a
-     draft.
+   - `fetch-draft` downloads the draft's assets with the job token, checks them
+     against `SHA256SUMS` and hands them on as a workflow artifact. It checks
+     out and runs nothing.
+   - `smoke` runs on Linux x86_64, Linux aarch64, macOS arm64 and Windows x64.
+     Each runner is read-only, has no secrets and no checkout. It serves the
+     draft's assets from a loopback server, runs that OS's published installer
+     with `WORDINK_INSTALL_BASE` pointed at it, checks that `wordink --version`
+     prints the tag's version, uninstalls, and installs again. The Linux runners
+     have no user systemd session, so there the installer ends with its "run
+     `wordink app`" hint, which still counts as success; the service, autostart
+     and the source-build migration are covered by the installer test script
+     and the manual checklist. A failed smoke keeps the release a draft.
    - `publish` only un-drafts the release. It checks out and runs nothing.
 
 4. **Approve the `release` environment.** The run pauses at `sign-linux`;
@@ -61,9 +72,9 @@ No other tag suffix is accepted.
    the job read the Linux signing key, so check before approving that the run is
    for the tag you pushed and that the tagged commit is the reviewed one. Reject
    it for anything else.
-5. Test the candidate: check the release on a real machine of each OS (see
-   `docs/release-checklist.md` once it exists). If anything is wrong, fix it on
-   `master` and cut `-rc.N+1`.
+5. Test the candidate: run [`docs/release-checklist.md`](release-checklist.md)
+   on a real machine of each OS. If anything is wrong, fix it on `master` and
+   cut `-rc.N+1`.
 6. When a candidate passes, tag **the same commit** as the final release and
    approve the `release` environment again:
 
@@ -83,7 +94,9 @@ For version `V` (`stable.json` only on final releases):
 | `wordink-V-linux-x64`, `wordink-V-linux-arm64` | bare executables, what the in-app updater installs |
 | `wordink-V-linux-x64.sig`, `wordink-V-linux-arm64.sig` | raw 64-byte ed25519 signature of each executable |
 | `wordink-V-linux-x64.tar.gz`, `wordink-V-linux-arm64.tar.gz` | tarball with the installer, desktop files and icons (made before signing, so it holds no `.sig`) |
-| `wordink-V-macos-arm64.zip`, `wordink-V-windows-x64.zip` | unsigned builds |
+| `wordink-V-macos-arm64.zip` | unsigned `WordInk.app` (zip root `WordInk.app/`) |
+| `wordink-V-windows-x64.zip` | unsigned build with `wordink.exe` |
+| `install.sh`, `install-macos.sh`, `install.ps1` | the one-line installers (Linux, macOS, Windows); users run them from `releases/latest/download/` |
 | `wordink-V.sbom.cdx.json` | CycloneDX SBOM |
 | `stable.json` | update manifest the stable-channel updater reads (final releases only) |
 | `dev.json` | update manifest the Dev-channel updater reads (every release) |
@@ -194,8 +207,8 @@ next check unless the bad release has been pulled back to a draft.
 | Platform | Download | Updates |
 | --- | --- | --- |
 | Linux x86_64, aarch64 | tarball with `install.sh`; the signed executable | The app downloads the newest release, verifies its ed25519 signature against the key compiled into it, and restarts into it. |
-| macOS (Apple silicon) | zip with the bare executable, **unsigned** | The app only links to the newest release. It never installs one. |
-| Windows x64 | zip with `wordink.exe`, **unsigned** | The app only links to the newest release. It never installs one. |
+| macOS (Apple silicon) | zip with `WordInk.app`, **unsigned**; `install-macos.sh` | The app only links to the newest release. It never installs one. |
+| Windows x64 | zip with `wordink.exe`, **unsigned**; `install.ps1` | The app only links to the newest release. It never installs one. |
 
 The tarball is assembled before signing and no longer contains `wordink.sig`,
 which the unpacked `install.sh` still looks for. Until the bootstrap installer

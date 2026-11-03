@@ -100,6 +100,39 @@ jobs:
             scripts/{release-gate,release-notes,test-release-scripts}.sh
           scripts/test-release-scripts.sh
 
+      # The installers (one per OS) against a loopback fixture release. The
+      # Linux one needs the bootstrap installer from the Linux installer change
+      # (packaging/linux/install.sh): until that is on this branch the step is
+      # skipped, because the older test script it replaces cannot run.
+      - name: Installer tests (Linux)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          set -eu
+          shellcheck packaging/macos/install-macos.sh scripts/test-install-macos.sh
+          # The macOS installer test fakes the macOS commands, so one arch is enough.
+          if [ "$(uname -m)" = x86_64 ]; then sh scripts/test-install-macos.sh; fi
+          if [ -f packaging/linux/install.sh ]; then
+            shellcheck packaging/linux/install.sh packaging/linux/install-release.sh scripts/test-install-linux-release.sh
+            sh scripts/test-install-linux-release.sh
+          else
+            echo "::notice::packaging/linux/install.sh is not on this branch; skipping the Linux installer test."
+          fi
+      - name: Installer test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Get-Module -ListAvailable PSScriptAnalyzer) {
+            $findings = Invoke-ScriptAnalyzer -Path packaging/windows/install.ps1 -Severity Error, Warning `
+              -ExcludeRule PSAvoidUsingWriteHost
+            $findings | Format-Table RuleName, Severity, Line, Message -AutoSize -Wrap
+            if ($findings | Where-Object Severity -eq 'Error') { throw 'PSScriptAnalyzer reported errors in install.ps1' }
+          } else {
+            Write-Host '::notice::PSScriptAnalyzer is not installed on this runner; skipped.'
+          }
+          pwsh -NoProfile -File scripts/test-windows-installer.ps1
+          if ($LASTEXITCODE -ne 0) { throw "test-windows-installer.ps1 failed ($LASTEXITCODE)" }
+
       - name: Clippy
         # Hex's own CI lints the same way; tests are linted on Linux, where
         # the suite runs in full.

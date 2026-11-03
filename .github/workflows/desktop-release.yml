@@ -9,19 +9,26 @@
 #
 # Job graph:
 #   prepare -> gate -> build (x4), sbom -> package-linux -> sign-linux
-#           -> draft -> [smoke: U9 inserts its jobs here] -> publish
+#           -> draft -> fetch-draft -> smoke (x4) -> publish
 #
 # Trust boundaries:
 #   prepare, gate   read-only; no secrets. gate only calls the GitHub API.
 #   build           runs repository code (cargo, build.rs); no secrets, read-only.
-#   package-linux   assembles the Linux tarballs from the build output; no
-#                   secrets. It runs before signing so the signed SHA256SUMS
-#                   covers the tarballs.
+#   package-linux   assembles the Linux tarballs from the build output and
+#                   gathers the three one-line installers (install.sh,
+#                   install-macos.sh, install.ps1); no secrets. It runs before
+#                   signing so the signed SHA256SUMS covers all of them.
 #   sign-linux      the only job that can read WORDINK_LINUX_SIGNING_KEY. It
 #                   sits in the protected `release` environment, so the owner
 #                   approves it. Only its two `sign-linux.sh` steps hold the
 #                   key; everything built is treated as data and never run.
 #   draft           uploads the assets as a DRAFT release; holds no signing key.
+#   fetch-draft     copies the draft's assets into a workflow artifact with the
+#                   job token; checks out and runs nothing.
+#   smoke           read-only, no secrets, no checkout: installs the draft's
+#                   assets on each OS with the published installers, from a
+#                   loopback server, and checks `wordink --version`. A failure
+#                   keeps the release a draft.
 #   publish         un-drafts the release and refreshes dev.json on the rolling
 #                   desktop-dev prerelease; checks out and runs nothing.
 # macOS and Windows ship unsigned; their updater only links to the release.
@@ -202,13 +209,13 @@ jobs:
               install -m 755 "$exe" "$dist/$name"
               ;;
             macOS)
-              # The bare executable in a zip: Hex's build-app.sh needs its
-              # Developer ID signing inputs, so there is no .app yet.
-              stage=$(mktemp -d)/wordink
-              mkdir -p "$stage"
-              install -m 755 "$exe" "$stage/wordink"
-              cp LICENSE THIRD_PARTY_NOTICES.md "$stage/"
-              (cd "$(dirname "$stage")" && zip -qr "$dist/$name.zip" wordink)
+              # The unsigned release app bundle; build-app.sh prints its path
+              # (<cargo target dir>/app/WordInk.app). The zip root is WordInk.app/.
+              bundle=$(HEX_RELEASE_UNSIGNED=1 scripts/build-app.sh | tail -n 1)
+              [ -d "$bundle" ] || { echo "::error::build-app.sh did not produce a bundle ($bundle)"; exit 1; }
+              reported=$("$bundle/Contents/MacOS/wordink" --version | awk 'NF { value=$NF } END { print value }')
+              [ "$reported" = "$HEX_VERSION" ] || { echo "::error::the app reports $reported, not $HEX_VERSION"; exit 1; }
+              ditto -c -k --keepParent "$bundle" "$dist/$name.zip"
               ;;
             Windows)
               stage=$(mktemp -d)/wordink
@@ -268,6 +275,21 @@ jobs:
           for arch in x64 arm64; do
             apps/desktop/packaging/linux/make-tarball.sh "$RUNNER_TEMP/in" "$arch"
           done
+      # The one-line installers are release assets under these exact names
+      # (`.../releases/latest/download/<name>` is the URL users run).
+      - name: Collect the installers
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/installers"
+          install -m 755 apps/desktop/packaging/linux/install.sh "$RUNNER_TEMP/installers/install.sh"
+          install -m 755 apps/desktop/packaging/macos/install-macos.sh "$RUNNER_TEMP/installers/install-macos.sh"
+          install -m 644 apps/desktop/packaging/windows/install.ps1 "$RUNNER_TEMP/installers/install.ps1"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: installers
+          path: ${{ runner.temp }}/installers/*
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: tarballs
@@ -295,7 +317,7 @@ jobs:
           sparse-checkout-cone-mode: true
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          pattern: "{build-*,sbom,tarballs}"
+          pattern: "{build-*,sbom,tarballs,installers}"
           path: ${{ runner.temp }}/release
           merge-multiple: true
       - name: Check the files this release defines
@@ -307,7 +329,8 @@ jobs:
             "wordink-$v-linux-x64" "wordink-$v-linux-x64.tar.gz" \
             "wordink-$v-linux-arm64" "wordink-$v-linux-arm64.tar.gz" \
             "wordink-$v-windows-x64.zip" "wordink-$v-macos-arm64.zip" \
-            "wordink-$v.sbom.cdx.json" | LC_ALL=C sort)
+            "wordink-$v.sbom.cdx.json" \
+            install.sh install-macos.sh install.ps1 | LC_ALL=C sort)
           found=$(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
           [ "$expected" = "$found" ] || { echo "::error::unexpected release files"; diff <(echo "$expected") <(echo "$found") || true; exit 1; }
       - name: Sign the Linux executables
@@ -389,13 +412,147 @@ jobs:
           uploaded=$(gh release view "$WORDINK_TAG" -R "$WORDINK_REPO" --json assets --jq '.assets[].name' | LC_ALL=C sort)
           [ "$expected" = "$uploaded" ] || { echo "::error::the draft's assets differ from the release files"; diff <(echo "$expected") <(echo "$uploaded") || true; exit 1; }
 
-  # smoke (U9) goes here: read-only jobs with `needs: [prepare, draft]` that
-  # install the draft's assets with the one-line installers and start the app.
-  # Add each one to `publish`'s `needs` so a failed smoke keeps the release a draft.
+  # Copies the draft's assets into a workflow artifact for the smoke jobs. The
+  # job token needs contents: write to see a draft release; the job checks out
+  # and runs nothing, and the smoke jobs that execute the assets get no token.
+  fetch-draft:
+    needs: [prepare, draft]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      WORDINK_TAG: ${{ github.ref_name }}
+      WORDINK_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download the draft's assets
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/draft"
+          mkdir -p "$dir"
+          gh release download "$WORDINK_TAG" -R "$WORDINK_REPO" --dir "$dir"
+          # What was uploaded is what was signed.
+          (cd "$dir" && sha256sum --check --strict --quiet SHA256SUMS)
+          ls -l "$dir"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: draft-assets
+          path: ${{ runner.temp }}/draft/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Install the draft's assets the way a user does (the published one-line
+  # installer, run from a loopback server in place of GitHub Releases), check the
+  # installed program reports the tag's version, uninstall, and reinstall. Read-only,
+  # no secrets, no checkout: only the downloaded assets run. The Linux runners
+  # have no user systemd session, so the installer ends with its "run wordink app"
+  # hint there, and that must still be a success.
+  smoke:
+    name: Smoke ${{ matrix.label }}
+    needs: [prepare, fetch-draft]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: linux-x64, os: ubuntu-24.04 }
+          - { label: linux-arm64, os: ubuntu-24.04-arm }
+          - { label: macos-arm64, os: macos-26 }
+          - { label: windows-x64, os: windows-latest }
+    env:
+      WORDINK_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: draft-assets
+          path: ${{ runner.temp }}/assets
+      - name: Install, check, uninstall, reinstall (Linux and macOS)
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Linux) installer=install.sh ;;
+            macOS) installer=install-macos.sh ;;
+          esac
+          port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+          python3 -m http.server "$port" --bind 127.0.0.1 --directory "$RUNNER_TEMP/assets" > "$RUNNER_TEMP/server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          base=http://127.0.0.1:$port
+          for _ in $(seq 1 50); do
+            curl -fsS -o /dev/null "$base/SHA256SUMS" && break
+            sleep 0.2
+          done
+          export WORDINK_INSTALL_BASE=$base
+          if [ "$RUNNER_OS" = Linux ]; then
+            wordink=$HOME/.local/bin/wordink
+          else
+            wordink=$HOME/Applications/WordInk.app/Contents/MacOS/wordink
+          fi
+          check_version() {
+            [ -x "$wordink" ] || { echo "::error::$wordink is not installed"; exit 1; }
+            reported=$("$wordink" --version | awk 'NF { value=$NF } END { print value }')
+            [ "$reported" = "$WORDINK_VERSION" ] || { echo "::error::wordink reports $reported, not $WORDINK_VERSION"; exit 1; }
+            echo "wordink reports $reported"
+          }
+          echo "::group::install"
+          curl -fsSL "$base/$installer" | sh
+          echo "::endgroup::"
+          check_version
+          echo "::group::uninstall"
+          curl -fsSL "$base/$installer" | sh -s -- uninstall
+          echo "::endgroup::"
+          if [ -e "$wordink" ] || [ -L "$wordink" ]; then echo "::error::uninstall left $wordink"; exit 1; fi
+          echo "::group::reinstall"
+          curl -fsSL "$base/$installer" | sh
+          echo "::endgroup::"
+          check_version
+      - name: Install, check, uninstall, reinstall (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'assets'
+          $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+          $listener.Start()
+          $port = $listener.LocalEndpoint.Port
+          $listener.Stop()
+          $server = Start-Process python -ArgumentList '-m', 'http.server', $port, '--bind', '127.0.0.1', '--directory', $dir -PassThru -WindowStyle Hidden
+          try {
+            $base = "http://127.0.0.1:$port"
+            for ($i = 0; $i -lt 50; $i++) {
+              try { Invoke-WebRequest -UseBasicParsing "$base/SHA256SUMS" | Out-Null; break } catch { Start-Sleep -Milliseconds 200 }
+            }
+            $env:WORDINK_INSTALL_BASE = $base
+            $exe = Join-Path $env:LOCALAPPDATA 'Programs\WordInk\wordink.exe'
+            function Invoke-Installer {
+              irm "$base/install.ps1" | iex
+              if ($LASTEXITCODE -ne 0) { throw "install.ps1 failed ($LASTEXITCODE)" }
+            }
+            function Test-Version {
+              if (-not (Test-Path $exe)) { throw "$exe is not installed" }
+              $reported = (((& $exe --version) | Out-String).Trim() -split '\s+')[-1]
+              if ($reported -ne $env:WORDINK_VERSION) { throw "wordink reports $reported, not $env:WORDINK_VERSION" }
+              Write-Host "wordink reports $reported"
+            }
+            Invoke-Installer
+            Test-Version
+            $env:WORDINK_UNINSTALL = '1'
+            Invoke-Installer
+            Remove-Item Env:WORDINK_UNINSTALL
+            if (Test-Path $exe) { throw "uninstall left $exe" }
+            Invoke-Installer
+            Test-Version
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
 
   # The only job that makes the release public. It checks out and runs nothing.
   publish:
-    needs: [prepare, draft]
+    needs: [prepare, draft, smoke]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

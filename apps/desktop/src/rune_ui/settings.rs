@@ -555,9 +555,61 @@ pub(super) fn missing_microphone(ui: &Ui) -> Option<&str> {
     let listed = ui.microphones.as_ref().ok();
     ui.settings.microphone.as_deref().filter(|saved| {
         listed.is_some_and(|devices| {
-            !devices.names.is_empty() && !devices.names.iter().any(|name| name == saved)
+            !devices.names.is_empty()
+                && !devices.names.iter().any(|name| name == saved)
+                && !devices.devices.iter().any(|device| device.id == *saved)
         })
     })
+}
+
+/// The name shown for the microphone `id`: the user's own, else the cleaned
+/// listing's, else the id itself.
+pub(super) fn microphone_label(ui: &Ui, id: &str) -> String {
+    crate::audio::sources::label_for(
+        &ui.settings.device_names,
+        id,
+        ui.microphones
+            .as_ref()
+            .ok()
+            .and_then(|devices| devices.listed_label(id)),
+    )
+}
+
+/// The microphone Rename acts on: the saved one, else the one System
+/// default resolves to.
+pub(super) fn renamable_microphone(ui: &Ui) -> Option<String> {
+    ui.settings.microphone.clone().or_else(|| {
+        ui.microphones
+            .as_ref()
+            .ok()
+            .and_then(|devices| devices.system_default.clone())
+    })
+}
+
+/// Opens the rename field on the microphone in use, holding its current name.
+pub(super) fn start_microphone_rename(ui: &mut Ui) {
+    let Some(id) = renamable_microphone(ui) else {
+        return;
+    };
+    ui.mic_rename = rune::TextEdit::new(microphone_label(ui, &id));
+    ui.mic_renaming = Some(id);
+    ui.open = None;
+}
+
+/// Saves the typed name for the microphone being renamed; a blank name
+/// goes back to the default one.
+pub(super) fn finish_microphone_rename(ui: &mut Ui) {
+    let Some(id) = ui.mic_renaming.take() else {
+        return;
+    };
+    let name = ui.mic_rename.text.trim().to_owned();
+    ui.update(|settings| {
+        if name.is_empty() {
+            settings.device_names.remove(&id);
+        } else {
+            settings.device_names.insert(id, name);
+        }
+    });
 }
 
 /// The microphone menu's choices, shared by General and the tour: System
@@ -569,7 +621,9 @@ pub(super) fn microphone_choices(ui: &Ui) -> Vec<Choice> {
     let off = listed.and_then(|devices| devices.off_with_lid_closed.as_deref());
     let mut devices = vec![Choice {
         label: tr("System default").to_owned(),
-        detail: listed.and_then(|devices| devices.system_default.clone()),
+        detail: listed
+            .and_then(|devices| devices.system_default.as_deref())
+            .map(|id| microphone_label(ui, id)),
         selected: settings.microphone.is_none(),
         choose: Box::new(|ui: &mut Ui| {
             ui.open = None;
@@ -577,12 +631,29 @@ pub(super) fn microphone_choices(ui: &Ui) -> Vec<Choice> {
         }),
     }];
     if let Some(listed) = listed {
-        devices.extend(listed.names.iter().map(|device| {
+        // Monitors, null and effect devices only on request; a saved one stays.
+        let mut ids: Vec<&String> = listed.names.iter().collect();
+        if ui.show_all_microphones {
+            ids.extend(
+                listed
+                    .devices
+                    .iter()
+                    .map(|device| &device.id)
+                    .filter(|id| !listed.names.contains(id)),
+            );
+        }
+        devices.extend(ids.into_iter().map(|device| {
             let name = device.clone();
+            let bluetooth = listed.devices.iter().any(|listed| {
+                listed.id == *device && listed.kind == crate::audio::sources::DeviceKind::Bluetooth
+            });
             Choice {
-                label: device.clone(),
-                detail: (off == Some(device.as_str()))
-                    .then(|| tr("off while the lid is closed").to_owned()),
+                label: microphone_label(ui, device),
+                detail: if off == Some(device.as_str()) {
+                    Some(tr("off while the lid is closed").to_owned())
+                } else {
+                    bluetooth.then(|| tr("Bluetooth").to_owned())
+                },
                 selected: settings.microphone.as_deref() == Some(device),
                 choose: Box::new(move |ui: &mut Ui| {
                     ui.open = None;
@@ -594,10 +665,38 @@ pub(super) fn microphone_choices(ui: &Ui) -> Vec<Choice> {
     }
     if let Some(saved) = missing_microphone(ui) {
         devices.push(Choice {
-            label: saved.to_owned(),
+            label: microphone_label(ui, saved),
             detail: Some(tr("not connected").to_owned()),
             selected: true,
             choose: Box::new(|ui: &mut Ui| ui.open = None),
+        });
+    }
+    // Hidden devices exist: offer them, or fold them away again.
+    if ui.show_all_microphones
+        || listed.is_some_and(|devices| devices.devices.iter().any(|d| d.hidden))
+    {
+        let showing = ui.show_all_microphones;
+        devices.push(Choice {
+            label: tr(if showing {
+                "Show fewer devices"
+            } else {
+                "Show all devices"
+            })
+            .to_owned(),
+            detail: None,
+            selected: false,
+            choose: Box::new(move |ui: &mut Ui| {
+                ui.show_all_microphones = !showing;
+                ui.open = Some(Menu::Microphone);
+            }),
+        });
+    }
+    if renamable_microphone(ui).is_some() {
+        devices.push(Choice {
+            label: tr("Rename…").to_owned(),
+            detail: None,
+            selected: false,
+            choose: Box::new(start_microphone_rename),
         });
     }
     devices

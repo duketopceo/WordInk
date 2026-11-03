@@ -51,7 +51,7 @@ hex
 │   ├── rename <id> <name>         Labs: an import's picker name
 │   ├── repair <id>                Labs: rehash Hex's copy; ready again if it still matches
 │   ├── remove <id>                Labs: Hex's copy of an import (not the selected model)
-│   └── status|devices|check|transcribe <wav>  Linux and Windows, run in this process
+│   └── status|devices|check|transcribe <wav>  Linux and Windows, run in this process (`wordink devices [--all]`, `devices rename <id> <name>`)
 ├── commands
 │   ├── init                       create ~/.config/hex (local, no running Hex needed)
 │   └── check                      validate ~/.config/hex/hex.config.ts transformations
@@ -75,6 +75,7 @@ hex
 │   └── link <feature>             macOS: print hex://labs/<feature>, the link that opens Hex's Labs page at that row
 ├── check-for-updates              check for an update now
 ├── launch-at-login [on|off]       report or change Launch at Login (macOS: installed Hex.app only; Windows Run key; Linux XDG autostart)
+├── diagnostics                    print a plain-text bug-report summary (version, channel, OS, architecture, engine, install method, recent errors); no running Hex needed, nothing sent
 └── logs [--process] [-n N] [-f]   tail live.ndjson (or process.log); no running Hex needed
 ```
 
@@ -266,8 +267,8 @@ scrawl-capture-list {limit?} | scrawl-capture-show {capture}
 scrawl-capture-send {capture, to?, always?} | scrawl-capture-route {capture, ask_jev}
 ```
 
-Optional fields may be left out. `hex start` and `hex logs` are local and have
-no wire form. `history-clear` has no confirmation field: the CLI asks for
+Optional fields may be left out. `hex start`, `hex logs` and `hex diagnostics` are
+local and have no wire form. `history-clear` has no confirmation field: the CLI asks for
 `--yes` before it sends it.
 
 Replies are tagged by `status`:
