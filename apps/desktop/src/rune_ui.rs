@@ -834,6 +834,8 @@ pub(crate) struct Ui {
     show_all_microphones: bool,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
+    /// Privacy's Copy diagnostics row.
+    diagnostics: privacy::DiagnosticsRow,
     /// The Labs page shows in place of a pane.
     labs_open: bool,
     /// The Labs row a link just opened, pulsing until it is cleared.
@@ -945,6 +947,7 @@ impl Ui {
             mic_rename: rune::TextEdit::new(String::new()),
             show_all_microphones: false,
             advanced: Vec::new(),
+            diagnostics: Default::default(),
             labs_open: false,
             lab_flash: None,
             build_preview: None,
@@ -1258,6 +1261,9 @@ impl Ui {
         explainer::close(self);
         sound_sets::close(self);
         vocabulary::close(self);
+        // The summary is made when the row opens; leaving Privacy drops it so
+        // the next visit reads the engine and errors as they are then.
+        self.diagnostics = Default::default();
         self.output.prompt_copied = false;
         if pane == Pane::Replacements {
             replacements::open(self);
