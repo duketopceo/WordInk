@@ -65,11 +65,31 @@ pub(crate) fn capture() -> ContextSnapshot {
 /// the paste shortcut. `None` where the desktop reports no focused window
 /// (GNOME and KDE on Wayland). Reads no accessibility data.
 pub(crate) fn focused_app_id() -> Option<String> {
-    if crate::linux::session::LinuxSession::detect().is_wayland() {
-        wayland_focused_window()?.app_id
-    } else {
-        x11_focused_class()
-    }
+    bounded(FOCUS_LOOKUP_LIMIT, || {
+        if crate::linux::session::LinuxSession::detect().is_wayland() {
+            wayland_focused_window()?.app_id
+        } else {
+            x11_focused_class()
+        }
+    })
+    .flatten()
+}
+
+/// How long a paste waits to learn the focused window; after that Auto sends
+/// the plain shortcut rather than hold up the paste.
+const FOCUS_LOOKUP_LIMIT: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// `lookup`'s result, or `None` if it takes longer than `limit`. A late
+/// lookup finishes on its own thread and is dropped.
+fn bounded<T: Send + 'static>(
+    limit: std::time::Duration,
+    lookup: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(lookup());
+    });
+    receiver.recv_timeout(limit).ok()
 }
 
 /// `WM_CLASS` of the active window: the instance and class names, joined by a
@@ -260,6 +280,20 @@ fn process_name(pid: u32) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_slow_lookup_is_given_up_on() {
+        use std::time::Duration;
+        let slow = || {
+            std::thread::sleep(Duration::from_millis(400));
+            Some("kitty".to_string())
+        };
+        assert_eq!(super::bounded(Duration::from_millis(20), slow), None);
+        assert_eq!(
+            super::bounded(Duration::from_secs(2), || Some(1)),
+            Some(Some(1))
+        );
+    }
+
     #[test]
     fn the_current_process_has_a_name() {
         assert!(super::process_name(std::process::id()).is_some());

@@ -344,14 +344,15 @@ impl LinuxPaster {
     }
 
     fn send_paste(&mut self, mime: Mime, bytes: &[u8]) -> Result<()> {
-        let paste_with_shift = crate::terminal_paste::paste_with_shift(
-            crate::terminal_paste::load(&self.paste_with_shift),
-            crate::linux::context::focused_app_id,
-        );
+        let setting = self.paste_with_shift.clone();
+        let resolve = move || {
+            crate::terminal_paste::paste_with_shift(
+                crate::terminal_paste::load(&setting),
+                crate::linux::context::focused_app_id,
+            )
+        };
         match &mut self.backend {
-            Backend::X11(paster) => {
-                paster.paste(mime, bytes, &self.stop, &self.keys, paste_with_shift)?
-            }
+            Backend::X11(paster) => paster.paste(mime, bytes, &self.stop, &self.keys, resolve)?,
             Backend::Wayland(wayland) => {
                 let mut copy = Command::new("wl-copy");
                 copy.args(["--type", mime.wayland()]);
@@ -360,6 +361,8 @@ impl LinuxPaster {
                 // wl-copy's parent exits only after the selection is installed.
                 // Never read a pipe inherited by its clipboard-serving daemon.
                 self.keys.settle(&self.stop)?;
+                // Chosen after the wait, so it is the window the keys go to.
+                let paste_with_shift = resolve();
                 wayland
                     .send(&self.stop, paste_with_shift)
                     .map_err(|error| copied_only(error, paste_with_shift))?;
@@ -440,7 +443,7 @@ impl X11Paster {
         bytes: &[u8],
         stop: &AtomicBool,
         keys: &ShortcutKeys,
-        paste_with_shift: bool,
+        paste_with_shift: impl FnOnce() -> bool,
     ) -> Result<()> {
         self.wait_for_modifier_release(stop, keys)?;
         let atoms = &self.clipboard.getter.atoms;
@@ -456,6 +459,8 @@ impl X11Paster {
             .store(atoms.clipboard, target, bytes)
             .wrap_err("could not own the X11 clipboard")?;
         thread::sleep(Duration::from_millis(60));
+        // Chosen last, so it is the window the keys go to.
+        let paste_with_shift = paste_with_shift();
         for (type_, key) in [
             (KEY_PRESS, self.control),
             (KEY_PRESS, self.shift),

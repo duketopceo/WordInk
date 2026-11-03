@@ -97,6 +97,14 @@ pub(crate) fn store(shared: &AtomicU8, setting: TerminalPaste) {
     shared.store(encode(setting), Ordering::Relaxed);
 }
 
+/// Stores `setting` when it is known; a failed read leaves the value alone.
+#[cfg(any(test, hex_capture))]
+pub(crate) fn store_if_known(shared: &AtomicU8, setting: Option<TerminalPaste>) {
+    if let Some(setting) = setting {
+        store(shared, setting);
+    }
+}
+
 pub(crate) fn load(shared: &AtomicU8) -> TerminalPaste {
     match shared.load(Ordering::Relaxed) {
         1 => TerminalPaste::Always,
@@ -173,6 +181,15 @@ mod tests {
         for setting in [TerminalPaste::Always, TerminalPaste::Never] {
             paste_with_shift(setting, || panic!("{setting:?} asked for the window"));
         }
+    }
+
+    #[test]
+    fn a_failed_settings_read_keeps_the_stored_choice() {
+        let shared = share(TerminalPaste::Always);
+        store_if_known(&shared, None);
+        assert_eq!(load(&shared), TerminalPaste::Always);
+        store_if_known(&shared, Some(TerminalPaste::Auto));
+        assert_eq!(load(&shared), TerminalPaste::Auto);
     }
 
     #[test]
