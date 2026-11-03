@@ -189,3 +189,46 @@ fn privacy_says_what_leaves_and_how_long_things_are_kept() {
     settle(&mut rt);
     assert!(texts(&rt).join("\n").contains("Nothing is kept"));
 }
+
+#[test]
+fn privacy_offers_copy_diagnostics_and_keeps_the_no_analytics_copy() {
+    // Tall enough to show the Diagnostics section, which is last.
+    let mut rt = runtime("privacy", true, (PANE_SIZE.0, 1400.0));
+    assert!(present(&rt, "privacy-diagnostics"));
+    assert!(!present(&rt, "privacy-diagnostics-text"), "closed at first");
+    let shown = texts(&rt).join("\n");
+    assert!(shown.contains("None. WordInk sends no analytics, crash reports or usage data."));
+    assert!(shown.contains("Copy diagnostics"));
+
+    tap(&mut rt, "privacy-diagnostics-toggle");
+    assert!(present(&rt, "privacy-diagnostics-text"));
+    let shown = texts(&rt).join("\n");
+    assert!(shown.contains("Version: "), "{shown}");
+    assert!(shown.contains("Engine: "), "{shown}");
+    assert!(shown.contains("Recent errors: none"), "{shown}");
+    assert!(shown.contains("None. WordInk sends no analytics"));
+    assert!(rt.copy_request.is_none(), "opening the row copies nothing");
+    assert!(!present(&rt, "privacy-diagnostics-copied"));
+
+    tap(&mut rt, "privacy-diagnostics-copy");
+    let copied = rt.copy_request.take().expect("Copy writes the clipboard");
+    assert_eq!(copied.content().text(), rt.state.diagnostics.text.as_str());
+    assert!(present(&rt, "privacy-diagnostics-copied"));
+    assert!(texts(&rt).iter().any(|t| t == "Copied"));
+
+    tap(&mut rt, "privacy-diagnostics-toggle");
+    assert!(!present(&rt, "privacy-diagnostics-text"));
+}
+
+#[test]
+fn a_failed_diagnostics_copy_shows_the_error_and_keeps_the_text() {
+    let mut rt = runtime("privacy", true, (PANE_SIZE.0, 1400.0));
+    tap(&mut rt, "privacy-diagnostics-toggle");
+    rt.state.diagnostics.error = Some("no clipboard".into());
+    rt.invalidate();
+    settle(&mut rt);
+    let shown = texts(&rt).join("\n");
+    assert!(shown.contains("Could not copy: no clipboard."), "{shown}");
+    assert!(present(&rt, "privacy-diagnostics-text"));
+    assert!(shown.contains("Version: "));
+}

@@ -163,6 +163,11 @@ pub enum ControlCli {
         #[command(subcommand)]
         command: CaptureCommand,
     },
+    /// Print a plain-text summary for a bug report: version, channel, OS,
+    /// architecture, engine, install method and recent errors. Never audio,
+    /// transcripts, file paths or keys; nothing is sent anywhere, and Hex
+    /// need not be running.
+    Diagnostics,
     /// Print Hex's recent log lines; works without Hex running.
     Logs {
         /// Read process.log (Rust and native diagnostics) instead of the
@@ -515,6 +520,7 @@ pub fn run(command: ControlCli) -> u8 {
                 send(ControlCommand::VocabularyRemove { term }, output)
             }
         },
+        ControlCli::Diagnostics => diagnostics(),
         ControlCli::Logs {
             process,
             lines,
@@ -1212,6 +1218,23 @@ fn installed_bundle() -> Option<std::path::PathBuf> {
         .nth(3)
         .filter(|path| path.extension().is_some_and(|extension| extension == "app"))
         .map(ToOwned::to_owned)
+}
+
+/// `hex diagnostics`: the summary Privacy's Copy diagnostics row shows, read
+/// in this process from the saved settings and the event log.
+fn diagnostics() -> u8 {
+    use crate::transcription::cloud::{Provider, route_for};
+    let engine = crate::app_settings::AppSettings::read()
+        .unwrap_or_default()
+        .engine;
+    let groq_key = crate::keys::resolve(Provider::Groq.id(), Provider::Groq.key_env()).is_some();
+    let log = crate::app_paths::logs_dir()
+        .ok()
+        .map(|directory| directory.join("live.ndjson"));
+    let diagnostics =
+        crate::diagnostics::Diagnostics::collect(route_for(engine, groq_key), log.as_deref());
+    print!("{}", diagnostics.text());
+    0
 }
 
 fn logs(process: bool, lines: usize, follow: bool) -> u8 {

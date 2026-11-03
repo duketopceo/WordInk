@@ -829,6 +829,8 @@ pub(crate) struct Ui {
     mic_level: general::MicLevel,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
+    /// Privacy's Copy diagnostics row.
+    diagnostics: privacy::DiagnosticsRow,
     /// The Labs page shows in place of a pane.
     labs_open: bool,
     /// The Labs row a link just opened, pulsing until it is cleared.
@@ -937,6 +939,7 @@ impl Ui {
             microphones_listing: None,
             mic_level: general::MicLevel::default(),
             advanced: Vec::new(),
+            diagnostics: Default::default(),
             labs_open: false,
             lab_flash: None,
             build_preview: None,

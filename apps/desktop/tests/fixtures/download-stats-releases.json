@@ -1,0 +1,203 @@
+[
+ {
+  "tag_name": "v1.0.1",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+   {
+    "name": "wordink-1.0.1-linux-x64.tar.gz",
+    "download_count": 10,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.1-linux-arm64.tar.gz",
+    "download_count": 4,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.1-linux-x64",
+    "download_count": 6,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.1-linux-x64.sig",
+    "download_count": 900,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.1-linux-arm64",
+    "download_count": 3,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.1-linux-arm64.sig",
+    "download_count": 900,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.1-macos-arm64.zip",
+    "download_count": 20,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.1-windows-x64.zip",
+    "download_count": 15,
+    "size": 1
+   },
+   {
+    "name": "SHA256SUMS",
+    "download_count": 800,
+    "size": 1
+   },
+   {
+    "name": "SHA256SUMS.sig",
+    "download_count": 800,
+    "size": 1
+   },
+   {
+    "name": "stable.json",
+    "download_count": 5000,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.1.sbom.cdx.json",
+    "download_count": 700,
+    "size": 1
+   }
+  ]
+ },
+ {
+  "tag_name": "v1.0.0",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+   {
+    "name": "wordink-1.0.0-linux-x64.tar.gz",
+    "download_count": 7,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.0-linux-arm64.tar.gz",
+    "download_count": 2,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.0-linux-x64",
+    "download_count": 5,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.0-linux-x64.sig",
+    "download_count": 900,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.0-linux-arm64",
+    "download_count": 1,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.0-linux-arm64.sig",
+    "download_count": 900,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.0-macos-arm64.zip",
+    "download_count": 12,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.0-windows-x64.zip",
+    "download_count": 9,
+    "size": 1
+   },
+   {
+    "name": "SHA256SUMS",
+    "download_count": 800,
+    "size": 1
+   },
+   {
+    "name": "SHA256SUMS.sig",
+    "download_count": 800,
+    "size": 1
+   },
+   {
+    "name": "stable.json",
+    "download_count": 5000,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.0.sbom.cdx.json",
+    "download_count": 700,
+    "size": 1
+   }
+  ]
+ },
+ {
+  "tag_name": "v1.0.2-draft",
+  "draft": true,
+  "prerelease": false,
+  "assets": [
+   {
+    "name": "wordink-1.0.2-linux-x64.tar.gz",
+    "download_count": 99,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.2-linux-arm64.tar.gz",
+    "download_count": 99,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.2-linux-x64",
+    "download_count": 99,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.2-linux-x64.sig",
+    "download_count": 900,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.2-linux-arm64",
+    "download_count": 99,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.2-linux-arm64.sig",
+    "download_count": 900,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.2-macos-arm64.zip",
+    "download_count": 99,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.2-windows-x64.zip",
+    "download_count": 99,
+    "size": 1
+   },
+   {
+    "name": "SHA256SUMS",
+    "download_count": 800,
+    "size": 1
+   },
+   {
+    "name": "SHA256SUMS.sig",
+    "download_count": 800,
+    "size": 1
+   },
+   {
+    "name": "stable.json",
+    "download_count": 5000,
+    "size": 1
+   },
+   {
+    "name": "wordink-1.0.2.sbom.cdx.json",
+    "download_count": 700,
+    "size": 1
+   }
+  ]
+ }
+]
