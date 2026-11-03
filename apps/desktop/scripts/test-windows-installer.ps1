@@ -1,97 +1,167 @@
-# Silently installs, reinstalls, installs over another version with, and
-# uninstalls a hex-setup-*.exe on a disposable Windows machine (CI), checking
-# the managed layout that src/updater/windows.rs expects at every step. It
-# uses the real %APPDATA%, so never run it on a machine with Hex installed.
+# Runs packaging/windows/install.ps1 against a local fixture HTTP server inside
+# a throwaway LOCALAPPDATA, APPDATA and USERPROFILE, and a scratch HKCU key in
+# place of the real Run key. Nothing outside the temp directory is touched, but
+# it is meant for CI (windows-latest); it needs PowerShell 5.1 or 7 on Windows.
 #
-#   scripts/test-windows-installer.ps1 -Installer dist\hex-setup-2.4.0-windows-x64.exe `
-#     -Executable dist\hex-2.4.0-windows-x64.exe -Version 2.4.0
+#   pwsh -NoProfile -File scripts/test-windows-installer.ps1
 [CmdletBinding()]
-param(
-    [Parameter(Mandatory)] [string]$Installer,
-    [Parameter(Mandatory)] [string]$Executable,
-    [Parameter(Mandatory)] [string]$Version
-)
+param([string]$Installer = (Join-Path $PSScriptRoot '..\packaging\windows\install.ps1'))
 $ErrorActionPreference = 'Stop'
-
-$support = Join-Path $env:APPDATA 'hex'
-$installed = Join-Path $support "versions\$Version\hex.exe"
-$pointer = Join-Path $support 'current-version'
-$receipt = Join-Path $support 'install.json'
-$shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Hex.lnk'
-$uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{6ED48C92-5177-41F4-B8D6-37B7B02CFDF4}_is1'
-$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-$logs = Join-Path $env:RUNNER_TEMP 'hex-installer-logs'
-New-Item -ItemType Directory -Force $logs | Out-Null
 
 function Check([bool]$condition, [string]$message) {
     if (-not $condition) { throw "FAIL: $message" }
     Write-Output "ok - $message"
 }
 
-function Run-Setup([string]$name) {
-    $process = Start-Process $Installer -Wait -PassThru -ArgumentList @(
-        '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SKIPVULKANCHECK=1', "/LOG=$logs\$name.log"
-    )
-    $process.ExitCode
+$root = Join-Path ([IO.Path]::GetTempPath()) ('wordink-installer-test-' + [guid]::NewGuid().ToString('N'))
+$web = Join-Path $root 'web'
+New-Item -ItemType Directory -Force $web | Out-Null
+$saved = @{}
+foreach ($n in 'LOCALAPPDATA', 'APPDATA', 'USERPROFILE', 'WORDINK_FORCE', 'WORDINK_UNINSTALL', 'WORDINK_PURGE', 'WORDINK_YES', 'WORDINK_INSTALL_BASE', 'WORDINK_INSTALLER_NO_MAIN') {
+    $saved[$n] = [Environment]::GetEnvironmentVariable($n)
+}
+$testKey = "HKCU:\Software\WordInkInstallerTest\$([guid]::NewGuid().ToString('N'))\Run"
+$server = $null
+
+# One release directory: wordink-<v>-windows-x64.zip plus SHA256SUMS.
+function New-Release([string]$Name, [string]$Version, [switch]$WrongHash) {
+    $dir = Join-Path $web $Name
+    $stage = Join-Path $root "stage-$Name\wordink"
+    New-Item -ItemType Directory -Force $dir, $stage | Out-Null
+    Set-Content -Path (Join-Path $stage 'wordink.exe') -Value "fake wordink $Version"
+    Set-Content -Path (Join-Path $stage 'LICENSE') -Value 'license'
+    $zip = Join-Path $dir "wordink-$Version-windows-x64.zip"
+    Compress-Archive -Path $stage -DestinationPath $zip
+    $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+    if ($WrongHash) { $hash = '0' * 64 }
+    Set-Content -Path (Join-Path $dir 'SHA256SUMS') -Value "$hash  wordink-$Version-windows-x64.zip" -Encoding ascii
 }
 
-if (Test-Path $support) { throw "$support already exists; run this only on a clean machine." }
-$expected = (Get-FileHash -Algorithm SHA256 $Executable).Hash
+try {
+    New-Release 'good' '1.2.3'
+    New-Release 'newer' '1.2.4'
+    New-Release 'bad' '1.2.5' -WrongHash
 
-Check ((Run-Setup 'install') -eq 0) 'silent install exits 0'
-Check (Test-Path $installed) "hex.exe is at versions\$Version"
-Check ((Get-FileHash -Algorithm SHA256 $installed).Hash -eq $expected) 'installed hex.exe matches the release bytes'
-Check ((Get-Content $pointer -Raw).Trim() -eq $Version) "current-version names $Version"
-$installReceipt = Get-Content $receipt -Raw | ConvertFrom-Json
-Check ($installReceipt.app -eq 'hex' -and $installReceipt.artifact -eq 'desktop' -and $installReceipt.channel -eq 'stable' -and $installReceipt.method -eq 'direct') 'install.json marks a direct install of hex desktop stable'
-Check ($installReceipt.root -eq $support) 'install.json names the install root'
-$link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
-Check ($link.TargetPath -eq $installed) 'Start Menu shortcut targets the managed executable'
-Check ($link.Arguments -eq 'app') 'Start Menu shortcut launches the app'
-Check ($link.Description -eq 'Hex managed install') 'Start Menu shortcut carries the managed mark the updater repoints'
-$entry = Get-ItemProperty $uninstallKey
-Check ($entry.DisplayName -eq 'Hex') 'Apps & Features lists Hex'
-Check ($entry.DisplayVersion -eq $Version) "Apps & Features shows $Version"
-$uninstaller = ($entry.UninstallString -replace '"', '')
-Check ($uninstaller -like "$support\uninstall\*") 'the uninstaller lives outside versions\, which updates prune'
-Check (Test-Path $uninstaller) 'the uninstaller exists'
+    # Fixture server on a free loopback port (HttpListener needs no admin there).
+    $port = (Get-Random -Minimum 20000 -Maximum 40000)
+    $server = Start-Job -ArgumentList $web, $port -ScriptBlock {
+        param($web, $port)
+        $listener = [Net.HttpListener]::new()
+        $listener.Prefixes.Add("http://127.0.0.1:$port/")
+        $listener.Start()
+        while ($listener.IsListening) {
+            $ctx = $listener.GetContext()
+            $file = Join-Path $web ($ctx.Request.Url.AbsolutePath.TrimStart('/') -replace '/', '\')
+            if ((Test-Path $file -PathType Leaf) -and $file.StartsWith($web)) {
+                $bytes = [IO.File]::ReadAllBytes($file)
+                $ctx.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+            } else { $ctx.Response.StatusCode = 404 }
+            $ctx.Response.Close()
+        }
+    }
+    $base = "http://127.0.0.1:$port"
+    $deadline = (Get-Date).AddSeconds(20)
+    while ($true) {
+        try { Invoke-WebRequest -UseBasicParsing "$base/good/SHA256SUMS" | Out-Null; break }
+        catch { if ((Get-Date) -gt $deadline) { throw 'fixture server did not start' }; Start-Sleep -Milliseconds 300 }
+    }
 
-if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or (Test-Path "$env:SystemRoot\System32\vulkan-1.dll")) {
-    $reported = (& $installed --version) -split '\s+' | Select-Object -Last 1
-    Check ($reported -eq $Version) "installed hex.exe reports $Version"
-} else {
-    Write-Output 'skip - hex.exe --version needs vulkan-1.dll, which this runner lacks'
+    $env:LOCALAPPDATA = Join-Path $root 'Local'
+    $env:APPDATA = Join-Path $root 'Roaming'
+    $env:USERPROFILE = Join-Path $root 'Home'
+    New-Item -ItemType Directory -Force $env:LOCALAPPDATA, $env:APPDATA, $env:USERPROFILE | Out-Null
+    foreach ($n in 'WORDINK_FORCE', 'WORDINK_UNINSTALL', 'WORDINK_PURGE', 'WORDINK_YES') { Remove-Item "Env:\$n" -ErrorAction SilentlyContinue }
+    $env:WORDINK_INSTALLER_NO_MAIN = '1'
+    . $Installer
+
+    # Test seams: a scratch Run key, no app launch, a fixed architecture.
+    $script:arch = 'AMD64'
+    $script:started = 0
+    function Get-WordInkRunKey { $testKey }
+    function Start-WordInkApp([string]$Exe) { $script:started++ }
+    function Get-WordInkArch { $script:arch }
+
+    function Invoke-Installer([string]$InstallBase, [string[]]$Switches = @()) {
+        $env:WORDINK_INSTALL_BASE = $InstallBase
+        $items = @(Invoke-WordInk $Switches 6>&1)
+        [pscustomobject]@{
+            Code  = [int]($items | Where-Object { $_ -is [int] } | Select-Object -Last 1)
+            Lines = @($items | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" })
+        }
+    }
+
+    $paths = Get-WordInkPaths
+    $data = $paths.Data[0]
+    $receipt = { (Get-Content -LiteralPath $paths.Receipt -TotalCount 1).Trim() }
+    $runValue = { (Get-ItemProperty -Path $testKey -Name WordInk -ErrorAction SilentlyContinue).WordInk }
+
+    # Fresh install.
+    $r = Invoke-Installer "$base/good"
+    Check ($r.Code -eq 0) 'fresh install exits 0'
+    Check ($r.Lines.Count -le 5) "fresh install prints at most five lines ($($r.Lines.Count))"
+    Check (($r.Lines -join ' ') -match 'unsigned') 'the output says the app is unsigned'
+    Check (Test-Path $paths.Exe) 'wordink.exe is installed under Programs\WordInk'
+    Check ((& $receipt) -eq '1.2.3') 'the receipt records 1.2.3'
+    $link = (New-Object -ComObject WScript.Shell).CreateShortcut($paths.Shortcut)
+    Check ($link.TargetPath -eq $paths.Exe -and $link.Arguments -eq 'app') 'the Start menu shortcut launches the installed app'
+    Check ((& $runValue) -eq ('"{0}" app --hidden' -f $paths.Exe)) 'the Run value matches the app''s own login item command'
+    Check ($script:started -eq 1) 'the app was started'
+    Check (-not (Test-Path ($paths.Install + '.new')) -and -not (Test-Path ($paths.Install + '.old'))) 'no staging directories are left'
+
+    # Same version again changes nothing.
+    Set-Content (Join-Path $paths.Install 'marker.txt') 'x'
+    $r = Invoke-Installer "$base/good"
+    Check ($r.Code -eq 0 -and (Test-Path (Join-Path $paths.Install 'marker.txt'))) 're-running the same version is a no-op'
+    Check ($script:started -eq 1) 'a no-op does not start the app again'
+
+    # -Force reinstalls.
+    $r = Invoke-Installer "$base/good" @('-Force')
+    Check ($r.Code -eq 0 -and -not (Test-Path (Join-Path $paths.Install 'marker.txt')) -and (Test-Path $paths.Exe)) '-Force reinstalls the same version'
+
+    # A hash mismatch fails and leaves the previous install working.
+    $r = Invoke-Installer "$base/bad"
+    Check ($r.Code -eq 1 -and $r.Lines[-1] -match 'SHA256') 'a hash mismatch fails with a one-line reason'
+    Check ((Test-Path $paths.Exe) -and ((& $receipt) -eq '1.2.3')) 'a hash mismatch leaves the prior install in place'
+    Check (-not (Test-Path ($paths.Install + '.new'))) 'a failed install leaves no staging directory'
+
+    # A newer release upgrades.
+    $r = Invoke-Installer "$base/newer"
+    Check ($r.Code -eq 0 -and ((& $receipt) -eq '1.2.4')) 'a newer release upgrades'
+    # An older release does not downgrade.
+    $r = Invoke-Installer "$base/good"
+    Check ($r.Code -eq 0 -and ((& $receipt) -eq '1.2.4')) 'an older release does not downgrade'
+
+    # Refusals.
+    $script:arch = 'ARM64'
+    $r = Invoke-Installer "$base/newer" @('-Force')
+    Check ($r.Code -eq 1 -and $r.Lines.Count -eq 1 -and $r.Lines[0] -match 'Windows x64' -and $r.Lines[0] -match 'github.com/duketopceo/WordInk/releases') 'ARM64 is refused with the supported-platform line'
+    $script:arch = 'AMD64'
+    $r = Invoke-Installer 'http://example.com/releases' @('-Force')
+    Check ($r.Code -eq 1 -and $r.Lines[0] -match 'localhost') 'a non-loopback http base is refused'
+    Check ((& $receipt) -eq '1.2.4') 'refusals leave the install in place'
+
+    # Uninstall keeps data; declining the purge keeps everything; -Purge removes data.
+    New-Item -ItemType Directory -Force $data | Out-Null
+    Set-Content (Join-Path $data 'settings.json') '{}'
+    $r = Invoke-Installer "$base/good" @('-Uninstall')
+    Check ($r.Code -eq 0) 'uninstall exits 0'
+    Check (-not (Test-Path $paths.Install)) 'uninstall removes the install directory'
+    Check (-not (Test-Path $paths.Shortcut)) 'uninstall removes the shortcut'
+    Check ($null -eq (& $runValue)) 'uninstall removes the Run value'
+    Check (Test-Path (Join-Path $data 'settings.json')) 'uninstall keeps the data directory'
+
+    $null = Invoke-Installer "$base/good"
+    function Confirm-WordInkPurge([string]$Prompt) { $false }
+    $r = Invoke-Installer "$base/good" @('-Uninstall', '-Purge')
+    Check ((Test-Path $paths.Exe) -and (Test-Path $data)) 'declining the purge removes nothing'
+    function Confirm-WordInkPurge([string]$Prompt) { $true }
+    $r = Invoke-Installer "$base/good" @('-Uninstall', '-Purge')
+    Check ($r.Code -eq 0 -and -not (Test-Path $paths.Install) -and -not (Test-Path $data)) '-Uninstall -Purge removes the data directory too'
+
+    Write-Output 'install.ps1 passed.'
+} finally {
+    if ($server) { Stop-Job $server -ErrorAction SilentlyContinue; Remove-Job $server -Force -ErrorAction SilentlyContinue }
+    foreach ($n in $saved.Keys) { [Environment]::SetEnvironmentVariable($n, $saved[$n]) }
+    Remove-Item (Split-Path (Split-Path $testKey)) -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
-
-Check ((Run-Setup 'reinstall') -eq 0) 'reinstalling the same version exits 0'
-Check ((Get-FileHash -Algorithm SHA256 $installed).Hash -eq $expected) 'reinstall keeps the release bytes'
-
-# Versions are never compared: the installer installs its own over any other.
-Set-Content -Path $pointer -Value '99.0.0' -NoNewline
-Check ((Run-Setup 'over-another') -eq 0) 'installing over another version exits 0'
-Check ((Get-Content $pointer -Raw).Trim() -eq $Version) 'current-version names this installer''s version'
-
-# Simulate what a self-update and Launch at login leave behind.
-$updated = Join-Path $support 'versions\99.0.0\hex.exe'
-New-Item -ItemType Directory -Force (Split-Path $updated) | Out-Null
-Copy-Item $installed $updated
-New-Item -ItemType Directory -Force (Join-Path $support 'updates') | Out-Null
-if (-not (Test-Path $runKey)) { New-Item -Path $runKey | Out-Null }
-Set-ItemProperty -Path $runKey -Name 'Hex' -Value "`"$updated`" app --hidden"
-Set-Content -Path (Join-Path $support 'settings.json') -Value '{}'
-
-$process = Start-Process $uninstaller -Wait -PassThru -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$logs\uninstall.log"
-Check ($process.ExitCode -eq 0) 'silent uninstall exits 0'
-# The uninstaller finishes from a temporary copy of itself.
-$deadline = (Get-Date).AddSeconds(60)
-while ((Test-Path $uninstallKey) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
-Check (-not (Test-Path $uninstallKey)) 'Apps & Features entry is removed'
-Check (-not (Test-Path (Join-Path $support 'versions'))) 'every version, including self-updated ones, is removed'
-Check (-not (Test-Path (Join-Path $support 'updates'))) 'staged updates are removed'
-Check (-not (Test-Path $pointer)) 'current-version is removed'
-Check (-not (Test-Path $receipt)) 'install.json is removed'
-Check (-not (Test-Path $shortcut)) 'Start Menu shortcut is removed'
-Check ($null -eq (Get-ItemProperty -Path $runKey -Name 'Hex' -ErrorAction SilentlyContinue)) 'Launch at login is removed'
-Check (Test-Path (Join-Path $support 'settings.json')) 'settings are kept'
-Remove-Item $support -Recurse -Force
-Write-Output "Installer $([IO.Path]::GetFileName($Installer)) passed."
