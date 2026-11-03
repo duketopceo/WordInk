@@ -367,6 +367,12 @@ pub enum VocabularyCommand {
         #[command(flatten)]
         output: Output,
     },
+    /// Words you might add: your replacements' outputs and unusual words
+    /// that recur in History (local only; nothing is added or sent).
+    Suggest {
+        #[command(flatten)]
+        output: Output,
+    },
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -519,6 +525,7 @@ pub fn run(command: ControlCli) -> u8 {
             VocabularyCommand::Remove { term, output } => {
                 send(ControlCommand::VocabularyRemove { term }, output)
             }
+            VocabularyCommand::Suggest { output } => suggest_vocabulary(output),
         },
         ControlCli::Diagnostics => diagnostics(),
         ControlCli::Logs {
@@ -1235,6 +1242,80 @@ fn diagnostics() -> u8 {
         crate::diagnostics::Diagnostics::collect(route_for(engine, groq_key), log.as_deref());
     print!("{}", diagnostics.text());
     0
+}
+
+/// `wordink vocabulary suggest`: reads the saved settings and History
+/// directly, like `wordink history`, so the app needn't be running.
+fn suggest_vocabulary(output: Output) -> u8 {
+    let read =
+        || -> color_eyre::Result<Vec<crate::dictation::vocabulary_suggestions::Suggestion>> {
+            let root = crate::app_paths::support_dir()?;
+            let (settings, _) =
+                crate::app_settings::AppSettings::read_from(&root.join("settings.json"))?;
+            let history = crate::history::read_snapshot(&root.join("history.json"))?;
+            let rules: Vec<_> = settings
+                .dictation_processing
+                .default_mode
+                .replacements
+                .iter()
+                .chain(
+                    settings
+                        .dictation_processing
+                        .modes
+                        .iter()
+                        .flat_map(|mode| &mode.replacements),
+                )
+                .cloned()
+                .collect();
+            // Newest first, as History lists them.
+            let history: Vec<_> = history.into_iter().rev().collect();
+            Ok(crate::dictation::vocabulary_suggestions::local(
+                &rules,
+                &history,
+                &settings.vocabulary,
+                &settings.vocabulary_dismissed,
+            ))
+        };
+    let found = match read() {
+        Ok(found) => found,
+        Err(error) => return fail(&format!("{error:#}")),
+    };
+    if output.json {
+        let rows: Vec<_> = found
+            .iter()
+            .map(|suggestion| {
+                serde_json::json!({
+                    "word": suggestion.word,
+                    "sounds_like": suggestion.sounds_like,
+                    "reason": suggestion_reason(suggestion),
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::json!({"version": 4, "status": "vocabulary-suggestions", "suggestions": rows})
+        );
+    } else if found.is_empty() {
+        println!("No suggestions.");
+    } else {
+        for suggestion in &found {
+            println!("{}\t{}", suggestion.word, suggestion_reason(suggestion));
+        }
+    }
+    0
+}
+
+/// Why a word is proposed, in plain English for the terminal.
+fn suggestion_reason(suggestion: &crate::dictation::vocabulary_suggestions::Suggestion) -> String {
+    use crate::dictation::vocabulary_suggestions::Reason;
+    match &suggestion.reason {
+        Reason::Replacement { fired } if *fired > 0 => {
+            format!("a replacement of yours produces it (it fired {fired} times)")
+        }
+        Reason::Replacement { .. } => "a replacement of yours produces it".into(),
+        Reason::Recurring { count } => format!("heard {count} times"),
+        Reason::Ai { reason, .. } => format!("AI guess: {reason}"),
+    }
 }
 
 fn logs(process: bool, lines: usize, follow: bool) -> u8 {

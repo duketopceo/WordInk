@@ -802,6 +802,12 @@ mod tests {
             }))) if output.json
         ));
         assert!(parse(&["hex", "vocabulary", "remove"]).is_err());
+        assert!(matches!(
+            parse(&["hex", "vocabulary", "suggest", "--json"]),
+            Ok(Some(Command::Control(ControlCli::Vocabulary {
+                command: crate::control::cli::VocabularyCommand::Suggest { output }
+            }))) if output.json
+        ));
     }
 
     #[test]

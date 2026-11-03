@@ -1401,6 +1401,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
             && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible),
     );
     changed |= ui.history.poll(ui.pane == Pane::History);
+    changed |= vocabulary::poll(ui);
     {
         let store = ui.history.store().cloned();
         changed |= ui.usage.poll(store.as_ref(), ui.pane == Pane::Usage);
@@ -2431,6 +2432,10 @@ const SCENES: &[Scene] = &[
         vocabulary::fixture(ui, false);
     }),
     // Cohere ignores the list: the row and the sheet say so.
+    ("vocabulary-suggestions", |ui| {
+        *ui = portal_fixture();
+        vocabulary::fixture_suggestions(ui);
+    }),
     ("vocabulary-unused", |ui| {
         *ui = portal_fixture();
         ui.settings.transcription.model = TranscriptionModelId::CohereTranscribe;
