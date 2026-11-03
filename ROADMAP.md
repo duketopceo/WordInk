@@ -1,6 +1,6 @@
 # WordInk Roadmap
 
-WordInk is one desktop app (`apps/desktop`, based on [Hex](https://github.com/anomalyco/hex), MIT) for Linux, Windows and macOS. It is on `master` at version 1.0.0. The first release candidate, `desktop-v1.0.0-rc.1`, is a published prerelease, built and install-tested on Linux x86_64 and aarch64, macOS arm64 and Windows x64. The final 1.0.0 tag is not cut yet. The active plan is [`docs/plans/2026-11-02-1907-feat-wordink-1-0-release-plan.md`](docs/plans/2026-11-02-1907-feat-wordink-1-0-release-plan.md). Earlier plans are in [`docs/archive/`](docs/archive/) or marked `status: done`.
+WordInk is one desktop app (`apps/desktop`, based on [Hex](https://github.com/anomalyco/hex) by Anomaly, MIT) for Linux, Windows and macOS. Version 1.0.0 is released (`desktop-v1.0.0`, 2026-11-03) for Linux x86_64 and aarch64, macOS arm64 and Windows x64. The 1.0 release plan, [`docs/plans/2026-11-02-1907-feat-wordink-1-0-release-plan.md`](docs/plans/2026-11-02-1907-feat-wordink-1-0-release-plan.md), is `status: done`. Earlier plans are in [`docs/archive/`](docs/archive/) or marked `status: done`.
 
 This page lists themes, not tickets. "Done" means merged to `master`.
 
@@ -11,10 +11,6 @@ This page lists themes, not tickets. "Done" means merged to `master`.
 - **Linux on any Wayland desktop**, **Windows**, and **macOS on Apple silicon**.
 - **`wordink-dictd` stays** (Python, `sdks/python`) until the desktop app is verified as its replacement on each OS.
 - **Separate products, not merged into the app:** the web SDK (`packages/*`) and the gateway (`packages/server`).
-
-## Now: finish 1.0
-
-- Cut `desktop-v1.0.0-rc.2`, run [`docs/release-checklist.md`](docs/release-checklist.md), then tag `desktop-v1.0.0`. The flow is in [`docs/releasing.md`](docs/releasing.md).
 
 ## Next
 
@@ -38,9 +34,9 @@ This page lists themes, not tickets. "Done" means merged to `master`.
 
 | Platform | Desktop app (`apps/desktop`) | Install | Signing and updates |
 |---|---|---|---|
-| Linux x86_64, aarch64 (Wayland; glibc 2.39+, OpenSSL 3) | 1.0.0-rc.1 | `install.sh` one-liner | ed25519-verified; self-updating |
-| macOS, Apple silicon | 1.0.0-rc.1 | `install-macos.sh` one-liner (`WordInk.app` in `~/Applications`) | Unsigned, not notarized; updates are download-only |
-| Windows x64 | 1.0.0-rc.1 | `install.ps1` one-liner (per-user) | Unsigned (SmartScreen warns); updates are download-only |
+| Linux x86_64, aarch64 (Wayland; glibc 2.39+, OpenSSL 3) | 1.0.0 | `install.sh` one-liner | ed25519-verified; self-updating |
+| macOS, Apple silicon | 1.0.0 | `install-macos.sh` one-liner (`WordInk.app` in `~/Applications`) | Unsigned, not notarized; updates are download-only |
+| Windows x64 | 1.0.0 | `install.ps1` one-liner (per-user) | Unsigned (SmartScreen warns); updates are download-only |
 | iOS | Paused | n/a | Preserved on `archive/ios-2026-11-03` |
 | Web | Separate product (`packages/*`) | `<wordink-mic>` and React; not on npm yet | n/a |
 

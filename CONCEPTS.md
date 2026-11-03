@@ -28,7 +28,7 @@ The router's per-entry skip window after a retryable provider failure (rate limi
 
 ## Desktop app
 
-The one WordInk dictation app for end users (`apps/desktop`, based on Hex, MIT): a hotkey, a recording indicator, and text typed into the focused app, on Linux (any Wayland desktop), Windows and macOS on Apple silicon. Groq is the default engine; Parakeet v3 is the local, no-key option. It is on `master` (version 1.0.0; the first release candidate is published as a prerelease). It calls providers directly with the user's own key and does not need the gateway.
+The one WordInk dictation app for end users (`apps/desktop`, based on Hex, MIT): a hotkey, a recording indicator, and text typed into the focused app, on Linux (any Wayland desktop), Windows and macOS on Apple silicon. Groq is the default engine; Parakeet v3 is the local, no-key option. It is released as 1.0.0. It calls providers directly with the user's own key and does not need the gateway.
 
 ## wordink-dictd
 
