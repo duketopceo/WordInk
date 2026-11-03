@@ -153,7 +153,7 @@ skipped while a capture is unfinished or Scrawl.app runs
   without it (every public release, Linux, Nix, Windows) never compile the
   crate or its Swift helper and refuse `scrawl-capture` with `unsupported`.
 - The Release, test-build, and Nix builds never pass the feature.
-  `scripts/release-app.sh` refuses `HEX_CAPTURE`, and
+  the release build refuses `HEX_CAPTURE`, and
   `scripts/validate-app.sh` (run on every macOS release artifact) refuses a
   bundle with `Contents/MacOS/scrawl-helper` or a `hex` containing the
   capture host's start-up log line.

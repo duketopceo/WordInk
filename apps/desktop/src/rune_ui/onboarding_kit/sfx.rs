@@ -85,12 +85,12 @@ impl SfxTrack {
             .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     }
 
-    /// Initial `"Setting up Hex"` hexagon bloom.
+    /// Initial `"Setting up WordInk"` hexagon bloom.
     pub(crate) fn on_download_start(&mut self, now: f64) {
         self.push(now + 0.08, Tone::Onboarding(OnboardingTone::Hexagon));
     }
 
-    /// `"Without Hex"`: hexagon settling into top pill + every typing stroke.
+    /// `"Without WordInk"`: hexagon settling into top pill + every typing stroke.
     pub(crate) fn on_without_hex(&mut self, now: f64, typing_from: f64, had_model: bool) {
         if !had_model {
             self.push(now + 0.12, Tone::Onboarding(OnboardingTone::Hexagon));
@@ -118,7 +118,7 @@ impl SfxTrack {
         }
     }
 
-    /// `"With Hex"` or scripted `"Your turn"` dictation: physical shortcut
+    /// `"With WordInk"` or scripted `"Your turn"` dictation: physical shortcut
     /// down, real `DictationStart`, then shortcut up, `DictationStop`, and
     /// `DictationDone`.
     pub(crate) fn on_voice_take(&mut self, start: f64, take: &Take) {
@@ -169,7 +169,7 @@ impl SfxTrack {
         }
     }
 
-    /// `"Hex is ready"` finale: hexagon arrival + Hex's `#292` success motif.
+    /// `"WordInk is ready"` finale: hexagon arrival + Hex's `#292` success motif.
     pub(crate) fn on_ready(&mut self, now: f64) {
         self.push(now, Tone::Onboarding(OnboardingTone::Hexagon));
         self.push(now + 0.12, Tone::OnboardingSuccess);

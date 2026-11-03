@@ -1,9 +1,9 @@
 # Silently installs, reinstalls, installs over another version with, and
-# uninstalls a hex-setup-*.exe on a disposable Windows machine (CI), checking
+# uninstalls a wordink-setup-*.exe on a disposable Windows machine (CI), checking
 # the managed layout that src/updater/windows.rs expects at every step. It
 # uses the real %APPDATA%, so never run it on a machine with Hex installed.
 #
-#   scripts/test-windows-installer.ps1 -Installer dist\hex-setup-2.4.0-windows-x64.exe `
+#   scripts/test-windows-installer.ps1 -Installer dist\wordink-setup-2.4.0-windows-x64.exe `
 #     -Executable dist\hex-2.4.0-windows-x64.exe -Version 2.4.0
 [CmdletBinding()]
 param(

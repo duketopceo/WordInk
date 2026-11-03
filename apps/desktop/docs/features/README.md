@@ -59,7 +59,7 @@ leaves runtime settings, models, and retained data intact.
 Download Hex                              // setup.download-recovery
 ├── anoma.ly/hex names the visitor's platform  // setup.download-button
 │   ├── Mac -> DMG | Intel Mac -> disabled, "needs Apple silicon"
-│   ├── Windows x64 / ARM64 (UA-CH) -> hex-setup-<version>-windows-<arch>.exe + SmartScreen note
+│   ├── Windows x64 / ARM64 (UA-CH) -> wordink-setup-<version>-windows-<arch>.exe + SmartScreen note
 │   ├── Linux -> copyable `curl … install-linux.sh | sh` + Arch/glibc requirement
 │   ├── Phone -> Send yourself the link
 │   └── Other platforms -> every build, Homebrew, the GitHub release
@@ -109,8 +109,6 @@ platform states were captured once in headless Chromium with `?platform=`.
 
 Sources: [website](../../site/src/Download.tsx), [installer](../../packaging/windows/hex.iss),
 [release publisher](../../.github/release/release-service.sh),
-[mirror publisher](../../scripts/publish-app-mirror.sh),
-[macOS release publisher](../../scripts/release-app.sh),
 [Linux installer](../../.github/release/install-linux.sh), and
 [updater](../../src/updater.rs).
 Model transfer failures in [transcription/models.rs](../../src/transcription/models.rs)

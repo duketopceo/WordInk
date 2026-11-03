@@ -231,7 +231,7 @@ const PATHS: &[(&str, &str)] = &[
         "mac-onboarding-reopen",
         "Window/Onboarding/Your turn · reopen",
     ),
-    ("mac-onboarding-ready", "Window/Onboarding/Hex is ready"),
+    ("mac-onboarding-ready", "Window/Onboarding/WordInk is ready"),
     ("portal", "Linux & Windows/Settings · portal shortcuts"),
     ("commands", "Linux & Windows/Settings · wordink commands"),
     ("portal-mouse", "Linux & Windows/Settings · mouse button"),

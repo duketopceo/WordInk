@@ -1601,7 +1601,7 @@ mod tests {
         let mismatch_status = HexMicrophoneStatus {
             driver_bundle_installed: true,
             driver_loaded: true,
-            installed_version: Some("1.0.0".into()),
+            installed_version: Some("0.9.0".into()),
             bundled_version: env!("CARGO_PKG_VERSION").into(),
             sink_streaming: true,
             mic_in_use: false,

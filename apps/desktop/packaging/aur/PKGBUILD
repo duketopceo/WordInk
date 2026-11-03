@@ -3,7 +3,7 @@
 # Not related to extra/hex (the hex dump tool): this is the WordInk voice
 # dictation app, so it neither provides nor conflicts with it.
 #
-# Generated from duketopceo/WordInk apps/desktop/packaging/aur by scripts/release-aur.sh, which
+# Generated from duketopceo/WordInk apps/desktop/packaging/aur by the release workflow, which
 # sets pkgver, the release manifest's linux-x64 and linux-arm64 file URLs, and
 # the checksums for each release.
 pkgname=wordink-bin
