@@ -243,6 +243,8 @@ const PATHS: &[(&str, &str)] = &[
     ("disabled", "Linux & Windows/Disabled"),
     ("capturing", "Linux & Windows/Recording a shortcut"),
     ("menus", "Linux & Windows/Microphone menu"),
+    ("microphone-bluetooth", "Linux & Windows/Bluetooth earbuds"),
+    ("microphone-rename", "Linux & Windows/Rename microphone"),
     ("chinese", "Linux & Windows/Chinese"),
     ("voice-filter", "Linux & Windows/Voice Filter"),
     (
