@@ -36,6 +36,14 @@ pub struct LocalTranscriber {
 /// 1.5 s of silence: what loading runs to warm a model and time it.
 const PREWARM_SAMPLES: usize = 24_000;
 
+/// 8 s of silence: about a typical dictation. The slow-GPU check times both
+/// devices on this, because a GPU's fixed cost per run (dispatch, transfers)
+/// dwarfs the 1.5 s warm-up run and the GPU wins on anything longer. On an
+/// Apple M1 Max (Asahi, Honeykrisp) the warm-up run alone read the GPU as
+/// slower than the CPU while every clip over a few seconds ran several times
+/// faster on it.
+const DECIDE_SAMPLES: usize = 8 * 16_000;
+
 /// An integrated GPU slower than this on a warm 1.5 s run (a fifth of real
 /// time) may lose to the CPU, so Auto times the CPU too (#484). Healthy
 /// GPUs run it in tens of milliseconds; the UHD 620 and Iris Plus 655 that
@@ -184,39 +192,8 @@ pub fn initialize_backends() {
     }
 }
 
-pub fn transcribe_wav_with_selection(
-    path: &Path,
-    selection: &TranscriptionSelection,
-) -> Result<String> {
-    let samples = read_wav_for_parakeet(path)?;
-    LocalTranscriber::load(selection)?.transcribe(&samples)
-}
-
 pub fn read_wav_for_parakeet(path: &Path) -> Result<Vec<f32>> {
-    let mut reader = hound::WavReader::open(path)
-        .wrap_err_with(|| format!("could not open {}", path.display()))?;
-    let spec = reader.spec();
-    let samples = match spec.sample_format {
-        hound::SampleFormat::Float => reader
-            .samples::<f32>()
-            .collect::<std::result::Result<Vec<_>, _>>()?,
-        hound::SampleFormat::Int if spec.bits_per_sample <= 16 => reader
-            .samples::<i16>()
-            .map(|sample| sample.map(|sample| sample as f32 / i16::MAX as f32))
-            .collect::<std::result::Result<Vec<_>, _>>()?,
-        hound::SampleFormat::Int => reader
-            .samples::<i32>()
-            .map(|sample| sample.map(|sample| sample as f32 / i32::MAX as f32))
-            .collect::<std::result::Result<Vec<_>, _>>()?,
-    };
-    let channels = usize::from(spec.channels);
-    let mono = samples
-        .chunks(channels)
-        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
-        .collect::<Vec<_>>();
-    let mut samples = crate::dictation::resample_for_parakeet(&mono, spec.sample_rate);
-    crate::dictation::pad_for_parakeet(&mut samples);
-    Ok(samples)
+    crate::transcription::compare::read_wav(path)
 }
 
 impl LocalTranscriber {
@@ -413,6 +390,12 @@ impl LocalTranscriber {
         self.transcribe(&samples)
     }
 
+    /// A warm 1.5 s run's time once loaded, in milliseconds: what Auto
+    /// reads to decide whether the CPU may be faster.
+    pub fn warm_ms(&self) -> u128 {
+        self.warm_ms
+    }
+
     pub fn device_label(&self) -> &str {
         &self.device_label
     }
@@ -465,11 +448,27 @@ impl LocalTranscriber {
                 .is_some_and(|gpu| gpu.device_type == transcribe_cpp::DeviceType::Igpu)
     }
 
+    /// The fastest of `runs` warm runs over `samples`, in milliseconds;
+    /// `None` when a run fails.
+    fn best_of(&mut self, samples: &[f32], runs: usize) -> Option<u128> {
+        let mut best: Option<u128> = None;
+        for _ in 0..runs {
+            let started = Instant::now();
+            self.transcribe(samples).ok()?;
+            let elapsed = started.elapsed().as_millis();
+            best = Some(best.map_or(elapsed, |best| best.min(elapsed)));
+        }
+        best
+    }
+
     /// This model, or the same one on the CPU when the CPU runs it faster;
     /// then the GPU is remembered as slow, so later loads go straight to the
-    /// CPU (#484).
-    fn or_faster_cpu(self) -> Self {
-        let cpu = match Self::load_on(&self.selection, Backend::Cpu, None, self.preference) {
+    /// CPU (#484). Both are timed on [`DECIDE_SAMPLES`], twice and the best
+    /// kept: one 1.5 s run, or one run while the machine was busy, is not
+    /// what a dictation costs, and the verdict lasts until the driver changes
+    /// or [`gpu_health::SLOW_TTL_SECS`] passes.
+    fn or_faster_cpu(mut self) -> Self {
+        let mut cpu = match Self::load_on(&self.selection, Backend::Cpu, None, self.preference) {
             Ok(cpu) => cpu,
             Err(error) => {
                 tracing::warn!(
@@ -479,21 +478,26 @@ impl LocalTranscriber {
                 return self;
             }
         };
+        let silence = vec![0.0; DECIDE_SAMPLES];
+        let (Some(gpu_ms), Some(cpu_ms)) = (self.best_of(&silence, 2), cpu.best_of(&silence, 2))
+        else {
+            tracing::warn!("could not time the model on both devices; keeping the GPU");
+            return self;
+        };
         tracing::info!(
-            gpu_ms = self.warm_ms,
-            cpu_ms = cpu.warm_ms,
-            "timed a warm 1.5 s run on the integrated GPU and the CPU"
+            gpu_warmup_ms = self.warm_ms,
+            cpu_warmup_ms = cpu.warm_ms,
+            gpu_ms,
+            cpu_ms,
+            "timed a warm 8 s run on the integrated GPU and the CPU"
         );
-        if cpu.warm_ms >= self.warm_ms {
+        if cpu_ms >= gpu_ms {
             return self;
         }
         if let Some(gpu) = &self.gpu {
             gpu_health::record_slow(
                 gpu,
-                &format!(
-                    "a warm 1.5 s run took {} ms on the GPU and {} ms on the CPU",
-                    self.warm_ms, cpu.warm_ms
-                ),
+                &format!("a warm 8 s run took {gpu_ms} ms on the GPU and {cpu_ms} ms on the CPU"),
             );
         }
         cpu
@@ -767,7 +771,10 @@ mod model_swap_tests {
     #[test]
     fn a_missing_model_points_to_settings_not_to_cargo() {
         let message = model_missing_message();
-        assert!(message.contains("Settings \u{203a} Speech model"), "{message}");
+        assert!(
+            message.contains("Settings \u{203a} Speech model"),
+            "{message}"
+        );
         assert!(message.contains("wordink model install"), "{message}");
         assert!(!message.contains("cargo"), "{message}");
     }

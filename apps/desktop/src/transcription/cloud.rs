@@ -4,11 +4,14 @@
 //! layer, for Groq (`whisper-large-v3-turbo`, the default), OpenAI, and the
 //! WordInk gateway; Deepgram's `/v1/listen`; and OpenRouter's audio models
 //! through chat completions. A dictation whose engine resolves here sends
-//! its 16 kHz clip as a mono WAV, never loads a local model, and records its
+//! its 16 kHz clip as mono FLAC (WAV where a provider's FLAC is not documented), never loads a local model, and records its
 //! usage and estimated cost (KTD5).
 
+pub mod audio;
 pub mod gateway;
 pub mod openrouter;
+
+pub use audio::{RequestStats, UploadFormat};
 
 use std::fs;
 use std::io::{Cursor, Write};
@@ -673,9 +676,15 @@ pub fn wav_bytes(samples: &[f32]) -> Vec<u8> {
 }
 
 /// A `multipart/form-data` body with `model`, optional `language`, and the
-/// WAV as `file`.
-pub fn multipart_body(boundary: &str, model: &str, language: Option<&str>, wav: &[u8]) -> Vec<u8> {
-    let mut body = Vec::with_capacity(wav.len() + 512);
+/// encoded clip as `file`.
+pub fn multipart_body(
+    boundary: &str,
+    model: &str,
+    language: Option<&str>,
+    format: UploadFormat,
+    audio: &[u8],
+) -> Vec<u8> {
+    let mut body = Vec::with_capacity(audio.len() + 512);
     let mut field = |name: &str, value: &str| {
         body.extend_from_slice(
             format!(
@@ -692,11 +701,13 @@ pub fn multipart_body(boundary: &str, model: &str, language: Option<&str>, wav: 
     }
     body.extend_from_slice(
         format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"dictation.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"dictation.{}\"\r\nContent-Type: {}\r\n\r\n",
+            format.extension(),
+            format.mime()
         )
         .as_bytes(),
     );
-    body.extend_from_slice(wav);
+    body.extend_from_slice(audio);
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
     body
 }
@@ -799,17 +810,28 @@ fn agent_for(endpoint: &str) -> ureq::Agent {
 }
 
 /// Transcribes `samples` at an OpenAI-style `/audio/transcriptions`
-/// `endpoint` (Groq, OpenAI, the gateway) with `key`.
+/// `endpoint` (Groq, OpenAI, the gateway) with `key`, the clip encoded as
+/// `format`.
 pub fn transcribe_at(
     endpoint: &str,
     key: &str,
     model: &str,
     language: Option<&str>,
     samples: &[f32],
-) -> Result<String, CloudError> {
+    format: UploadFormat,
+) -> Result<(String, RequestStats), CloudError> {
     check_size(samples)?;
     let boundary = format!("wordink-{:016x}", boundary_nonce());
-    let body = multipart_body(&boundary, model, language, &wav_bytes(samples));
+    let encoded = audio::encode(samples, format);
+    let body = multipart_body(&boundary, model, language, format, &encoded.bytes);
+    let stats = RequestStats {
+        format,
+        request_bytes: body.len(),
+        encode_ms: encoded.encode_ms,
+        send_ms: 0,
+        read_ms: 0,
+    };
+    let sending = Instant::now();
     let response = agent_for(endpoint)
         .post(endpoint)
         .header("Authorization", &format!("Bearer {key}"))
@@ -819,10 +841,17 @@ pub fn transcribe_at(
         )
         .send(&body[..])
         .map_err(map_error)?;
-    read_json(response)?
-        .get("text")
+    let send_ms = sending.elapsed().as_millis();
+    let reading = Instant::now();
+    let json = read_json(response)?;
+    let stats = RequestStats {
+        send_ms,
+        read_ms: reading.elapsed().as_millis(),
+        ..stats
+    };
+    json.get("text")
         .and_then(serde_json::Value::as_str)
-        .map(|text| text.trim().to_string())
+        .map(|text| (text.trim().to_string(), stats))
         .ok_or(CloudError::BadReply)
 }
 
@@ -847,19 +876,27 @@ pub fn transcribe_deepgram(
     model: &str,
     language: Option<&str>,
     samples: &[f32],
-) -> Result<String, CloudError> {
+) -> Result<(String, RequestStats), CloudError> {
     check_size(samples)?;
     let url = deepgram_url(endpoint, model, language);
+    let encoded = audio::encode(samples, UploadFormat::Wav);
+    let stats = RequestStats {
+        format: encoded.format,
+        request_bytes: encoded.bytes.len(),
+        encode_ms: encoded.encode_ms,
+        send_ms: 0,
+        read_ms: 0,
+    };
     let response = agent_for(&url)
         .post(&url)
         .header("Authorization", &format!("Token {key}"))
-        .header("Content-Type", "audio/wav")
-        .send(&wav_bytes(samples)[..])
+        .header("Content-Type", encoded.format.mime())
+        .send(&encoded.bytes[..])
         .map_err(map_error)?;
     read_json(response)?
         .pointer("/results/channels/0/alternatives/0/transcript")
         .and_then(serde_json::Value::as_str)
-        .map(|text| text.trim().to_string())
+        .map(|text| (text.trim().to_string(), stats))
         .ok_or(CloudError::BadReply)
 }
 
@@ -870,16 +907,27 @@ pub fn transcribe_openrouter(
     key: &str,
     model: &str,
     samples: &[f32],
-) -> Result<(String, openrouter::Tokens), CloudError> {
+    format: UploadFormat,
+) -> Result<(String, openrouter::Tokens, RequestStats), CloudError> {
     check_size(samples)?;
-    let body = openrouter::chat_body(model, &wav_bytes(samples)).to_string();
+    let encoded = audio::encode(samples, format);
+    let body = openrouter::chat_body(model, &encoded.bytes, format).to_string();
+    let stats = RequestStats {
+        format,
+        request_bytes: body.len(),
+        encode_ms: encoded.encode_ms,
+        send_ms: 0,
+        read_ms: 0,
+    };
     let response = agent_for(endpoint)
         .post(endpoint)
         .header("Authorization", &format!("Bearer {key}"))
         .header("Content-Type", "application/json")
         .send(body.as_bytes())
         .map_err(map_error)?;
-    openrouter::parse_reply(&read_json(response)?).ok_or(CloudError::BadReply)
+    openrouter::parse_reply(&read_json(response)?)
+        .map(|(text, tokens)| (text, tokens, stats))
+        .ok_or(CloudError::BadReply)
 }
 
 fn boundary_nonce() -> u64 {
@@ -920,37 +968,107 @@ impl<'a> Call<'a> {
     }
 }
 
-/// Makes `call` and returns the text and its cost (`None` when the model
-/// has no listed price).
-fn send(call: &Call<'_>, samples: &[f32]) -> Result<(String, Option<f64>), CloudError> {
+/// What one cloud transcription returned.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sent {
+    pub text: String,
+    /// `None` when the model has no listed price.
+    pub cost: Option<f64>,
+    pub stats: RequestStats,
+    /// Encoding and the round trip, as the caller waited.
+    pub total_ms: u128,
+}
+
+/// Whether a FLAC upload's refusal may be the format: a server that only
+/// reads WAV answers 400, 415 or 422. The clip is then sent once more as WAV.
+fn format_refused(error: &CloudError) -> bool {
+    matches!(error, CloudError::Rejected(400 | 415 | 422))
+}
+
+/// Makes `call` and returns the text, its cost, and what the request was.
+/// A FLAC upload the server refuses as a format is sent again as WAV.
+pub fn transcribe_call(call: &Call<'_>, samples: &[f32]) -> Result<Sent, CloudError> {
+    let format = call.provider.upload_format();
+    let started = Instant::now();
+    let first = send_as(call, samples, format);
+    let result = match first {
+        Err(error) if format == UploadFormat::Flac && format_refused(&error) => {
+            tracing::warn!(
+                provider = call.provider.id(),
+                "the server refused the FLAC upload; sending WAV"
+            );
+            send_as(call, samples, UploadFormat::Wav)
+        }
+        other => other,
+    };
+    let total_ms = started.elapsed().as_millis();
+    result.map(|(text, cost, stats)| {
+        tracing::info!(
+            provider = call.provider.id(),
+            model = call.model,
+            format = stats.format.extension(),
+            request_bytes = stats.request_bytes,
+            encode_ms = stats.encode_ms as u64,
+            send_ms = stats.send_ms as u64,
+            read_ms = stats.read_ms as u64,
+            total_ms = total_ms as u64,
+            "cloud transcription request"
+        );
+        Sent {
+            text,
+            cost,
+            stats,
+            total_ms,
+        }
+    })
+}
+
+type Priced = (String, Option<f64>, RequestStats);
+
+fn send_as(call: &Call<'_>, samples: &[f32], format: UploadFormat) -> Result<Priced, CloudError> {
     check_size(samples)?;
     let key = call
         .key
         .filter(|key| !key.is_empty())
         .ok_or(CloudError::NoKey)?;
     let audio_seconds = samples.len() as f64 / f64::from(SAMPLE_RATE);
-    let priced = |text| {
+    let priced = |(text, stats)| {
         (
             text,
             estimate_cost(call.provider.id(), call.model, audio_seconds),
+            stats,
         )
     };
     match call.provider {
-        Provider::Groq | Provider::OpenAi | Provider::Gateway => {
-            transcribe_at(call.endpoint, key, call.model, call.language, samples).map(priced)
-        }
+        Provider::Groq | Provider::OpenAi | Provider::Gateway => transcribe_at(
+            call.endpoint,
+            key,
+            call.model,
+            call.language,
+            samples,
+            format,
+        )
+        .map(priced),
         Provider::Deepgram => {
             transcribe_deepgram(call.endpoint, key, call.model, call.language, samples).map(priced)
         }
         Provider::OpenRouter => {
-            transcribe_openrouter(call.endpoint, key, call.model, samples).map(|(text, tokens)| {
-                (
-                    text,
-                    call.catalogue.map(|model| openrouter::cost(model, tokens)),
-                )
-            })
+            transcribe_openrouter(call.endpoint, key, call.model, samples, format).map(
+                |(text, tokens, stats)| {
+                    (
+                        text,
+                        call.catalogue.map(|model| openrouter::cost(model, tokens)),
+                        stats,
+                    )
+                },
+            )
         }
     }
+}
+
+/// Makes `call` and returns the text and its cost.
+fn send(call: &Call<'_>, samples: &[f32]) -> Result<(String, Option<f64>), CloudError> {
+    transcribe_call(call, samples).map(|sent| (sent.text, sent.cost))
 }
 
 /// Transcribes with `call` (tests point its endpoint at a mock), and on
@@ -1051,7 +1169,26 @@ pub fn run_with(
             return Err(error.message(provider));
         }
     };
-    let key = key_for_request(provider);
+    let resolving = Instant::now();
+    let (key, catalogue) = key_and_catalogue(provider, model);
+    tracing::info!(
+        provider = provider.id(),
+        key_ms = resolving.elapsed().as_millis() as u64,
+        "resolved the cloud key"
+    );
+    let mut call = Call::new(provider, &endpoint, model);
+    call.key = key.as_deref();
+    call.language = language;
+    call.catalogue = catalogue.as_ref();
+    run_at(&call, samples, keep)
+}
+
+/// The key for a request to `provider`, and OpenRouter's catalogue entry
+/// for `model` (its price).
+fn key_and_catalogue(
+    provider: Provider,
+    model: &str,
+) -> (Option<Arc<str>>, Option<openrouter::Model>) {
     let catalogue = (provider == Provider::OpenRouter)
         .then(|| {
             openrouter_models()
@@ -1059,11 +1196,32 @@ pub fn run_with(
                 .find(|entry| entry.id == model)
         })
         .flatten();
+    (key_for_request(provider), catalogue)
+}
+
+/// Whether `provider` has a key, resolving it now if nothing is cached. May
+/// wait on the keyring: for a worker or a one-shot command, never the hotkey
+/// thread.
+pub fn has_key_blocking(provider: Provider) -> bool {
+    key_for_request(provider).is_some()
+}
+
+/// One transcription at `provider` and `model` that keeps no clip and
+/// records no usage: Compare engines (a developer tool) uses it.
+pub fn transcribe_unkept(
+    provider: Provider,
+    model: &str,
+    gateway_url: Option<&str>,
+    samples: &[f32],
+    language: Option<&str>,
+) -> Result<Sent, String> {
+    let endpoint = endpoint_for(provider, gateway_url).map_err(|error| error.message(provider))?;
+    let (key, catalogue) = key_and_catalogue(provider, model);
     let mut call = Call::new(provider, &endpoint, model);
     call.key = key.as_deref();
     call.language = language;
     call.catalogue = catalogue.as_ref();
-    run_at(&call, samples, keep)
+    transcribe_call(&call, samples).map_err(|error| error.message(provider))
 }
 
 /// The gateway URL setting, as applied.
@@ -1245,6 +1403,14 @@ mod tests {
     /// A one-request HTTP server: answers `status` with `body` and sends the
     /// request it received (headers and body) back to the test.
     fn mock(status: u16, body: &'static str) -> (String, mpsc::Receiver<(String, Vec<u8>)>) {
+        mock_sequence(vec![(status, body)])
+    }
+
+    /// Like [`mock`], answering each request with the next of `replies` (the
+    /// last again, once they run out) and sending every request to the test.
+    fn mock_sequence(
+        replies: Vec<(u16, &'static str)>,
+    ) -> (String, mpsc::Receiver<(String, Vec<u8>)>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!(
             "http://{}/openai/v1/audio/transcriptions",
@@ -1252,29 +1418,33 @@ mod tests {
         );
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let mut head = String::new();
-            let mut length = 0;
-            loop {
-                let mut line = String::new();
-                reader.read_line(&mut line).unwrap();
-                if line == "\r\n" || line.is_empty() {
-                    break;
+            // More than one request: a refused FLAC upload comes again as WAV.
+            for (served, stream) in listener.incoming().enumerate() {
+                let (status, body) = replies[served.min(replies.len() - 1)];
+                let mut stream = stream.unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut head = String::new();
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse().unwrap();
+                    }
+                    head.push_str(&line);
                 }
-                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                    length = value.trim().parse().unwrap();
-                }
-                head.push_str(&line);
+                let mut request = vec![0; length];
+                reader.read_exact(&mut request).unwrap();
+                let reply = format!(
+                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(reply.as_bytes()).unwrap();
+                let _ = sender.send((head, request));
             }
-            let mut request = vec![0; length];
-            reader.read_exact(&mut request).unwrap();
-            let reply = format!(
-                "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            stream.write_all(reply.as_bytes()).unwrap();
-            let _ = sender.send((head, request));
         });
         (url, receiver)
     }
@@ -1313,9 +1483,19 @@ mod tests {
     #[test]
     fn the_request_is_multipart_with_the_model_and_a_16khz_mono_wav_file() {
         let (url, received) = mock(200, r#"{"text":" hello world "}"#);
-        let text = transcribe_at(&url, "k-123", "whisper-large-v3-turbo", None, &speech()).unwrap();
+        let (text, stats) = transcribe_at(
+            &url,
+            "k-123",
+            "whisper-large-v3-turbo",
+            None,
+            &speech(),
+            UploadFormat::Wav,
+        )
+        .unwrap();
         assert_eq!(text, "hello world");
+        assert_eq!(stats.format, UploadFormat::Wav);
         let (head, body) = received.recv().unwrap();
+        assert_eq!(stats.request_bytes, body.len());
         let head = head.to_ascii_lowercase();
         assert!(head.contains("authorization: bearer k-123"));
         assert!(head.contains("content-type: multipart/form-data; boundary="));
@@ -1335,11 +1515,130 @@ mod tests {
         assert!(reader.duration() >= 32_000 - 1);
     }
 
+    /// The file part of a multipart body: the bytes between its blank line
+    /// and the closing boundary.
+    fn file_part(body: &[u8]) -> &[u8] {
+        let find = |haystack: &[u8], needle: &[u8]| {
+            haystack
+                .windows(needle.len())
+                .position(|window| window == needle)
+                .unwrap()
+        };
+        let at = find(body, b"name=\"file\"");
+        let start = at + find(&body[at..], b"\r\n\r\n") + 4;
+        let closing = body[start..]
+            .windows(4)
+            .rposition(|window| window == b"\r\n--")
+            .unwrap();
+        &body[start..start + closing]
+    }
+
+    fn decode_flac(bytes: &[u8]) -> Vec<i32> {
+        claxon::FlacReader::new(bytes)
+            .unwrap()
+            .samples()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn groq_gets_the_clip_as_flac_that_decodes_to_the_samples_a_wav_would_carry() {
+        let (url, received) = mock(200, r#"{"text":"hi"}"#);
+        let samples = speech();
+        let mut call = Call::new(Provider::Groq, &url, "whisper-large-v3-turbo");
+        call.key = Some("k");
+        let sent = transcribe_call(&call, &samples).unwrap();
+        assert_eq!(sent.text, "hi");
+        assert_eq!(sent.stats.format, UploadFormat::Flac);
+        let (_, body) = received.recv().unwrap();
+        assert_eq!(sent.stats.request_bytes, body.len());
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("filename=\"dictation.flac\""));
+        assert!(text.contains("Content-Type: audio/flac"));
+        assert!(!text.contains("RIFF"));
+        let wav = wav_bytes(&samples);
+        let from_wav: Vec<i32> = hound::WavReader::new(Cursor::new(&wav))
+            .unwrap()
+            .samples::<i16>()
+            .map(|sample| i32::from(sample.unwrap()))
+            .collect();
+        assert_eq!(decode_flac(file_part(&body)), from_wav);
+        // The request is smaller than the WAV's would be.
+        assert!(
+            body.len() < wav.len() / 2,
+            "{} against {}",
+            body.len(),
+            wav.len()
+        );
+    }
+
+    #[test]
+    fn a_server_that_refuses_flac_gets_the_wav_once() {
+        let (url, received) = mock_sequence(vec![(415, "{}"), (200, r#"{"text":"ok"}"#)]);
+        let mut call = Call::new(Provider::Gateway, &url, "gateway");
+        call.key = Some("t");
+        let sent = transcribe_call(&call, &speech()).unwrap();
+        assert_eq!(sent.text, "ok");
+        assert_eq!(sent.stats.format, UploadFormat::Wav);
+        let (_, first) = received.recv().unwrap();
+        let (_, second) = received.recv().unwrap();
+        assert!(String::from_utf8_lossy(&first).contains("dictation.flac"));
+        assert!(String::from_utf8_lossy(&second).contains("dictation.wav"));
+        assert!(received.try_recv().is_err(), "no third request");
+    }
+
+    #[test]
+    fn a_refusal_that_is_not_about_the_format_is_not_sent_again() {
+        let (url, received) = mock_sequence(vec![(401, "{}"), (200, r#"{"text":"ok"}"#)]);
+        let mut call = Call::new(Provider::Groq, &url, "whisper-large-v3-turbo");
+        call.key = Some("bad");
+        assert_eq!(
+            transcribe_call(&call, &speech()).unwrap_err(),
+            CloudError::KeyRejected
+        );
+        received.recv().unwrap();
+        assert!(received.try_recv().is_err());
+        assert!(format_refused(&CloudError::Rejected(400)));
+        assert!(format_refused(&CloudError::Rejected(422)));
+        assert!(!format_refused(&CloudError::Rejected(413)));
+        assert!(!format_refused(&CloudError::RateLimited));
+    }
+
+    #[test]
+    fn openrouter_chat_audio_carries_flac() {
+        let reply = r#"{"choices":[{"message":{"content":"hi"}}]}"#;
+        let (url, received) = mock(200, reply);
+        let (_, _, stats) = transcribe_openrouter(
+            &url,
+            "k",
+            "google/gemini-2.5-flash",
+            &speech(),
+            UploadFormat::Flac,
+        )
+        .unwrap();
+        let (_, body) = received.recv().unwrap();
+        let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let audio = &request["messages"][0]["content"][1]["input_audio"];
+        assert_eq!(audio["format"], "flac");
+        // "fLaC" in base64.
+        assert!(audio["data"].as_str().unwrap().starts_with("ZkxhQ"));
+        assert_eq!(stats.request_bytes, body.len());
+        assert_eq!(stats.format, UploadFormat::Flac);
+    }
+
     #[test]
     fn a_language_hint_is_sent_only_when_given() {
-        let body = String::from_utf8(multipart_body("b", "m", Some("fr"), b"x")).unwrap();
+        let body = String::from_utf8(multipart_body(
+            "b",
+            "m",
+            Some("fr"),
+            UploadFormat::Wav,
+            b"x",
+        ))
+        .unwrap();
         assert!(body.contains("name=\"language\"\r\n\r\nfr"));
-        let body = String::from_utf8(multipart_body("b", "m", None, b"x")).unwrap();
+        let body =
+            String::from_utf8(multipart_body("b", "m", None, UploadFormat::Wav, b"x")).unwrap();
         assert!(!body.contains("language"));
     }
 
@@ -1352,7 +1651,8 @@ mod tests {
             (503, "Groq is unavailable"),
         ] {
             let (url, _received) = mock(status, "{}");
-            let error = transcribe_at(&url, "k", "m", None, &speech()).unwrap_err();
+            let error =
+                transcribe_at(&url, "k", "m", None, &speech(), UploadFormat::Wav).unwrap_err();
             assert_eq!(error.message(Provider::Groq), expected, "HTTP {status}");
         }
     }
@@ -1365,7 +1665,7 @@ mod tests {
             .unwrap()
             .port();
         let url = format!("http://127.0.0.1:{port}/x");
-        let error = transcribe_at(&url, "k", "m", None, &speech()).unwrap_err();
+        let error = transcribe_at(&url, "k", "m", None, &speech(), UploadFormat::Wav).unwrap_err();
         assert_eq!(error.message(Provider::Groq), "can't reach Groq");
     }
 
@@ -1705,8 +2005,14 @@ mod tests {
         let reply = r#"{"choices":[{"message":{"content":" hello there "}}],"usage":{"prompt_tokens":120,"completion_tokens":3,"prompt_tokens_details":{"audio_tokens":100}}}"#;
         let (url, received) = mock(200, reply);
         let samples = speech();
-        let (text, tokens) =
-            transcribe_openrouter(&url, "or-key", "google/gemini-2.5-flash", &samples).unwrap();
+        let (text, tokens, _) = transcribe_openrouter(
+            &url,
+            "or-key",
+            "google/gemini-2.5-flash",
+            &samples,
+            UploadFormat::Wav,
+        )
+        .unwrap();
         assert_eq!(text, "hello there");
         assert_eq!(
             tokens,
@@ -1847,7 +2153,8 @@ mod tests {
             let body = String::from_utf8_lossy(&body);
             assert!(body.contains(&format!("name=\"model\"\r\n\r\n{model}")));
             assert!(body.contains("name=\"language\"\r\n\r\nen"));
-            assert!(body.contains("filename=\"dictation.wav\""));
+            assert!(body.contains("filename=\"dictation.flac\""));
+            assert!(body.contains("Content-Type: audio/flac"));
         }
     }
 

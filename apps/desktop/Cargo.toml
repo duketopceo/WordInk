@@ -135,6 +135,10 @@ rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "f5
 # The welcome hero's own GPU pass (`rune_ui::hero`); Rune's version.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
 
+[dev-dependencies]
+# Decodes the FLAC the cloud upload encoder writes, to prove it lossless.
+claxon = "0.4.3"
+
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dev-dependencies]
 png = "0.18"
 

@@ -163,6 +163,12 @@ pub enum ControlCli {
         #[command(subcommand)]
         command: CaptureCommand,
     },
+    /// Developer tool: run one WAV through several engines and show their
+    /// texts side by side with a word diff, latency, real-time factor,
+    /// request size and cost; `--report` ranks every logged run. Rows go to
+    /// compare.jsonl in the logs folder. Spends real money on cloud engines.
+    #[command(hide = true)]
+    Compare(CompareArgs),
     /// Print a plain-text summary for a bug report: version, channel, OS,
     /// architecture, engine, install method and recent errors. Never audio,
     /// transcripts, file paths or keys; nothing is sent anywhere, and Hex
@@ -181,6 +187,58 @@ pub enum ControlCli {
         #[arg(short, long)]
         follow: bool,
     },
+}
+
+/// `wordink compare`.
+#[derive(Args, Debug)]
+pub struct CompareArgs {
+    /// A WAV file; it is resampled to 16 kHz mono. Not used with --report.
+    pub wav: Option<std::path::PathBuf>,
+    /// Comma-separated engines as provider:model, such as
+    /// groq:whisper-large-v3-turbo,openrouter:microsoft/mai-transcribe-2,local:parakeet-v3.
+    /// Default: every cloud engine with a key at its default model, and the
+    /// selected local model when installed.
+    #[arg(long)]
+    pub engines: Option<String>,
+    /// A text file with the true transcript: rows get a word error rate
+    /// against it, and --report ranks by it.
+    #[arg(long)]
+    pub reference: Option<std::path::PathBuf>,
+    /// Rank the rows already in compare.jsonl instead of running anything.
+    #[arg(long)]
+    pub report: bool,
+    /// With --report: only the runs of this clip id (printed by a run).
+    #[arg(long, requires = "report")]
+    pub clip: Option<String>,
+    /// The speech language to tell the engines (default: the setting).
+    #[arg(long)]
+    pub language: Option<String>,
+    /// Where local engines run: auto, gpu or cpu (default: Settings › Speech engine).
+    #[arg(long, value_enum)]
+    pub device: Option<DeviceArg>,
+    /// Do not append this run to compare.jsonl.
+    #[arg(long)]
+    pub no_log: bool,
+    #[command(flatten)]
+    pub output: Output,
+}
+
+/// Where a local engine runs.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub enum DeviceArg {
+    Auto,
+    Gpu,
+    Cpu,
+}
+
+impl From<DeviceArg> for crate::app_settings::TranscriptionDevice {
+    fn from(device: DeviceArg) -> Self {
+        match device {
+            DeviceArg::Auto => Self::Auto,
+            DeviceArg::Gpu => Self::Gpu,
+            DeviceArg::Cpu => Self::Cpu,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -284,6 +342,10 @@ pub enum ModelCommand {
         model: Option<String>,
         #[arg(long)]
         language: Option<String>,
+        /// Where the model runs: auto, gpu or cpu (default: Settings › Speech engine). Prints the
+        /// device, load time, run time and real-time factor on stderr.
+        #[arg(long, value_enum)]
+        device: Option<DeviceArg>,
     },
     /// Copy a GGUF speech model into Hex after checking its header,
     /// and print its id. The original is left as it is.
@@ -527,6 +589,7 @@ pub fn run(command: ControlCli) -> u8 {
             }
             VocabularyCommand::Suggest { output } => suggest_vocabulary(output),
         },
+        ControlCli::Compare(args) => report(compare(args)),
         ControlCli::Diagnostics => diagnostics(),
         ControlCli::Logs {
             process,
@@ -647,13 +710,26 @@ fn offline_model(command: ModelCommand) -> u8 {
             wav,
             model,
             language,
+            device,
         } => {
-            println!(
-                "{}",
-                crate::transcription::local_transcriber::transcribe_wav_with_selection(
-                    &wav,
-                    &selection(model, language)?
-                )?
+            use crate::transcription::local_transcriber as local;
+            let settings = crate::app_settings::AppSettings::read().unwrap_or_default();
+            local::set_device(device.map_or(settings.transcription_device, Into::into));
+            let selection = selection(model, language)?;
+            let samples = local::read_wav_for_parakeet(&wav)?;
+            let loading = std::time::Instant::now();
+            let mut transcriber = local::LocalTranscriber::load(&selection)?;
+            let load_ms = loading.elapsed().as_millis();
+            let running = std::time::Instant::now();
+            let text = transcriber.transcribe(&samples)?;
+            let run_ms = running.elapsed().as_millis();
+            println!("{text}");
+            eprintln!(
+                "device={} load_ms={load_ms} warm_ms={} run_ms={run_ms} audio_s={:.2} rtf={:.3}",
+                transcriber.device_label(),
+                transcriber.warm_ms(),
+                samples.len() as f64 / 16_000.0,
+                run_ms as f64 / 1000.0 / (samples.len() as f64 / 16_000.0)
             );
             Ok(())
         }
@@ -671,6 +747,88 @@ fn offline_model(_: ModelCommand) -> u8 {
         ),
         Output::default(),
     )
+}
+
+/// `wordink compare`: runs here, never in the running app.
+fn compare(args: CompareArgs) -> color_eyre::Result<()> {
+    use crate::transcription::compare;
+    let log = compare::log_path();
+    let reference = args
+        .reference
+        .as_deref()
+        .map(std::fs::read_to_string)
+        .transpose()
+        .map_err(|error| color_eyre::eyre::eyre!("could not read the reference: {error}"))?;
+    if args.report {
+        let path = log.ok_or_else(|| color_eyre::eyre::eyre!("no logs folder"))?;
+        let rows = compare::read(&path).map_err(|error| {
+            color_eyre::eyre::eyre!("no comparison log at {}: {error}", path.display())
+        })?;
+        let ranked = compare::rank(&rows, reference.as_deref(), args.clip.as_deref());
+        if args.output.json {
+            println!("{}", compare::ranking_json(&ranked));
+        } else {
+            print!("{}", compare::report_text(&ranked));
+        }
+        return Ok(());
+    }
+    let wav = args
+        .wav
+        .as_deref()
+        .ok_or_else(|| color_eyre::eyre::eyre!("give a WAV file, or --report"))?;
+    let samples = compare::read_wav(wav)?;
+    let specs = match &args.engines {
+        Some(list) => {
+            compare::EngineSpec::parse_list(list).map_err(|error| color_eyre::eyre::eyre!(error))?
+        }
+        None => compare::default_specs(),
+    };
+    // Gateway URL and engine as the settings have them, as the app applies them.
+    let settings = crate::app_settings::AppSettings::read().unwrap_or_default();
+    crate::transcription::cloud::set_engine(
+        settings.engine,
+        settings.engine_model.as_deref(),
+        settings.gateway_url.as_deref(),
+    );
+    #[cfg(not(target_os = "macos"))]
+    crate::transcription::local_transcriber::set_device(
+        args.device
+            .map_or(settings.transcription_device, Into::into),
+    );
+    #[cfg(target_os = "macos")]
+    let _ = args.device;
+    let rows = compare::run_specs(
+        &specs,
+        &samples,
+        reference.as_deref(),
+        args.language.as_deref(),
+    );
+    if args.output.json {
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+    } else {
+        let width = std::env::var("COLUMNS")
+            .ok()
+            .and_then(|columns| columns.parse().ok())
+            .unwrap_or(160);
+        println!(
+            "clip {} ({:.1} s of audio)\n",
+            rows.first().map_or("", |row| row.clip.as_str()),
+            samples.len() as f64 / 16_000.0
+        );
+        print!(
+            "{}",
+            compare::comparison_text(&rows, reference.as_deref(), width)
+        );
+    }
+    if !args.no_log
+        && let Some(path) = compare::log_path()
+    {
+        match compare::append(&path, &rows) {
+            Ok(()) => eprintln!("appended {} rows to {}", rows.len(), path.display()),
+            Err(error) => eprintln!("wordink: could not write {}: {error}", path.display()),
+        }
+    }
+    Ok(())
 }
 
 /// The exit code of a command that runs here rather than in Hex.

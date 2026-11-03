@@ -137,7 +137,7 @@ pub fn bundled() -> Vec<Model> {
 
 /// The chat completion body: the fixed instruction and the clip as base64
 /// WAV in an `input_audio` part.
-pub fn chat_body(model: &str, wav: &[u8]) -> Value {
+pub fn chat_body(model: &str, audio: &[u8], format: super::UploadFormat) -> Value {
     json!({
         "model": model,
         "temperature": 0,
@@ -145,7 +145,7 @@ pub fn chat_body(model: &str, wav: &[u8]) -> Value {
             "role": "user",
             "content": [
                 { "type": "text", "text": INSTRUCTION },
-                { "type": "input_audio", "input_audio": { "data": base64(wav), "format": "wav" } },
+                { "type": "input_audio", "input_audio": { "data": base64(audio), "format": format.extension() } },
             ],
         }],
     })
