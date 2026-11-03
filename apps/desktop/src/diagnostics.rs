@@ -180,20 +180,30 @@ pub fn scrub(message: &str, redactions: &Redactions) -> String {
 }
 
 fn replace_ignoring_case(haystack: &str, needle: &str, with: &str) -> String {
-    let (lower, needle) = (haystack.to_lowercase(), needle.to_lowercase());
-    // Lowercasing can change byte lengths for some scripts; fall back to an
-    // exact replace then.
-    if lower.len() != haystack.len() {
-        return haystack.replace(needle.as_str(), with);
+    // Compare by lowercased characters, so scripts whose lowercase form has a
+    // different byte length (Turkish İ, for one) are still matched in any case.
+    let target: Vec<char> = needle.chars().flat_map(char::to_lowercase).collect();
+    if target.is_empty() {
+        return haystack.to_owned();
     }
+    let chars: Vec<char> = haystack.chars().collect();
     let mut out = String::with_capacity(haystack.len());
-    let mut rest = 0;
-    while let Some(found) = lower[rest..].find(&needle) {
-        out.push_str(&haystack[rest..rest + found]);
-        out.push_str(with);
-        rest += found + needle.len();
+    let mut i = 0;
+    while i < chars.len() {
+        let mut lowered: Vec<char> = Vec::with_capacity(target.len());
+        let mut j = i;
+        while j < chars.len() && lowered.len() < target.len() {
+            lowered.extend(chars[j].to_lowercase());
+            j += 1;
+        }
+        if lowered == target {
+            out.push_str(with);
+            i = j;
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
     }
-    out.push_str(&haystack[rest..]);
     out
 }
 
@@ -366,6 +376,20 @@ mod tests {
         }
         assert!(scrub("microphone busy", &redactions()) == "microphone busy");
         assert!(scrub(&"x ".repeat(300), &redactions()).chars().count() <= MAX_MESSAGE_CHARS + 3);
+    }
+
+    #[test]
+    fn names_are_scrubbed_in_any_case_even_when_lowercasing_changes_length() {
+        let scrubbed = replace_ignoring_case("İ: émile ÉMILE Émile done", "Émile", "<user>");
+        assert_eq!(scrubbed, "İ: <user> <user> <user> done");
+        assert_eq!(
+            replace_ignoring_case("kit KIT Kit", "kit", "<user>"),
+            "<user> <user> <user>"
+        );
+        assert_eq!(
+            replace_ignoring_case("unchanged", "", "<user>"),
+            "unchanged"
+        );
     }
 
     #[test]
