@@ -34,15 +34,25 @@ entitlements="$root/packaging/macos/wordink.entitlements"
 # Every build carries the `capture` experiment (dormant until enabled), with
 # Scrawl's `scrawl-helper` beside `wordink`, where the engine looks for it.
 # crates/capture/build.rs compiles the helper from crates/capture/helper into
-# target/release.
-icon_output="$root/target/AppIcon.assets"
-icon_info="$root/target/AppIcon-info.plist"
+# <target dir>/release.
+# Where cargo puts its output: CARGO_TARGET_DIR, else the workspace target.
+if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+  case "$CARGO_TARGET_DIR" in
+    /*) target_dir=$CARGO_TARGET_DIR ;;
+    *) target_dir=$PWD/$CARGO_TARGET_DIR ;;
+  esac
+else
+  target_dir=$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" | jq -r .target_directory)
+fi
+[ -n "$target_dir" ] && [ "$target_dir" != null ] || { echo "Could not find cargo's target directory." >&2; exit 1; }
+icon_output="$target_dir/AppIcon.assets"
+icon_info="$target_dir/AppIcon-info.plist"
 version=$(hex_version "$root")
 build_number=$(hex_build_number "$version")
 bundle_name="$app_name.app"
 executable_name=wordink
 
-bundle="$root/target/app/$bundle_name"
+bundle="$target_dir/app/$bundle_name"
 executable="$bundle/Contents/MacOS/$executable_name"
 
 sign() {
@@ -73,8 +83,8 @@ SCRAWL_HELPER_PLIST="$root/packaging/macos/scrawl-helper-Info.plist" \
   cargo build --locked --release ${env_args[@]+"${env_args[@]}"} --manifest-path "$root/Cargo.toml"
 rm -rf "$bundle"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources" "$bundle/Contents/Library"
-cp "$root/target/release/wordink" "$executable"
-cp "$root/target/release/scrawl-helper" "$bundle/Contents/MacOS/scrawl-helper"
+cp "$target_dir/release/wordink" "$executable"
+cp "$target_dir/release/scrawl-helper" "$bundle/Contents/MacOS/scrawl-helper"
 cp "$root/app/Info.plist" "$bundle/Contents/Info.plist"
 cp "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.md" "$bundle/Contents/Resources/"
 HEX_VERSION="$version" HEX_BUILD_NUMBER="$build_number" HEX_TEAM_ID="$team_id" HEX_CODESIGN_IDENTITY="${identity#-}" HEX_SKIP_INSTALL_SCRIPT=1 \
