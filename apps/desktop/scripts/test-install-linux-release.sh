@@ -629,6 +629,42 @@ check "it installed the rc for this CPU" [ "$(installed_version)" = versions/1.0
 check "the service runs it" runs_binary "$support/versions/1.0.0-rc.1/wordink"
 check "output is at most five lines" line_count_at_most "$temporary/out" 5
 
+echo "scenario: an upgrade whose new version does not start"
+reset
+publish 1.0.0
+run_bootstrap
+cp "$units/wordink.service" "$temporary/unit.before"
+publish 1.1.0 bad
+run_bootstrap
+check "a failed upgrade exits non-zero" status_not 0
+check "it says the previous version is back" contains "$temporary/out" "WordInk 1.0.0 is back"
+check "current points at the previous version again" [ "$(installed_version)" = versions/1.0.0 ]
+check "the failed version is removed" absent "$support/versions/1.1.0"
+check "the service is running the previous version" runs_binary "$support/versions/1.0.0/wordink"
+check "the service is active" [ -e "$sysd/active" ]
+check "the unit is restored" cmp "$units/wordink.service" "$temporary/unit.before"
+check "the receipt is still there" [ -f "$support/install.json" ]
+publish 1.1.0
+run_bootstrap
+check "a good 1.1.0 then upgrades normally" [ "$(installed_version)" = versions/1.1.0 ]
+
+echo "scenario: version ordering"
+sed -n '/^version_ge() {/,/^}/p' "$root/packaging/linux/install-release.sh" > "$temporary/version_ge.sh"
+ordered() { # <a> <b> <ge|lt>
+  # shellcheck disable=SC1091
+  . "$temporary/version_ge.sh"
+  if version_ge "$1" "$2"; then got=ge; else got=lt; fi
+  [ "$got" = "$3" ]
+}
+for row in "1.0.0 1.0.0-rc.1 ge" "1.0.0-rc.1 1.0.0 lt" "1.0.0-rc.10 1.0.0-rc.9 ge" "1.0.0-rc.9 1.0.0-rc.10 lt" \
+  "1.0.10 1.0.9 ge" "1.0.9 1.0.10 lt" "1.10.0 1.9.0 ge" "1.9.0 1.10.0 lt" "01.0.0 1.0.0 ge" "1.0.0 01.0.0 ge" \
+  "1.0.0 1.0.0 ge" "1.0.0-rc.1 1.0.0-rc.1 ge" "1.0.0-beta 1.0.0-alpha ge" "1.0.0-alpha 1.0.0-alpha.1 lt" \
+  "1.0.0-alpha.1 1.0.0-alpha.beta lt" "1.0.0+build.5 1.0.0 ge" "1.0 1.0.0 ge" "1.0.0 1.0.1 lt" "2.0.0 1.99.99 ge"; do
+  # shellcheck disable=SC2086 # a row is three words
+  set -- $row
+  check "version_ge $1 $2 is $3" ordered "$1" "$2" "$3"
+done
+
 echo "scenario: tarball installer on its own"
 reset
 publish 1.0.0

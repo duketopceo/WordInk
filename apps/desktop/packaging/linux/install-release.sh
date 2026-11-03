@@ -43,6 +43,7 @@ app_id=io.github.duketopceo.wordink
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 temporary=
 migrating=0
+upgrading=0
 committed=0
 backup_unit=
 created_receipt=0
@@ -56,13 +57,19 @@ fail() {
 }
 
 restore_migration() {
-  # Put the source build back exactly as it was: directory, unit, entry, service.
-  rm -f "${support:?}/current" "${support:?}/.current.next"
-  if [ "$created_receipt" = 1 ]; then rm -f "${support:?}/install.json"; fi
-  if [ -n "$created_version_dir" ]; then rm -rf "${created_version_dir:?}"; fi
-  if [ -d "$support/current.source-bak" ] && [ ! -e "$support/current" ]; then
-    mv "$support/current.source-bak" "$support/current"
+  # Put the previous install back exactly as it was: the source build's
+  # directory, or the previous version's symlink, plus unit, entry, service.
+  if [ "$upgrading" = 1 ]; then
+    ln -sfn "versions/$installed" "${support:?}/.current.next"
+    mv -Tf "$support/.current.next" "$support/current"
+  else
+    rm -f "${support:?}/current" "${support:?}/.current.next"
+    if [ "$created_receipt" = 1 ]; then rm -f "${support:?}/install.json"; fi
+    if [ -d "$support/current.source-bak" ] && [ ! -e "$support/current" ]; then
+      mv "$support/current.source-bak" "$support/current"
+    fi
   fi
+  if [ -n "$created_version_dir" ]; then rm -rf "${created_version_dir:?}"; fi
   if [ -n "$backup_unit" ] && [ -f "$backup_unit/wordink.service" ]; then
     cp -p "$backup_unit/wordink.service" "$units/wordink.service"
   fi
@@ -79,7 +86,7 @@ restore_migration() {
 
 cleanup() {
   status=$?
-  if [ "$migrating" = 1 ] && [ "$committed" = 0 ] && [ "$status" -ne 0 ]; then
+  if { [ "$migrating" = 1 ] || [ "$upgrading" = 1 ]; } && [ "$committed" = 0 ] && [ "$status" -ne 0 ]; then
     restore_migration
   fi
   if [ -n "$temporary" ]; then rm -rf "${temporary:?}"; fi
@@ -389,13 +396,20 @@ chmod 700 "$support" "$support/versions"
 if [ ! -e "$support/versions/$version" ]; then created_version_dir="$support/versions/$version"; fi
 if [ ! -e "$support/install.json" ]; then created_receipt=1; fi
 
-if [ "$state" = directory ]; then
-  migrating=1
+# Another version already installed (an upgrade, or --force over an older
+# one) can be switched back to if the new one does not start.
+if [ "$state" = release ] && [ "$installed" != "$version" ] && [ -x "$support/versions/$installed/wordink" ]; then
+  upgrading=1
+fi
+if [ "$state" = directory ] || [ "$upgrading" = 1 ]; then
   backup_unit="$temporary/backup"
   mkdir -p "$backup_unit"
   if [ -f "$units/wordink.service" ]; then cp -p "$units/wordink.service" "$backup_unit/"; fi
   if [ -f "$applications/$app_id.desktop" ]; then cp -p "$applications/$app_id.desktop" "$backup_unit/"; fi
   if service_active; then service_was_active=1; fi
+fi
+if [ "$state" = directory ]; then
+  migrating=1
   if command -v systemctl >/dev/null 2>&1; then
     systemctl --user stop wordink.service >/dev/null 2>&1 || true
   fi
@@ -441,9 +455,10 @@ if have_bus; then
   done
 fi
 
-if [ "$migrating" = 1 ] && [ "$bus" = 1 ] && [ "$running" = 0 ]; then
-  # Exits non-zero: the cleanup trap restores the source build and its service.
-  fail "The release build did not start; your source build was restored."
+if [ "$bus" = 1 ] && [ "$running" = 0 ]; then
+  # Exits non-zero: the cleanup trap restores the previous install and its service.
+  if [ "$migrating" = 1 ]; then fail "The release build did not start; your source build was restored."; fi
+  if [ "$upgrading" = 1 ]; then fail "WordInk $version did not start; WordInk $installed is back."; fi
 fi
 
 if [ "$migrating" = 1 ]; then
@@ -452,11 +467,11 @@ else
   printf 'WordInk %s installed.\n' "$version"
 fi
 echo "It checks the stable release for updates and verifies each one's signature."
+committed=1
 if [ "$migrating" = 1 ]; then
   # The backup goes only once the service is confirmed active; with no user
   # bus it stays, and the next run removes it.
   if [ "$running" = 1 ]; then rm -rf "${support:?}/current.source-bak"; fi
-  committed=1
 fi
 # The one hint when the bin directory is not on PATH.
 case ":$PATH:" in
