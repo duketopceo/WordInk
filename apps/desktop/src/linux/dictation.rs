@@ -322,6 +322,10 @@ pub(crate) fn run(
     // When the press that is waiting on the microphone began, for latency.
     let mut press_at: Option<Instant> = None;
     let mut headset_began: Option<Instant> = None;
+    // When the capture route was confirmed for the press now waiting for its
+    // first audio, and whether that stream was already reopened once.
+    let mut route_confirmed_at: Option<Instant> = None;
+    let mut reopened_for_audio = false;
     let paste_with_shift = crate::terminal_paste::share(settings.terminal_paste);
     let worker_paste_with_shift = paste_with_shift.clone();
     let paste_keys = hotkey_status.keys();
@@ -698,6 +702,8 @@ pub(crate) fn run(
                 HotkeyEvent::Start { raw } if !capture.is_recording() && !start_pending => {
                     recording_raw = raw;
                     press_at = Some(Instant::now());
+                    route_confirmed_at = None;
+                    reopened_for_audio = false;
                     crate::debug_log::dlog!(
                         Info,
                         "hotkeys.start",
@@ -764,16 +770,25 @@ pub(crate) fn run(
                     } else {
                         // Released before the microphone was ready: say so,
                         // since the words were lost to the switch.
-                        raise_failure(
-                            &Failure::ReleasedEarly {
-                                device: settings.microphone.as_deref().map_or_else(
-                                    || device_label.clone(),
-                                    |id| released_name(&settings, id),
-                                ),
-                            },
-                            &events,
-                            Some(&mut indicator),
-                        )?;
+                        let device = settings.microphone.as_deref().map_or_else(
+                            || device_label.clone(),
+                            |id| released_name(&settings, id),
+                        );
+                        let failure = release_blame(
+                            device,
+                            press_at.map(|at| at.elapsed()),
+                            route_confirmed_at.map(|at| at.elapsed()),
+                        );
+                        crate::debug_log::dlog!(
+                            Info,
+                            "hotkeys.release_blame",
+                            "released with no audio yet",
+                            code = failure.code(),
+                            held_ms = press_at.map(|at| at.elapsed().as_millis() as u64),
+                            since_confirm_ms =
+                                route_confirmed_at.map(|at| at.elapsed().as_millis() as u64),
+                        );
+                        raise_failure(&failure, &events, Some(&mut indicator))?;
                     }
                     emit_state(&mut events, active_state(false, pending), &device_label)?;
                 }
@@ -923,6 +938,54 @@ pub(crate) fn run(
                 }
             }
         }
+        // The route was confirmed but no audio came: reopen the stream once,
+        // then fail as no audio rather than blame the user.
+        if start_pending
+            && !audio_ready
+            && let Some(confirmed) = route_confirmed_at
+        {
+            match no_audio_step(confirmed.elapsed(), reopened_for_audio) {
+                NoAudioStep::Wait => {}
+                NoAudioStep::Reopen => {
+                    crate::debug_log::dlog!(
+                        Info,
+                        "audio.reopen",
+                        "no audio after the route was confirmed; reopening the stream",
+                        reason = "no_audio_after_confirm",
+                        since_confirm_ms = confirmed.elapsed().as_millis() as u64,
+                        since_press_ms = press_at.map(|at| at.elapsed().as_millis() as u64),
+                    );
+                    reopened_for_audio = true;
+                    route_confirmed_at = None;
+                    // The HUD keeps saying the earbuds are connecting.
+                    input.close();
+                    input.request_open();
+                }
+                NoAudioStep::Fail => {
+                    let device = settings
+                        .microphone
+                        .as_deref()
+                        .map_or_else(|| device_label.clone(), |id| released_name(&settings, id));
+                    start_pending = false;
+                    route_confirmed_at = None;
+                    indicator.earbuds_connecting(false);
+                    resume_audio(&suppressor, &mut headset);
+                    input.close();
+                    audio_ready = false;
+                    events.dictation(DictationPhase::Cancelled, "")?;
+                    raise_failure(
+                        &Failure::NoAudio {
+                            device,
+                            held_ms: press_at.map(|at| at.elapsed().as_millis() as u64),
+                            since_confirm_ms: Some(confirmed.elapsed().as_millis() as u64),
+                        },
+                        &events,
+                        Some(&mut indicator),
+                    )?;
+                    emit_state(&mut events, active_state(false, pending), &device_label)?;
+                }
+            }
+        }
         indicator.update(capture.is_recording() || start_pending, pending);
         match input.recv_timeout(
             UPDATE_INTERVAL,
@@ -1058,6 +1121,9 @@ pub(crate) fn run(
             RecoveringAudioInputEvent::Reopened => {
                 timeline.restart();
                 audio_ready = false;
+                if start_pending {
+                    route_confirmed_at = Some(Instant::now());
+                }
                 device_label = shown_label(&settings, &input);
                 // A press waiting on the released microphone is already
                 // Dictating; its first chunk starts the capture.
@@ -1209,6 +1275,62 @@ fn ready_cue(since_press: Option<Duration>, earbuds: bool) -> ReadyCue {
         ReadyCue::StartTone
     }
 }
+
+/// What to do about a confirmed route that has delivered no audio yet.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NoAudioStep {
+    Wait,
+    /// Close and reopen the stream once, on the same default source.
+    Reopen,
+    /// The reopened stream is silent too.
+    Fail,
+}
+
+/// How long a confirmed route may stay silent before its stream is reopened,
+/// and then before the dictation fails.
+const NO_AUDIO_BEFORE_REOPEN: Duration = Duration::from_millis(1_200);
+const NO_AUDIO_AFTER_REOPEN: Duration = Duration::from_millis(1_500);
+
+fn no_audio_step(since_confirm: Duration, reopened: bool) -> NoAudioStep {
+    match (reopened, since_confirm) {
+        (false, since) if since >= NO_AUDIO_BEFORE_REOPEN => NoAudioStep::Reopen,
+        (true, since) if since >= NO_AUDIO_AFTER_REOPEN => NoAudioStep::Fail,
+        _ => NoAudioStep::Wait,
+    }
+}
+
+/// Why a press released before any audio arrived: a stream that was confirmed
+/// yet silent is the earbuds' fault, a quick release before the route was
+/// ready is the user's to hold longer, and a long hold with neither is a
+/// microphone that never became ready.
+fn release_blame(
+    device: String,
+    held: Option<Duration>,
+    since_confirm: Option<Duration>,
+) -> Failure {
+    let held_ms = held.map(|held| held.as_millis() as u64);
+    if let Some(since) = since_confirm {
+        return Failure::NoAudio {
+            device,
+            held_ms,
+            since_confirm_ms: Some(since.as_millis() as u64),
+        };
+    }
+    if held.is_none_or(|held| held < RELEASED_EARLY_UNDER) {
+        Failure::ReleasedEarly { device }
+    } else {
+        Failure::StreamNotLinked {
+            device,
+            reason: format!(
+                "the microphone was not ready after {} ms",
+                held_ms.unwrap_or(0)
+            ),
+        }
+    }
+}
+
+/// Released sooner than this with the route not ready is "hold longer".
+const RELEASED_EARLY_UNDER: Duration = Duration::from_millis(1_500);
 
 /// What ending a capture did with it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1847,6 +1969,34 @@ mod tests {
         );
         assert_eq!(ready_cue(None, true), ReadyCue::ReadyTone);
         assert_eq!(ready_cue(None, false), ReadyCue::StartTone);
+    }
+
+    #[test]
+    fn a_confirmed_but_silent_stream_is_reopened_once_then_fails_as_no_audio() {
+        let ms = Duration::from_millis;
+        assert_eq!(no_audio_step(ms(300), false), NoAudioStep::Wait);
+        assert_eq!(no_audio_step(ms(1_199), false), NoAudioStep::Wait);
+        assert_eq!(no_audio_step(ms(1_200), false), NoAudioStep::Reopen);
+        // After the reopen the clock restarts from its own confirmation.
+        assert_eq!(no_audio_step(ms(900), true), NoAudioStep::Wait);
+        assert_eq!(no_audio_step(ms(1_500), true), NoAudioStep::Fail);
+    }
+
+    #[test]
+    fn a_release_is_blamed_on_the_earbuds_or_the_user_by_what_happened() {
+        let ms = Duration::from_millis;
+        let device = || "Between 3ANC".to_owned();
+        // Confirmed, then 6 s of silence: the earbuds sent nothing.
+        let silent = release_blame(device(), Some(ms(6_200)), Some(ms(5_800)));
+        assert_eq!(silent.code(), "E-EARBUDS-NOAUDIO");
+        assert!(silent.message().contains("sent no audio"));
+        assert!(silent.message().contains("6200 ms"), "{}", silent.message());
+        // A quick release before the route was ready: hold longer.
+        let quick = release_blame(device(), Some(ms(400)), None);
+        assert_eq!(quick.code(), "E-RELEASED-EARLY");
+        // A long hold that never became ready is not the user's fault.
+        let slow = release_blame(device(), Some(ms(6_200)), None);
+        assert_eq!(slow.code(), "E-STREAM-LINK");
     }
 
     mod earbuds {

@@ -31,6 +31,12 @@ pub(crate) enum Failure {
     MicGone { device: String },
     /// The microphone delivered only zeros.
     Silent { device: String },
+    /// The route was confirmed but the stream delivered no audio.
+    NoAudio {
+        device: String,
+        held_ms: Option<u64>,
+        since_confirm_ms: Option<u64>,
+    },
     /// The shortcut came up before the microphone was ready.
     ReleasedEarly { device: String },
     /// Transcription failed (network, auth, quota, HTTP status).
@@ -48,6 +54,7 @@ impl Failure {
             Self::StreamHijacked { .. } => "E-STREAM-HIJACKED",
             Self::MicGone { .. } => "E-MIC-GONE",
             Self::Silent { .. } => "E-MIC-SILENT",
+            Self::NoAudio { .. } => "E-EARBUDS-NOAUDIO",
             Self::ReleasedEarly { .. } => "E-RELEASED-EARLY",
             Self::Engine { detail } => engine_code(detail),
             Self::Paste { .. } => "E-PASTE",
@@ -78,6 +85,21 @@ impl Failure {
             Self::Silent { device } => format!(
                 "{device} is silent \u{2014} check the microphone. Make sure it isn't muted."
             ),
+            Self::NoAudio {
+                device,
+                held_ms,
+                since_confirm_ms,
+            } => {
+                let timing = match (held_ms, since_confirm_ms) {
+                    (Some(held), Some(confirm)) => {
+                        format!(" (held {held} ms, {confirm} ms after the route was confirmed)")
+                    }
+                    _ => String::new(),
+                };
+                format!(
+                    "{device} connected but sent no audio{timing} \u{2014} try again; if it repeats, reconnect the earbuds."
+                )
+            }
             Self::ReleasedEarly { device } => format!(
                 "{device}: released before the microphone was ready \u{2014} hold a little longer; the earbuds take about 1 s to switch."
             ),
@@ -246,6 +268,11 @@ mod tests {
             Failure::ReleasedEarly {
                 device: DEVICE.into(),
             },
+            Failure::NoAudio {
+                device: DEVICE.into(),
+                held_ms: Some(6_200),
+                since_confirm_ms: Some(5_800),
+            },
             Failure::from_job("Groq could not transcribe this clip (HTTP 503)"),
             Failure::from_job("Groq rejected the API key"),
             Failure::from_job("could not paste: wtype failed"),
@@ -274,7 +301,7 @@ mod tests {
             );
             codes.insert(failure.code());
         }
-        assert_eq!(codes.len(), 10, "each kind has its own code: {codes:?}");
+        assert_eq!(codes.len(), 11, "each kind has its own code: {codes:?}");
     }
 
     #[test]
