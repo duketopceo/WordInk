@@ -11,7 +11,7 @@ Report security problems privately, as described in [SECURITY.md](SECURITY.md).
 | `sdks/python` | `cd sdks/python && uv sync` (add `--extra mic` for the microphone) | `uv run pytest` |
 | `packages/*`, `apps/docs` (pnpm) | `pnpm install` at the repo root | `pnpm test`, `pnpm typecheck`, `pnpm build` |
 
-`apps/ios` and `sdks/ios` have their own READMEs. CI (`.github/workflows/`) runs
+CI (`.github/workflows/`) runs
 the same commands, so a green local run is a good predictor.
 
 User-visible changes to a published package need a changeset: `pnpm changeset`.

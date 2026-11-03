@@ -1,1 +1,0 @@
-../../../WordInkRemote/HistoryView.swift

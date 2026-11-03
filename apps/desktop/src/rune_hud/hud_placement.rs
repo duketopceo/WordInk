@@ -274,7 +274,7 @@ mod tests {
 
     const CONTENT: Content = Content {
         window: (320.0, 128.0),
-        plate: (112.0, 26.0),
+        plate: (140.0, 32.0),
         island_spread: 28.0,
     };
 
@@ -385,11 +385,58 @@ mod tests {
     #[test]
     fn below_hangs_6_points_under_the_menu_bar_or_above_the_dock() {
         let placed = place(Placement::Below, &flat(), CONTENT, false);
-        assert_eq!(plate(&placed), (-1280.0, 1416.0 - 6.0 - 13.0));
+        assert_eq!(plate(&placed), (-1280.0, 1416.0 - 6.0 - 16.0));
         assert!(!placed.over_menu_bar);
         assert_eq!(placed.layout, Layout::default());
         let placed = place(Placement::Below, &notched(), CONTENT, true);
-        assert_eq!(plate(&placed), (756.0, 70.0 + 24.0 + 13.0));
+        assert_eq!(plate(&placed), (756.0, 70.0 + 24.0 + 16.0));
+    }
+
+    #[test]
+    fn the_bottom_plate_clears_the_dock_on_screens_of_every_size() {
+        // Plate middle = visible bottom + 24 pt gap + half the 32 pt plate,
+        // wherever the exclusive zone (Dock or bar) ends.
+        let screen = |width: f64, height: f64, zone: f64| Screen {
+            frame: Rect {
+                x: 0.0,
+                y: 0.0,
+                width,
+                height,
+            },
+            visible: Rect {
+                x: 0.0,
+                y: zone,
+                width,
+                height: height - zone - 24.0,
+            },
+            bar: 24.0,
+            ..Screen::default()
+        };
+        for (width, height, zone) in [
+            (1280.0, 800.0, 0.0),
+            (1512.0, 982.0, 70.0),
+            (2560.0, 1440.0, 0.0),
+            (3440.0, 1440.0, 96.0),
+        ] {
+            let placed = place(
+                Placement::Below,
+                &screen(width, height, zone),
+                CONTENT,
+                true,
+            );
+            let (x, y) = plate(&placed);
+            assert_eq!(x, width / 2.0);
+            assert_eq!(y, zone + BOTTOM_OFFSET + 16.0);
+            // The whole plate stays above the zone, with the gap to spare.
+            assert!(y - 16.0 - zone >= BOTTOM_OFFSET);
+            let top = place(
+                Placement::Below,
+                &screen(width, height, zone),
+                CONTENT,
+                false,
+            );
+            assert!(plate(&top).1 > height / 2.0, "top stays at the top");
+        }
     }
 
     #[test]
@@ -399,14 +446,14 @@ mod tests {
             ..notched()
         };
         let placed = place(Placement::Below, &fullscreen, CONTENT, false);
-        assert_eq!(plate(&placed).1, 982.0 - 32.0 - 6.0 - 13.0);
+        assert_eq!(plate(&placed).1, 982.0 - 32.0 - 6.0 - 16.0);
     }
 
     #[test]
     fn the_menu_bar_centres_a_fitted_plate_in_a_flat_bar() {
         let placed = place(Placement::MenuBar, &flat(), CONTENT, true);
         assert_eq!(plate(&placed), (-1280.0, 1440.0 - 12.0));
-        assert!((placed.layout.fit - 18.0 / 26.0).abs() < 1e-6);
+        assert!((placed.layout.fit - 18.0 / 32.0).abs() < 1e-6);
         assert!(placed.over_menu_bar && placed.layout.island.is_none());
         assert_eq!(placed.top_left.1, 1440.0, "hangs from the top edge");
     }
@@ -439,7 +486,7 @@ mod tests {
             .layout
             .island;
         assert_eq!(island.unwrap().width, 318.0, "never wider than the window");
-        assert_eq!(plate(&placed), (756.0, 982.0 - 32.0 - ISLAND_PAD - 13.0));
+        assert_eq!(plate(&placed), (756.0, 982.0 - 32.0 - ISLAND_PAD - 16.0));
         assert_eq!(
             place(Placement::Notch, &flat(), CONTENT, false),
             place(Placement::MenuBar, &flat(), CONTENT, false)

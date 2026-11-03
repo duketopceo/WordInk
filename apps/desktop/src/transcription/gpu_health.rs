@@ -15,6 +15,12 @@ use transcribe_cpp::{Backend, Device, DeviceType};
 /// At most this many remembered failures; the oldest go first.
 const KEPT: usize = 16;
 
+/// How long a "slower than the CPU" verdict keeps a GPU off. A failure (a hang
+/// or device loss) stays until the driver changes; a speed verdict is a
+/// measurement, and a measurement taken on a busy machine must not decide
+/// for good, so Auto tries the GPU again after this.
+pub(crate) const SLOW_TTL_SECS: u64 = 7 * 24 * 60 * 60;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub(crate) struct Failure {
     /// The device: its description, kind, and hardware id.
@@ -77,13 +83,27 @@ pub(crate) fn device_key(device: &Device) -> String {
     )
 }
 
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+/// Whether `failure` keeps `key` off under `driver` at `now`: a failure
+/// always does; a slow verdict only until [`SLOW_TTL_SECS`] pass.
+fn keeps_off(failure: &Failure, key: &str, driver: &str, now: u64) -> bool {
+    failure.device == key
+        && failure.driver == driver
+        && (!failure.slow || now.saturating_sub(failure.at) < SLOW_TTL_SECS)
+}
+
 /// Whether `device` failed under the driver installed now.
 pub(crate) fn failed(device: &Device) -> bool {
-    let (key, driver) = (device_key(device), driver());
+    let (key, driver, now) = (device_key(device), driver(), now_secs());
     with_failures(|failures| {
         failures
             .iter()
-            .any(|failure| failure.device == key && failure.driver == driver)
+            .any(|failure| keeps_off(failure, &key, &driver, now))
     })
 }
 
@@ -148,12 +168,15 @@ pub(crate) fn forget(device: &Device) {
 
 /// The newest failure that keeps a GPU off now, for Settings.
 pub(crate) fn current() -> Option<Failure> {
-    let driver = driver();
+    let (driver, now) = (driver(), now_secs());
     with_failures(|failures| {
         failures
             .iter()
             .rev()
-            .find(|failure| failure.driver == driver)
+            .find(|failure| {
+                failure.driver == driver
+                    && (!failure.slow || now.saturating_sub(failure.at) < SLOW_TTL_SECS)
+            })
             .cloned()
     })
 }
@@ -279,6 +302,26 @@ mod tests {
             Err(transcribe_cpp::Error::InputTooShort("x".into())).wrap_err("transcription failed");
         assert!(!device_error(&short.unwrap_err()));
         assert!(!device_error(&color_eyre::eyre::eyre!("cancelled")));
+    }
+
+    #[test]
+    fn a_slow_verdict_expires_but_a_failure_does_not() {
+        let failure = |slow| Failure {
+            device: "GPU".into(),
+            driver: "d1".into(),
+            reason: String::new(),
+            at: 1_000,
+            slow,
+        };
+        let day = 24 * 60 * 60;
+        let fresh = 1_000 + day;
+        let stale = 1_000 + SLOW_TTL_SECS + 1;
+        assert!(keeps_off(&failure(true), "GPU", "d1", fresh));
+        assert!(!keeps_off(&failure(true), "GPU", "d1", stale));
+        assert!(keeps_off(&failure(false), "GPU", "d1", stale));
+        // Another device or driver is never kept off by it.
+        assert!(!keeps_off(&failure(false), "Other", "d1", fresh));
+        assert!(!keeps_off(&failure(false), "GPU", "d2", fresh));
     }
 
     #[cfg(target_os = "linux")]

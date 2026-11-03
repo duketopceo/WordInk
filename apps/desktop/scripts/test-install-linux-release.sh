@@ -665,6 +665,22 @@ for row in "1.0.0 1.0.0-rc.1 ge" "1.0.0-rc.1 1.0.0 lt" "1.0.0-rc.10 1.0.0-rc.9 g
   check "version_ge $1 $2 is $3" ordered "$1" "$2" "$3"
 done
 
+echo "scenario: receipt channel follows the build"
+reset
+publish 1.0.0-rc.1
+run_bootstrap
+check "a release candidate installs" [ "$(installed_version)" = versions/1.0.0-rc.1 ]
+check "its receipt follows the dev channel" contains "$support/install.json" '"channel":"dev"'
+publish 1.0.0
+run_bootstrap
+check "the final replaces the candidate" [ "$(installed_version)" = versions/1.0.0 ]
+check "its receipt is stable" contains "$support/install.json" '"channel":"stable"'
+check "and no longer says dev" not_contains "$support/install.json" '"channel":"dev"'
+reset
+publish 1.0.0
+run_bootstrap
+check "a fresh final install is stable" contains "$support/install.json" '"channel":"stable"'
+
 echo "scenario: tarball installer on its own"
 reset
 publish 1.0.0

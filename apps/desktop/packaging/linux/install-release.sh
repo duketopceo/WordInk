@@ -423,7 +423,14 @@ mv -f "$support/versions/$version/wordink.new" "$support/versions/$version/wordi
 rm -f "${support:?}/versions/$version/source-build"
 ln -sfn "versions/$version" "$support/.current.next"
 mv -Tf "$support/.current.next" "$current"
-printf '{"app":"hex","artifact":"desktop","channel":"stable","method":"direct","root":"%s"}\n' "$support" > "$support/.install.json.next"
+# Release candidates are built on the dev channel (HEX_BUILD_CHANNEL=dev) and
+# followed through dev.json; a final release is stable. The receipt names the
+# channel the installed build belongs to, so the updater sees no switch.
+case "$version" in
+  *-rc.*) channel=dev ;;
+  *) channel=stable ;;
+esac
+printf '{"app":"hex","artifact":"desktop","channel":"%s","method":"direct","root":"%s"}\n' "$channel" "$support" > "$support/.install.json.next"
 mv -f "$support/.install.json.next" "$support/install.json"
 ln -sfn "$support/current/wordink" "$bin_dir/wordink"
 

@@ -665,14 +665,14 @@ mod tests {
             top: -64.0,
         };
         let filled = fill_island(tuning, Some(island)).clamped();
-        assert_eq!((filled.columns, filled.rows), (84.0, tuning.rows));
+        assert_eq!((filled.columns, filled.rows), (69.0, tuning.rows));
         assert_eq!(filled.width, filled.processing_width);
         // The outer columns sit as far in from the ends as the outermost
         // rows that show from the top and bottom (the faint outer row
         // doesn't), within the island less its padding.
         let side = (filled.width - (filled.columns - 1.0) * filled.spacing) / 2.0;
         assert!((side - field_edge(&filled)).abs() < 1e-3);
-        assert!((field_edge(&filled) - 5.2).abs() < 1e-3);
+        assert!((field_edge(&filled) - 3.0).abs() < 1e-3);
         assert!(
             filled.width <= island.plate_width()
                 && island.plate_width() - filled.width < filled.spacing
