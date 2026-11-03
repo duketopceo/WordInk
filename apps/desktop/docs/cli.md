@@ -51,7 +51,7 @@ hex
 │   ├── rename <id> <name>         Labs: an import's picker name
 │   ├── repair <id>                Labs: rehash Hex's copy; ready again if it still matches
 │   ├── remove <id>                Labs: Hex's copy of an import (not the selected model)
-│   └── status|devices|check|transcribe <wav>  Linux and Windows, run in this process
+│   └── status|devices|check|transcribe <wav>  Linux and Windows, run in this process (`wordink devices [--all]`, `devices rename <id> <name>`)
 ├── commands
 │   ├── init                       create ~/.config/hex (local, no running Hex needed)
 │   └── check                      validate ~/.config/hex/hex.config.ts transformations

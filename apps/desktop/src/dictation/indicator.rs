@@ -61,6 +61,12 @@ pub enum DictationIndicatorEvent {
     /// The speech model finished loading.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     ModelReady,
+    /// Bluetooth earbuds are switching to headset mode for the dictation.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    EarbudsConnecting,
+    /// The earbuds' microphone is ready.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    EarbudsReady,
     /// The words were left on the clipboard instead of typed.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     Copied,
@@ -228,6 +234,8 @@ impl IndicatorStyle {
 pub enum Label {
     Ready,
     LoadingModel,
+    /// Bluetooth earbuds are switching to headset mode.
+    ConnectingEarbuds,
     Recording,
     Transcribing,
     Done,
@@ -240,6 +248,7 @@ impl Label {
         match self {
             Self::Ready => "Ready",
             Self::LoadingModel => "Loading model",
+            Self::ConnectingEarbuds => "Connecting earbuds mic…",
             Self::Recording => "Recording",
             Self::Transcribing => "Transcribing",
             Self::Done => "Done",
@@ -332,6 +341,8 @@ pub struct IndicatorModel {
     /// A meter above the room's noise has arrived since the capture began.
     heard: bool,
     loading: bool,
+    /// Earbuds are switching to headset mode; nothing is heard yet.
+    earbuds: bool,
     copied: bool,
     /// The label now showing and since when, for [`Self::label`].
     label: Option<(Label, Instant)>,
@@ -357,6 +368,7 @@ impl IndicatorModel {
             bars: Bars::new(),
             heard: false,
             loading: false,
+            earbuds: false,
             copied: false,
             label: None,
         }
@@ -393,6 +405,7 @@ impl IndicatorModel {
             return Some(Label::Copied);
         }
         match self.phase {
+            Phase::Recording if self.earbuds => Some(Label::ConnectingEarbuds),
             Phase::Recording if self.loading => Some(Label::LoadingModel),
             Phase::Recording if !self.heard => Some(Label::Ready),
             Phase::Recording => Some(Label::Recording),
@@ -445,6 +458,7 @@ impl IndicatorModel {
                 self.demo_voice = None;
                 self.heard = false;
                 self.loading = false;
+                self.earbuds = false;
                 self.copied = false;
                 self.bars.clear();
             }
@@ -492,6 +506,8 @@ impl IndicatorModel {
             }
             DictationIndicatorEvent::ModelLoading => self.loading = true,
             DictationIndicatorEvent::ModelReady => self.loading = false,
+            DictationIndicatorEvent::EarbudsConnecting => self.earbuds = true,
+            DictationIndicatorEvent::EarbudsReady => self.earbuds = false,
             DictationIndicatorEvent::Copied => self.copied = true,
             DictationIndicatorEvent::JobCompleted { job_id } => {
                 self.finish_job(job_id, now, Phase::Completed);
@@ -938,6 +954,24 @@ mod tests {
         let failed = run(&mut model, start, 5.5, 0.5);
         assert_eq!(model.stage, Stage::Failed);
         assert!(failed.last().unwrap().pose.fail > 0.9);
+    }
+
+    #[test]
+    fn earbuds_connecting_is_said_until_their_microphone_is_ready() {
+        let start = Instant::now();
+        let mut model = model_with(IndicatorStyle::LiveText, start);
+        model.handle(DictationIndicatorEvent::Started, start, false);
+        model.handle(DictationIndicatorEvent::EarbudsConnecting, start, false);
+        assert_eq!(model.label(start), Some(Label::ConnectingEarbuds));
+        model.handle(DictationIndicatorEvent::EarbudsReady, at(start, 1.0), false);
+        assert_eq!(model.label(at(start, 1.0)), Some(Label::Ready));
+        model.handle(
+            DictationIndicatorEvent::EarbudsConnecting,
+            at(start, 2.0),
+            false,
+        );
+        model.handle(DictationIndicatorEvent::Reset, at(start, 2.1), false);
+        assert_eq!(model.label(at(start, 2.1)), None, "a reset forgets it");
     }
 
     #[test]

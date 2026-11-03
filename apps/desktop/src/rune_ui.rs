@@ -827,6 +827,11 @@ pub(crate) struct Ui {
     microphones_listing:
         Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
     mic_level: general::MicLevel,
+    /// The microphone being renamed (its id) and the name typed so far.
+    mic_renaming: Option<String>,
+    mic_rename: rune::TextEdit,
+    /// The microphone menu lists monitors, null and effect devices too.
+    show_all_microphones: bool,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
     /// The Labs page shows in place of a pane.
@@ -936,6 +941,9 @@ impl Ui {
             input_sources_listed_at: f64::NEG_INFINITY,
             microphones_listing: None,
             mic_level: general::MicLevel::default(),
+            mic_renaming: None,
+            mic_rename: rune::TextEdit::new(String::new()),
+            show_all_microphones: false,
             advanced: Vec::new(),
             labs_open: false,
             lab_flash: None,
@@ -2032,6 +2040,20 @@ const SCENES: &[Scene] = &[
             ..Default::default()
         });
     }),
+    // Bluetooth earbuds among the microphones: the Bluetooth row shows.
+    ("microphone-bluetooth", |ui| {
+        *ui = portal_fixture();
+        ui.microphones = Ok(bluetooth_microphones());
+        ui.settings.microphone = Some(BLUETOOTH_FIXTURE_ID.into());
+    }),
+    // Renaming the microphone in use.
+    ("microphone-rename", |ui| {
+        *ui = portal_fixture();
+        ui.microphones = Ok(bluetooth_microphones());
+        ui.settings.microphone = Some(BLUETOOTH_FIXTURE_ID.into());
+        ui.mic_renaming = Some(BLUETOOTH_FIXTURE_ID.into());
+        ui.mic_rename = rune::TextEdit::new("Test Buds".to_owned());
+    }),
     ("history", |ui| {
         *ui = portal_fixture();
         ui.history = history::HistoryPane::fixture();
@@ -2826,6 +2848,29 @@ fn mac_fixture() -> Ui {
     });
     ui.meetings = meetings::MeetingsPane::fixture();
     ui
+}
+
+const BLUETOOTH_FIXTURE_ID: &str = "bluez_input.00:11:22:33:44:55";
+
+/// A built-in microphone and Bluetooth earbuds in music mode.
+fn bluetooth_microphones() -> crate::audio::InputDevices {
+    use crate::audio::{InputDevice, sources::DeviceKind};
+    let device = |id: &str, label: &str, kind, music_mode| InputDevice {
+        id: id.into(),
+        label: label.into(),
+        kind,
+        hidden: false,
+        music_mode,
+    };
+    crate::audio::InputDevices {
+        names: vec!["alsa_input.builtin".into(), BLUETOOTH_FIXTURE_ID.into()],
+        devices: vec![
+            device("alsa_input.builtin", "Laptop Mic", DeviceKind::BuiltIn, false),
+            device(BLUETOOTH_FIXTURE_ID, "Test Buds", DeviceKind::Bluetooth, true),
+        ],
+        system_default: Some("alsa_input.builtin".into()),
+        ..Default::default()
+    }
 }
 
 fn shortcut_row(ui: &mut Ui, capture: Capture) {

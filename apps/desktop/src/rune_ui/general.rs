@@ -8,7 +8,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use rune::{Color, El, Tx, col, el, row, text};
-use rune_kit::{Placement, Select, SelectAppearance};
+use rune_kit::{Placement, Select, SelectAppearance, TextInput};
 
 use super::controls::{
     self, ButtonKind, CardRow, DEVICE_SELECT_WIDTH, KeySize, METRICS, Paint, button, card,
@@ -21,7 +21,7 @@ use super::platform::PlatformRequest;
 use super::settings::{self as s, Capture, Face};
 use super::{Menu, Pane, Request, ShortcutTarget, Ui};
 use crate::app_settings::{
-    IndicatorPosition, IndicatorStyle, RecordingAudioBehavior, UpdateChannel,
+    BluetoothMic, IndicatorPosition, IndicatorStyle, RecordingAudioBehavior, UpdateChannel,
 };
 use crate::desktop::host::DesktopAction;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
@@ -479,7 +479,11 @@ fn language_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
 fn microphone_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     let settings = &ui.settings;
     let listed = ui.microphones.as_ref().ok();
-    let default_name = listed.and_then(|devices| devices.system_default.as_deref());
+    let label = |id: &str| s::microphone_label(ui, id);
+    let default_name = listed
+        .and_then(|devices| devices.system_default.as_deref())
+        .map(label);
+    let default_name = default_name.as_deref();
     let missing = s::missing_microphone(ui);
     // A MacBook's built-in microphone is off while its lid is closed.
     let off = listed.and_then(|devices| devices.off_with_lid_closed.as_deref());
@@ -490,7 +494,7 @@ fn microphone_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     // The value always names the input in use, so a missing saved
     // microphone shows the system default standing in for it.
     let (microphone, detail) = match (&settings.microphone, missing.or(saved_off)) {
-        (Some(saved), None) => (saved.clone(), None),
+        (Some(saved), None) => (label(saved), None),
         _ => (
             tr("System default").to_owned(),
             default_name.map(str::to_owned),
@@ -500,17 +504,17 @@ fn microphone_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     let lid_note = |built_in: &str| match default_name {
         Some(name) => tr_named(
             "{built_in} is off while the lid is closed, so WordInk listens to {input}",
-            &[("built_in", built_in), ("input", name)],
+            &[("built_in", &label(built_in)), ("input", name)],
         ),
-        None => tr_fill("{} is off while the lid is closed", built_in),
+        None => tr_fill("{} is off while the lid is closed", &label(built_in)),
     };
     let microphone_note = listed.and_then(|devices| match &settings.microphone {
         Some(_) if saved_off.is_some() => saved_off.map(lid_note),
         Some(_) => missing.map(|saved| {
             if mac {
-                tr_fill("{} isn't connected; using your Mac's input", saved)
+                tr_fill("{} isn't connected; using your Mac's input", &label(saved))
             } else {
-                tr_fill("{} isn't connected; using the system input", saved)
+                tr_fill("{} isn't connected; using the system input", &label(saved))
             }
         }),
         None if devices.default_is_hex_microphone => default_name.map(|name| {
@@ -527,11 +531,11 @@ fn microphone_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             .map(|(bluetooth, input)| {
                 tr_named(
                     "{bluetooth} is Bluetooth, so WordInk listens to {input}",
-                    &[("bluetooth", bluetooth), ("input", input)],
+                    &[("bluetooth", &label(bluetooth)), ("input", input)],
                 )
             }),
     });
-    vec![
+    let mut rows: Vec<CardRow> = vec![
         icon_row(
             p,
             "microphone",
@@ -542,15 +546,116 @@ fn microphone_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         )
         .into(),
         folding(
-            "devices-error-fold",
-            match (ui.open, &ui.microphones) {
-                (Some(Menu::Microphone), Err(error)) => {
-                    Some(note("devices-error", error, p.danger()))
-                }
-                _ => None,
-            },
+            "microphone-rename-fold",
+            ui.mic_renaming
+                .is_some()
+                .then(|| microphone_rename_row(ui, p)),
         ),
-    ]
+    ];
+    if let Some(row) = bluetooth_mic_row(ui, p, layer) {
+        rows.push(row);
+    }
+    rows.push(folding(
+        "devices-error-fold",
+        match (ui.open, &ui.microphones) {
+            (Some(Menu::Microphone), Err(error)) => Some(note("devices-error", error, p.danger())),
+            _ => None,
+        },
+    ));
+    rows
+}
+
+/// The field that renames the microphone in use. A blank name goes back to
+/// the cleaned-up default.
+fn microphone_rename_row(ui: &Ui, p: Paint) -> El {
+    let control = row()
+        .key("microphone-rename-control")
+        .gap(8.0)
+        .center_y()
+        .child(
+            TextInput::new(&ui.mic_rename)
+                .width(Some(200.0))
+                .on_edit(|ui: &mut Ui| &mut ui.mic_rename)
+                .on_submit(|ui: &mut Ui, _| s::finish_microphone_rename(ui))
+                .build(p.k)
+                .key("microphone-rename-field"),
+        )
+        .child(button(
+            p,
+            "microphone-rename-save",
+            tr("Save"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| s::finish_microphone_rename(ui),
+        ))
+        .child(button(
+            p,
+            "microphone-rename-cancel",
+            tr("Cancel"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| ui.mic_renaming = None,
+        ));
+    icon_row(
+        p,
+        "microphone-rename",
+        &MIC,
+        tr("Rename microphone"),
+        Some(tr("Leave it blank to use the default name")),
+        control,
+    )
+}
+
+/// Linux only: what dictating with Bluetooth earbuds does to them. Earbuds
+/// have a microphone only in headset mode (call quality); the choice is to
+/// use it, switching them for the dictation, or to keep music mode and
+/// dictate with another microphone. Shown only while a Bluetooth microphone
+/// is listed.
+fn bluetooth_mic_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<CardRow> {
+    if ui.platform.caps.os != super::platform::Os::Linux
+        || !ui
+            .microphones
+            .as_ref()
+            .is_ok_and(|devices| devices.has_bluetooth_microphone())
+    {
+        return None;
+    }
+    let choices = [BluetoothMic::Headset, BluetoothMic::KeepQuality];
+    let current = ui.settings.bluetooth_mic;
+    let description = match current {
+        BluetoothMic::Headset => {
+            tr("Earbuds switch to headset mode while you dictate, then back to music mode")
+        }
+        BluetoothMic::KeepQuality => {
+            tr("Earbuds stay in music mode; WordInk dictates with another microphone")
+        }
+    };
+    let control = pick_select(
+        ui,
+        p,
+        "bluetooth-mic",
+        vec![
+            tr("Use the earbuds' mic (headset mode)"),
+            tr("Keep music mode, use another mic"),
+        ],
+        choices.iter().position(|c| *c == current).unwrap_or(0),
+        |ui, index| {
+            let choice = [BluetoothMic::Headset, BluetoothMic::KeepQuality][index];
+            if ui.settings.bluetooth_mic != choice {
+                ui.update(|settings| settings.bluetooth_mic = choice);
+            }
+        },
+        layer,
+    );
+    Some(
+        icon_row(
+            p,
+            "bluetooth-mic",
+            &BLUETOOTH,
+            tr("Bluetooth earbuds"),
+            Some(description),
+            control,
+        )
+        .into(),
+    )
 }
 
 /// The level and the input in use, drawn like the kit's borderless select,
@@ -914,25 +1019,28 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             },
         ));
     }
-    rows.push(
-        icon_toggle_row(
-            p,
-            "avoid-bluetooth-microphone",
-            &BLUETOOTH,
-            if ui.platform.caps.os == super::platform::Os::Macos {
-                tr("Use the Mac's microphone instead of Bluetooth")
-            } else {
-                tr("Use another microphone instead of Bluetooth")
-            },
-            tr("Keeps AirPods and other headsets out of call-quality audio"),
-            settings.avoid_bluetooth_microphone,
-            |ui: &mut Ui| {
-                let enabled = !ui.settings.avoid_bluetooth_microphone;
-                ui.update(|settings| settings.avoid_bluetooth_microphone = enabled);
-            },
-        )
-        .into(),
-    );
+    // Linux has the Bluetooth earbuds row under Microphone instead.
+    if ui.platform.caps.os != super::platform::Os::Linux {
+        rows.push(
+            icon_toggle_row(
+                p,
+                "avoid-bluetooth-microphone",
+                &BLUETOOTH,
+                if ui.platform.caps.os == super::platform::Os::Macos {
+                    tr("Use the Mac's microphone instead of Bluetooth")
+                } else {
+                    tr("Use another microphone instead of Bluetooth")
+                },
+                tr("Keeps AirPods and other headsets out of call-quality audio"),
+                settings.avoid_bluetooth_microphone,
+                |ui: &mut Ui| {
+                    let enabled = !ui.settings.avoid_bluetooth_microphone;
+                    ui.update(|settings| settings.avoid_bluetooth_microphone = enabled);
+                },
+            )
+            .into(),
+        );
+    }
     // macOS runs its models on Metal or Apple's speech engine.
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     if ui.platform.caps.os != super::platform::Os::Macos {

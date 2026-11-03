@@ -1,0 +1,123 @@
+[
+ {
+  "name": "easyeffects_sink.monitor",
+  "description": "Monitor of Easy Effects Sink",
+  "properties": {
+   "media.class": "Audio/Sink",
+   "node.name": "easyeffects_sink",
+   "device.description": "Easy Effects Sink",
+   "node.virtual": "true",
+   "device.class": "monitor"
+  }
+ },
+ {
+  "name": "easyeffects_source",
+  "description": "Easy Effects Source",
+  "properties": {
+   "media.class": "Audio/Source/Virtual",
+   "node.name": "easyeffects_source",
+   "device.description": "Easy Effects Source",
+   "node.virtual": "true"
+  }
+ },
+ {
+  "name": "alsa_input.platform-sound.HiFi__Headset__source",
+  "description": "Laptop Mic (raw)",
+  "properties": {
+   "device.api": "alsa",
+   "device.class": "sound",
+   "media.class": "Audio/Source",
+   "node.name": "alsa_input.platform-sound.HiFi__Headset__source",
+   "device.description": "Laptop Mic",
+   "device.form_factor": "internal",
+   "device.name": "alsa_card.platform-sound"
+  }
+ },
+ {
+  "name": "effect_output.laptop-mic",
+  "description": "Laptop Microphone",
+  "properties": {
+   "node.name": "effect_output.laptop-mic",
+   "media.class": "Audio/Source",
+   "node.virtual": "false",
+   "device.description": "Laptop Microphone"
+  }
+ },
+ {
+  "name": "alsa_input.usb-acme_Acme_N60_FHD_Webcam_Webcam-02.mono-fallback",
+  "description": "Acme N60 FHD Webcam  Mono",
+  "properties": {
+   "device.bus": "usb",
+   "device.api": "alsa",
+   "device.class": "sound",
+   "media.class": "Audio/Source",
+   "node.name": "alsa_input.usb-acme_Acme_N60_FHD_Webcam_Webcam-02.mono-fallback",
+   "device.description": "Acme N60 FHD Webcam ",
+   "device.form_factor": "webcam",
+   "device.name": "alsa_card.usb-acme_Acme_N60_FHD_Webcam_Webcam-02"
+  }
+ },
+ {
+  "name": "alsa_output.usb-acme_Studio_Mic-00.analog-stereo.monitor",
+  "description": "Monitor of Acme Studio Mic Analog Stereo",
+  "properties": {
+   "device.bus": "usb",
+   "device.api": "alsa",
+   "device.class": "monitor",
+   "media.class": "Audio/Sink",
+   "node.name": "alsa_output.usb-acme_Studio_Mic-00.analog-stereo",
+   "device.description": "Acme Studio Mic",
+   "device.form_factor": "microphone",
+   "device.name": "alsa_card.usb-acme_Studio_Mic-00"
+  }
+ },
+ {
+  "name": "alsa_input.usb-acme_Studio_Mic-00.analog-stereo",
+  "description": "Acme Studio Mic Analog Stereo",
+  "properties": {
+   "device.bus": "usb",
+   "device.api": "alsa",
+   "device.class": "sound",
+   "media.class": "Audio/Source",
+   "node.name": "alsa_input.usb-acme_Studio_Mic-00.analog-stereo",
+   "device.description": "Acme Studio Mic",
+   "device.form_factor": "microphone",
+   "device.name": "alsa_card.usb-acme_Studio_Mic-00"
+  }
+ },
+ {
+  "name": "bluez_output.00_11_22_33_44_55.1.monitor",
+  "description": "Monitor of Test Buds",
+  "properties": {
+   "api.bluez5.address": "00:11:22:33:44:55",
+   "device.description": "Test Buds",
+   "node.name": "bluez_output.00_11_22_33_44_55.1",
+   "device.api": "bluez5",
+   "media.class": "Audio/Sink",
+   "device.bus": "bluetooth",
+   "device.name": "bluez_card.00_11_22_33_44_55",
+   "device.alias": "Test Buds",
+   "device.form_factor": "headset",
+   "device.class": "monitor"
+  }
+ },
+ {
+  "name": "auto_null.monitor",
+  "description": "Monitor of Dummy Output",
+  "properties": {
+   "device.class": "monitor",
+   "media.class": "Audio/Sink"
+  }
+ },
+ {
+  "name": "bluez_input.00_11_22_33_44_55.0",
+  "description": "Test Buds",
+  "properties": {
+   "device.api": "bluez5",
+   "device.alias": "Test Buds",
+   "api.bluez5.address": "00:11:22:33:44:55",
+   "media.class": "Audio/Source",
+   "device.name": "bluez_card.00_11_22_33_44_55"
+  }
+ }
+]
