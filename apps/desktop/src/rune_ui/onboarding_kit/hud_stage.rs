@@ -324,7 +324,7 @@ pub(crate) fn frame_slot(key: &str, centre: [f32; 2], scale: f32, frame: &DotFra
 }
 
 /// Mounts the real `Dot scope` `Processing::Flow` phosphor HUD centred in a
-/// layout box of `(w, h)` for `"Setting up Hex"` and `"Almost ready"`.
+/// layout box of `(w, h)` for `"Setting up WordInk"` and `"Almost ready"`.
 pub(crate) fn flow_box(key: &str, scale: f32, s: &super::stories::Onboard) -> El {
     update_hud(hud_mark(key), s.flow_hud.frame(s.now, s.reduced.get()));
     let (w, h) = (WINDOW.0 * scale, 62.0 * scale);
@@ -335,7 +335,7 @@ pub(crate) fn flow_box(key: &str, scale: f32, s: &super::stories::Onboard) -> El
         .child(slot_el(key, [w * 0.5, h * 0.5], scale))
 }
 
-/// Mounts the real `Dot scope` phosphor HUD for `"With Hex"` or `"Your turn"`,
+/// Mounts the real `Dot scope` phosphor HUD for `"With WordInk"` or `"Your turn"`,
 /// returning `(hud_element, hud_heat, voice_energy)`. The plate rests while
 /// `waiting`, then records `take` from `take_from`, on one model that started
 /// when the plate first showed (`Onboard::hud_from`).

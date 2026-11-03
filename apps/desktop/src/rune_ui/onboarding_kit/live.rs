@@ -257,7 +257,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
 /// A page of the first run, for scenes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::rune_ui) enum Page {
-    /// `"Setting up Hex"`, or the model step when models were found.
+    /// `"Setting up WordInk"`, or the model step when models were found.
     Download,
     /// The demo, finished: `"Twice as fast"` and Continue.
     Demo,

@@ -12,7 +12,7 @@
 #      appearances and compares each with its approved golden in
 #      tests/golden/. Any difference fails and names the changed scenes; an
 #      intentional change refreshes the goldens in the same PR
-#      (HEX_UPDATE_GOLDENS=1 cargo test --bin hex onboarding_goldens). A GPU
+#      (HEX_UPDATE_GOLDENS=1 cargo test --bin wordink onboarding_goldens). A GPU
 #      adapter is required (Mesa's lavapipe will do), so the check never
 #      passes by skipping.
 #   2. Walks a first run through the real onboarding in a clean temporary
@@ -45,7 +45,7 @@ unset HEX_UPDATE_GOLDENS
 run_one() {
   local log=$1 test=$2
   shift 2
-  env "$@" cargo test --locked --bin hex -- --exact --include-ignored --nocapture "$test" 2>&1 | tee "$log"
+  env "$@" cargo test --locked --bin wordink -- --exact --include-ignored --nocapture "$test" 2>&1 | tee "$log"
   local result=${PIPESTATUS[0]}
   [ "$result" = 0 ] && grep -q 'test result: ok. 1 passed' "$log"
 }

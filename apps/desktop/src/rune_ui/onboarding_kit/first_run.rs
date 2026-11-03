@@ -2,7 +2,7 @@
 //!
 //! - Flat, crisp Rune 2D UI (no embossed cards or shader starbursts).
 //! - Hex's real `Dot scope` phosphor dot-matrix HUD (`rune_hud.wgsl`) on
-//!   `"Setting up Hex"`, `"With Hex"`, and `"Your turn"`.
+//!   `"Setting up WordInk"`, `"With WordInk"`, and `"Your turn"`.
 //! - Live interactive `"Your turn"` in desktop windows: pauses with a focused
 //!   [`rune_kit::TextArea`] so holding `⌥` and speaking into the running Hex
 //!   listener pastes real dictated words right into the card.
