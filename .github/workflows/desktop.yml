@@ -93,6 +93,13 @@ jobs:
         if: runner.os == 'macOS'
         run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
 
+      - name: Release scripts (shellcheck and tests)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          shellcheck packaging/linux/{sign-linux,make-tarball,write-sums,verify-release,write-manifest}.sh \
+            scripts/{release-gate,release-notes,test-release-scripts}.sh
+          scripts/test-release-scripts.sh
+
       - name: Clippy
         # Hex's own CI lints the same way; tests are linted on Linux, where
         # the suite runs in full.
