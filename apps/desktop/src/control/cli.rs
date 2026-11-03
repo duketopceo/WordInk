@@ -1013,6 +1013,16 @@ pub(crate) fn set_in_running_hex(key: &str, value: &str) -> Option<ControlReply>
     })
 }
 
+/// `hex settings set key value` with Hex stopped: writes settings.json
+/// directly. `json` is the value as JSON.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) fn set_offline(key: &str, json: &str) -> ControlReply {
+    match serde_json::from_str(json) {
+        Ok(value) => apply_offline(&serde_json::Map::from_iter([(key.to_owned(), value)])),
+        Err(error) => ControlReply::error("invalid-value", error.to_string()),
+    }
+}
+
 fn call(request: ControlRequest) -> Result<ControlResponse, ControlReply> {
     if !running() {
         return Err(absent());

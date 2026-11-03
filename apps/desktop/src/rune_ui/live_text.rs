@@ -452,6 +452,7 @@ mod tests {
         for label in [
             Label::Ready,
             Label::LoadingModel,
+            Label::ConnectingEarbuds,
             Label::Recording,
             Label::Transcribing,
             Label::Done,

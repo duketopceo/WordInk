@@ -162,6 +162,16 @@ const KEYS: &[Key] = &[
         "System default records from the built-in or another wired microphone, not a Bluetooth headset's",
     ),
     key(
+        "bluetooth_mic",
+        Kind::Choice(&["headset", "keep_quality"]),
+        "Linux: dictate with Bluetooth earbuds' own microphone, switching them to headset mode while you dictate (headset), or keep music quality and dictate with another microphone (keep_quality)",
+    ),
+    key(
+        "device_names",
+        Kind::Json,
+        "Names you gave microphones, as a JSON object of device id to name; `wordink devices rename` edits one",
+    ),
+    key(
         "recording_audio_behavior",
         Kind::Choice(&["mute", "pause_media", "do_nothing", "duck"]),
         "What other audio does while you dictate",

@@ -1,0 +1,97 @@
+[
+ {
+  "name": "alsa_card.platform-sound",
+  "active_profile": "HiFi",
+  "properties": {
+   "device.api": "alsa",
+   "device.form_factor": "internal",
+   "device.name": "alsa_card.platform-sound",
+   "device.description": "Built-in Audio"
+  },
+  "profiles": {
+   "off": {
+    "available": true
+   },
+   "HiFi": {
+    "available": true
+   },
+   "pro-audio": {
+    "available": true
+   }
+  }
+ },
+ {
+  "name": "bluez_card.00_11_22_33_44_55",
+  "active_profile": "headset-head-unit",
+  "properties": {
+   "device.api": "bluez5",
+   "device.name": "bluez_card.00_11_22_33_44_55",
+   "device.description": "Test Buds",
+   "device.alias": "Test Buds",
+   "device.form_factor": "headset",
+   "api.bluez5.address": "00:11:22:33:44:55"
+  },
+  "profiles": {
+   "off": {
+    "available": true
+   },
+   "a2dp-sink-sbc": {
+    "available": true
+   },
+   "a2dp-sink-sbc_xq": {
+    "available": true
+   },
+   "a2dp-sink": {
+    "available": true
+   },
+   "headset-head-unit-cvsd": {
+    "available": true
+   },
+   "headset-head-unit": {
+    "available": true
+   }
+  }
+ },
+ {
+  "name": "alsa_card.usb-acme_Studio_Mic-00",
+  "active_profile": "output:analog-stereo+input:analog-stereo",
+  "properties": {
+   "device.api": "alsa",
+   "device.form_factor": "microphone",
+   "device.name": "alsa_card.usb-acme_Studio_Mic-00",
+   "device.description": "Acme Studio Mic"
+  },
+  "profiles": {
+   "off": {
+    "available": true
+   },
+   "output:analog-stereo+input:analog-stereo": {
+    "available": true
+   },
+   "output:analog-stereo+input:iec958-stereo": {
+    "available": true
+   },
+   "output:analog-stereo": {
+    "available": true
+   },
+   "output:iec958-stereo+input:analog-stereo": {
+    "available": true
+   },
+   "output:iec958-stereo+input:iec958-stereo": {
+    "available": true
+   },
+   "output:iec958-stereo": {
+    "available": true
+   },
+   "input:analog-stereo": {
+    "available": true
+   },
+   "input:iec958-stereo": {
+    "available": true
+   },
+   "pro-audio": {
+    "available": true
+   }
+  }
+ }
+]

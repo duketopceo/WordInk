@@ -1,5 +1,8 @@
+pub(crate) mod bluetooth_mic;
 #[cfg(target_os = "macos")]
 pub(crate) mod browser_media;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) mod devices_cli;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod hex_microphone;
 pub(crate) mod idle_sleep;
@@ -10,6 +13,7 @@ mod lid;
 pub(crate) mod output_ducking;
 #[cfg(target_os = "macos")]
 pub(crate) mod recording_environment;
+pub(crate) mod sources;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod voice_filter;
 
@@ -22,6 +26,20 @@ static AUDIO_SERVICE_RESTART_GENERATION: AtomicU64 = AtomicU64::new(0);
 static INPUT_ROUTE_GENERATION: AtomicU64 = AtomicU64::new(0);
 static STREAM_GLITCHED_AT: Mutex<Option<Instant>> = Mutex::new(None);
 static AVOID_BLUETOOTH_MICROPHONE: AtomicBool = AtomicBool::new(true);
+static KEEP_BLUETOOTH_QUALITY: AtomicBool = AtomicBool::new(false);
+
+/// Linux: dictate with another microphone and leave Bluetooth earbuds in
+/// music mode (`bluetooth_mic = keep_quality`), instead of switching them to
+/// headset mode. A change resolves the input again once capture is idle.
+pub fn set_keep_bluetooth_quality(keep: bool) {
+    if KEEP_BLUETOOTH_QUALITY.swap(keep, Ordering::AcqRel) != keep {
+        INPUT_ROUTE_GENERATION.fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+fn keep_bluetooth_quality() -> bool {
+    cfg!(target_os = "linux") && KEEP_BLUETOOTH_QUALITY.load(Ordering::Acquire)
+}
 
 /// Whether System default passes over a Bluetooth default input, whose
 /// microphone drops the headset into low-quality call audio. A change
@@ -33,6 +51,11 @@ pub fn set_avoid_bluetooth_microphone(avoid: bool) {
 }
 
 fn avoid_bluetooth_microphone() -> bool {
+    // On Linux `bluetooth_mic` replaces the toggle (settings migrate the
+    // old value once); the stored flag is not read there.
+    if cfg!(target_os = "linux") {
+        return keep_bluetooth_quality();
+    }
     AVOID_BLUETOOTH_MICROPHONE.load(Ordering::Acquire)
 }
 
@@ -200,6 +223,8 @@ pub struct AudioInput {
     chunks: Receiver<(Vec<f32>, CaptureInstant)>,
     pub sample_rate: u32,
     pub device_name: String,
+    /// The cleaned-up name for `device_name`, before the user's own name.
+    pub device_label: String,
     /// Whether this input stands in for the saved microphone until it can
     /// be opened again.
     pub selection: Selection,
@@ -407,6 +432,7 @@ impl AudioInput {
                 stream_errors,
                 sample_rate: 48_000,
                 device_name: "Test microphone".into(),
+                device_label: "Test microphone".into(),
                 selection: Selection::InUse,
                 watch_service_restarts: false,
                 restart_generation: audio_service_restart_generation(),
@@ -509,6 +535,7 @@ impl AudioInput {
             _stream: Some(stream),
             chunks,
             sample_rate,
+            device_label: sources::clean_name(&device_name),
             device_name,
             selection: Selection::InUse,
             stream_errors,
@@ -823,6 +850,16 @@ impl RecoveringAudioInput {
             .device_name
     }
 
+    /// The open microphone's cleaned-up name, before the user's own name.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub fn device_label(&self) -> &str {
+        &self
+            .input
+            .as_ref()
+            .expect("microphone name requested while closed")
+            .device_label
+    }
+
     fn start_replacement(&mut self) {
         let revision = self
             .recovery
@@ -923,6 +960,9 @@ struct Route {
     /// System default passes over a Bluetooth default while another real
     /// input is listed.
     avoid_bluetooth: bool,
+    /// A saved Bluetooth microphone is passed over for the built-in one too
+    /// (Linux, Keep music quality).
+    avoid_selected_bluetooth: bool,
 }
 
 const LID_CLOSED_ERROR: &str = "the built-in microphone is off while the lid is closed";
@@ -970,9 +1010,17 @@ fn resolve_input(
             })
             .ok_or_else(|| format!("microphone is unavailable: {name}"));
     }
+    let mut skip_default = false;
     let selection = match selected.filter(|name| !is_hex(name)) {
         Some(name) => match position(name) {
             Some(index) if off(index) => Selection::LidClosed,
+            // Keep music quality: leave the earbuds alone, record elsewhere.
+            Some(index)
+                if route.avoid_selected_bluetooth && transport(index) == Transport::Bluetooth =>
+            {
+                skip_default = true;
+                Selection::InUse
+            }
             Some(index) => {
                 return Ok(InputPlan {
                     target: InputTarget::Named(index),
@@ -987,7 +1035,7 @@ fn resolve_input(
     let default_usable = !names.is_empty()
         && default.is_some_and(|name| !is_hex(name) && !position(name).is_some_and(off));
     let default_avoided = default.and_then(position).is_some_and(avoided);
-    if default_usable && !default_avoided {
+    if default_usable && !default_avoided && !skip_default {
         return Ok(InputPlan {
             target: InputTarget::SystemDefault,
             selection,
@@ -1021,6 +1069,7 @@ fn current_route() -> Route {
     Route {
         lid_closed: lid_closed(),
         avoid_bluetooth: avoid_bluetooth_microphone(),
+        avoid_selected_bluetooth: keep_bluetooth_quality(),
     }
 }
 
@@ -1075,22 +1124,139 @@ fn description_name<E: std::fmt::Display>(
     }
 }
 
+/// The inputs an open or a listing resolves against. With a sound server
+/// (Linux, through `pactl`) these are its sources, and every input opens
+/// through ALSA's default device, which Hex then routes by node name;
+/// otherwise they are the audio API's own devices.
+struct Inventory {
+    /// A handle to open each input.
+    handles: Vec<Device>,
+    /// Each input's stable id: the device name, or the PipeWire node name.
+    names: Vec<String>,
+    labels: Vec<String>,
+    kinds: Vec<sources::DeviceKind>,
+    hidden: Vec<bool>,
+    transports: Vec<Transport>,
+    /// The sound-server source to move the stream to after opening.
+    routes: Vec<Option<String>>,
+    /// Bluetooth earbuds in music mode: no microphone until they switch.
+    music_mode: Vec<bool>,
+    default: Option<(Device, String)>,
+    /// Inputs come from the sound server rather than ALSA's own list.
+    sound_server: bool,
+}
+
+impl Inventory {
+    fn read(host: &cpal::Host) -> Result<Self> {
+        #[cfg(target_os = "linux")]
+        if let Some(listing) = crate::linux::pulse::listing()
+            && let Some((handle, _)) = default_input_of(host)
+        {
+            return Ok(Self::from_listing(listing, handle));
+        }
+        let (devices, names) = input_devices_of(host)?;
+        let transports: Vec<Transport> = devices.iter().map(transport).collect();
+        Ok(Self {
+            labels: names.iter().map(|name| sources::clean_name(name)).collect(),
+            kinds: transports
+                .iter()
+                .map(|transport| match transport {
+                    Transport::BuiltIn => sources::DeviceKind::BuiltIn,
+                    Transport::Bluetooth => sources::DeviceKind::Bluetooth,
+                    Transport::Virtual => sources::DeviceKind::Virtual,
+                    Transport::Other => sources::DeviceKind::Other,
+                })
+                .collect(),
+            hidden: names
+                .iter()
+                .map(|name| sources::is_alsa_plumbing(name))
+                .collect(),
+            routes: vec![None; names.len()],
+            music_mode: vec![false; names.len()],
+            transports,
+            default: default_input_of(host),
+            handles: devices,
+            names,
+            sound_server: false,
+        })
+    }
+
+    #[cfg(target_os = "linux")]
+    fn from_listing(listing: crate::linux::pulse::Listing, handle: Device) -> Self {
+        let devices = &listing.devices;
+        let default = listing
+            .default
+            .as_ref()
+            .map(|id| (handle.clone(), id.clone()));
+        Self {
+            handles: vec![handle; devices.len()],
+            names: devices.iter().map(|device| device.id.clone()).collect(),
+            labels: devices.iter().map(|device| device.label.clone()).collect(),
+            kinds: devices.iter().map(|device| device.kind).collect(),
+            hidden: devices.iter().map(|device| device.hidden).collect(),
+            transports: devices
+                .iter()
+                .map(|device| match device.kind {
+                    sources::DeviceKind::BuiltIn => Transport::BuiltIn,
+                    sources::DeviceKind::Bluetooth => Transport::Bluetooth,
+                    sources::DeviceKind::Virtual => Transport::Virtual,
+                    _ => Transport::Other,
+                })
+                .collect(),
+            routes: devices
+                .iter()
+                .map(|device| match &device.bluetooth {
+                    Some(card) => card.source.clone(),
+                    None => Some(device.id.clone()),
+                })
+                .collect(),
+            music_mode: devices
+                .iter()
+                .map(sources::Device::needs_headset_mode)
+                .collect(),
+            default,
+            sound_server: true,
+        }
+    }
+
+    /// `--device` by id, else by its name, ignoring case.
+    fn id_for(&self, query: &str) -> String {
+        if self.names.iter().any(|name| name == query) {
+            return query.to_owned();
+        }
+        self.labels
+            .iter()
+            .position(|label| label.eq_ignore_ascii_case(query))
+            .map_or_else(|| query.to_owned(), |index| self.names[index].clone())
+    }
+
+    /// The sound server's "follow the default" stands for no saved microphone.
+    fn saved<'a>(&self, selected: Option<&'a str>) -> Option<&'a str> {
+        selected.filter(|name| {
+            !(self.sound_server
+                && (*name == "PipeWire Sound Server" || sources::is_alsa_plumbing(name)))
+        })
+    }
+}
+
 /// Resolves and opens the input, or keeps the open one when it resolves to
 /// the same device. A listed saved microphone that will not open falls back
 /// to the system default.
 fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
     let host = cpal::default_host();
-    let (devices, names) = input_devices_of(&host)?;
-    let (default, default_name) = default_input_of(&host).unzip();
-    let transports = devices.iter().map(transport).collect::<Vec<_>>();
+    let inventory = Inventory::read(&host)?;
     let route = current_route();
+    let device_override = request
+        .device_override
+        .as_deref()
+        .map(|query| inventory.id_for(query));
     let resolve = |selected: Option<&str>| {
         resolve_input(
-            request.device_override.as_deref(),
-            selected,
-            &names,
-            default_name.as_deref(),
-            |index| transports[index],
+            device_override.as_deref(),
+            inventory.saved(selected),
+            &inventory.names,
+            inventory.default.as_ref().map(|(_, name)| name.as_str()),
+            |index| inventory.transports[index],
             route,
         )
         .map_err(|error| eyre!(error))
@@ -1098,15 +1264,25 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
     // Keeping the open device returns before logging, so a periodic look
     // for a missing microphone logs only when the input changes.
     let open = |plan: InputPlan| -> Result<Opened> {
-        let (device, name, follows_default) = match plan.target {
+        let (device, name, follows_default, route_to) = match plan.target {
             InputTarget::Named(index) | InputTarget::StandIn(index) => {
-                (devices[index].clone(), names[index].clone(), false)
+                if inventory.music_mode[index] {
+                    return Err(eyre!(
+                        "{} is in music mode; its microphone starts when you dictate",
+                        inventory.labels[index]
+                    ));
+                }
+                (
+                    inventory.handles[index].clone(),
+                    inventory.names[index].clone(),
+                    false,
+                    inventory.routes[index].clone(),
+                )
             }
-            InputTarget::SystemDefault => (
-                default.clone().expect("resolved default"),
-                default_name.clone().expect("resolved default"),
-                true,
-            ),
+            InputTarget::SystemDefault => {
+                let (device, name) = inventory.default.clone().expect("resolved default");
+                (device, name, true, None)
+            }
         };
         if request.keep.as_deref() == Some(name.as_str()) {
             return Ok(Opened::Unchanged {
@@ -1115,7 +1291,7 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         }
         if let InputTarget::StandIn(_) = plan.target {
             tracing::warn!(
-                default = default_name.as_deref().unwrap_or("none"),
+                default = inventory.default.as_ref().map_or("none", |(_, name)| name.as_str()),
                 using = %name,
                 lid_closed = route.lid_closed,
                 avoid_bluetooth = route.avoid_bluetooth,
@@ -1137,14 +1313,23 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
                 "the saved microphone is off while the lid is closed; using the system default"
             ),
         }
-        let mut input = AudioInput::open_device(device, name, follows_default)?;
+        let mut input = AudioInput::open_device(device, name.clone(), follows_default)?;
+        if let Some(index) = inventory.names.iter().position(|listed| *listed == name) {
+            input.device_label = inventory.labels[index].clone();
+        }
         input.selection = plan.selection;
-        // The ALSA default cannot name another PipeWire source, so Linux
-        // moves the opened stream off a Bluetooth default instead.
         #[cfg(target_os = "linux")]
-        if follows_default && route.avoid_bluetooth {
+        if let Some(node) = route_to {
+            // Hex records through ALSA's default; the sound server moves the
+            // stream to the chosen source.
+            crate::linux::pulse::route_streams_to(node);
+        } else if follows_default && route.avoid_bluetooth && !inventory.sound_server {
+            // The ALSA default cannot name another PipeWire source, so Linux
+            // moves the opened stream off a Bluetooth default instead.
             crate::linux::input_route::move_streams_off_bluetooth();
         }
+        #[cfg(not(target_os = "linux"))]
+        drop(route_to);
         Ok(Opened::Input(Box::new(input)))
     };
     let plan = resolve(request.selected_device.as_deref())?;
@@ -1207,13 +1392,31 @@ fn open_selected<T>(
     open_default()
 }
 
+/// One input as the picker names it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InputDevice {
+    /// What `microphone` saves: the device name, or on Linux the PipeWire
+    /// node name (`bluez_input.<address>` for Bluetooth earbuds).
+    pub id: String,
+    /// The cleaned-up name, before the user's own name for it.
+    pub label: String,
+    pub kind: sources::DeviceKind,
+    /// A monitor, null device, or effect or virtual node: listed only when
+    /// the picker shows every device.
+    pub hidden: bool,
+    /// Bluetooth earbuds in music mode, whose microphone starts with headset mode.
+    pub music_mode: bool,
+}
+
 /// The inputs Settings offers, without Hex Microphone, and what System
 /// default currently resolves to.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InputDevices {
+    /// The ids of the inputs the picker lists by default.
     pub names: Vec<String>,
-    /// The input System default captures from. Linux's ALSA default has no
-    /// useful name, so it is `None` there.
+    /// Every input, with its label, kind and whether it is hidden by default.
+    pub devices: Vec<InputDevice>,
+    /// The input System default captures from, by id.
     pub system_default: Option<String>,
     /// The OS default is Hex Microphone, so `system_default` stands in.
     pub default_is_hex_microphone: bool,
@@ -1227,18 +1430,42 @@ pub struct InputDevices {
     pub bluetooth_default_passed_over: Option<String>,
 }
 
+impl InputDevices {
+    /// The cleaned-up name listed for `id`, if it is listed.
+    pub fn listed_label(&self, id: &str) -> Option<&str> {
+        self.devices
+            .iter()
+            .find(|device| device.id == id)
+            .map(|device| device.label.as_str())
+    }
+
+    /// The name to show for `id`: the user's own, else the listed one.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub fn label(&self, aliases: &std::collections::BTreeMap<String, String>, id: &str) -> String {
+        sources::label_for(aliases, id, self.listed_label(id))
+    }
+
+    /// Whether any listed input is a Bluetooth headset with a microphone.
+    pub fn has_bluetooth_microphone(&self) -> bool {
+        self.devices
+            .iter()
+            .any(|device| device.kind == sources::DeviceKind::Bluetooth && !device.hidden)
+    }
+}
+
 pub fn input_devices() -> Result<InputDevices> {
     #[cfg(target_os = "macos")]
     watch_input_devices();
     let host = cpal::default_host();
-    let (devices, listed) = input_devices_of(&host)?;
-    let default = default_input_of(&host).map(|(_, name)| name);
+    let inventory = Inventory::read(&host)?;
+    let listed = &inventory.names;
+    let default = inventory.default.as_ref().map(|(_, name)| name.clone());
     let default_is_hex_microphone = default
         .as_deref()
         .is_some_and(crate::audio::hex_microphone::is_hex_virtual_device_name);
-    let transports = devices.iter().map(transport).collect::<Vec<_>>();
+    let transports = &inventory.transports;
     let route = current_route();
-    let off_with_lid_closed = (0..devices.len())
+    let off_with_lid_closed = (0..listed.len())
         .find(|&index| route.lid_closed && transports[index] == Transport::BuiltIn)
         .map(|index| listed[index].clone());
     let default_is_off_with_lid_closed =
@@ -1246,7 +1473,7 @@ pub fn input_devices() -> Result<InputDevices> {
     let plan = resolve_input(
         None,
         None,
-        &listed,
+        listed,
         default.as_deref(),
         |index| transports[index],
         route,
@@ -1266,26 +1493,44 @@ pub fn input_devices() -> Result<InputDevices> {
             InputTarget::SystemDefault => default.clone(),
             InputTarget::Named(index) | InputTarget::StandIn(index) => Some(listed[index].clone()),
         })
-        .filter(|_| cfg!(not(target_os = "linux")));
-    // Linux names the sound server's sources instead, and only when it
-    // passes over a Bluetooth default.
+        .filter(|_| cfg!(not(target_os = "linux")) || inventory.sound_server);
+    // Without a sound server's list, Linux names the sources it can see,
+    // and only when it passes over a Bluetooth default.
     #[cfg(target_os = "linux")]
-    let (system_default, bluetooth_default_passed_over) = match route
-        .avoid_bluetooth
-        .then(crate::linux::input_route::bluetooth_stand_in)
-        .flatten()
-    {
-        Some(stand_in) => (Some(stand_in.input), Some(stand_in.bluetooth)),
-        None => (system_default, bluetooth_default_passed_over),
+    let (system_default, bluetooth_default_passed_over) = if inventory.sound_server {
+        (system_default, bluetooth_default_passed_over)
+    } else {
+        match route
+            .avoid_bluetooth
+            .then(crate::linux::input_route::bluetooth_stand_in)
+            .flatten()
+        {
+            Some(stand_in) => (Some(stand_in.input), Some(stand_in.bluetooth)),
+            None => (system_default, bluetooth_default_passed_over),
+        }
     };
-    let mut names = listed
-        .into_iter()
-        .filter(|name| !crate::audio::hex_microphone::is_hex_virtual_device_name(name))
-        .collect::<Vec<_>>();
-    names.sort_by_key(|name| name.to_lowercase());
-    names.dedup();
+    let mut devices: Vec<InputDevice> = (0..listed.len())
+        .filter(|&index| !crate::audio::hex_microphone::is_hex_virtual_device_name(&listed[index]))
+        .map(|index| InputDevice {
+            id: listed[index].clone(),
+            label: inventory.labels[index].clone(),
+            kind: inventory.kinds[index],
+            hidden: inventory.hidden[index],
+            music_mode: inventory.music_mode[index],
+        })
+        .collect();
+    if !inventory.sound_server {
+        devices.sort_by_key(|device| device.label.to_lowercase());
+    }
+    devices.dedup_by(|a, b| a.id == b.id);
+    let names = devices
+        .iter()
+        .filter(|device| !device.hidden)
+        .map(|device| device.id.clone())
+        .collect();
     Ok(InputDevices {
         names,
+        devices,
         system_default,
         default_is_hex_microphone,
         off_with_lid_closed,
@@ -1548,10 +1793,12 @@ mod tests {
     const OPEN: Route = Route {
         lid_closed: false,
         avoid_bluetooth: false,
+        avoid_selected_bluetooth: false,
     };
     const CLOSED: Route = Route {
         lid_closed: true,
         avoid_bluetooth: false,
+        avoid_selected_bluetooth: false,
     };
 
     fn other(_: usize) -> Transport {
@@ -1633,6 +1880,60 @@ mod tests {
     }
 
     #[test]
+    fn keep_music_quality_records_from_the_built_in_microphone_not_the_saved_earbuds() {
+        use InputTarget::{Named, StandIn, SystemDefault};
+        use Transport::{Bluetooth, BuiltIn, Other, Virtual};
+        let names = listed(&["Effects", "USB Mic", "Test Buds", "Laptop Mic"]);
+        let transports = [Virtual, Other, Bluetooth, BuiltIn];
+        let transport = |index: usize| transports[index];
+        let found = |target| {
+            Ok(InputPlan {
+                target,
+                selection: Selection::InUse,
+            })
+        };
+        let keep = Route {
+            avoid_bluetooth: true,
+            avoid_selected_bluetooth: true,
+            ..Default::default()
+        };
+        let plan = |selected, default, route| {
+            resolve_input(None, selected, &names, default, transport, route)
+        };
+        // The saved earbuds are passed over for the built-in microphone, even
+        // when the default is another real input.
+        assert_eq!(
+            plan(Some("Test Buds"), Some("USB Mic"), keep),
+            found(StandIn(3))
+        );
+        assert_eq!(plan(Some("Test Buds"), None, keep), found(StandIn(3)));
+        // A virtual node never stands in; with no built-in one, a wired input does.
+        let no_built_in = listed(&["Effects", "USB Mic", "Test Buds"]);
+        let no_built_in_transports = [Virtual, Other, Bluetooth];
+        assert_eq!(
+            resolve_input(
+                None,
+                Some("Test Buds"),
+                &no_built_in,
+                None,
+                |index| no_built_in_transports[index],
+                keep
+            ),
+            found(StandIn(1))
+        );
+        // Other saved microphones are used as named.
+        assert_eq!(plan(Some("USB Mic"), None, keep), found(Named(1)));
+        // Headset mode (the default choice) honours the saved earbuds as named.
+        assert_eq!(
+            plan(Some("Test Buds"), Some("USB Mic"), OPEN),
+            found(Named(2))
+        );
+        // Following the system default stays on it unless that is Bluetooth.
+        assert_eq!(plan(None, Some("USB Mic"), keep), found(SystemDefault));
+        assert_eq!(plan(None, Some("Test Buds"), keep), found(StandIn(3)));
+    }
+
+    #[test]
     fn system_default_passes_over_a_bluetooth_default() {
         use InputTarget::{Named, StandIn, SystemDefault};
         use Transport::{Bluetooth, BuiltIn, Other};
@@ -1647,6 +1948,7 @@ mod tests {
         let avoid = Route {
             lid_closed: false,
             avoid_bluetooth: true,
+            ..Default::default()
         };
         let found = |target, selection| Ok(InputPlan { target, selection });
         let plan = |selected, default, route| {
@@ -1721,6 +2023,7 @@ mod tests {
         let avoid = Route {
             lid_closed: false,
             avoid_bluetooth: true,
+            ..Default::default()
         };
         let found = |target| {
             Ok(InputPlan {
@@ -1755,6 +2058,7 @@ mod tests {
                 Route {
                     lid_closed: true,
                     avoid_bluetooth: true,
+                    ..Default::default()
                 }
             ),
             found(SystemDefault)
@@ -1769,6 +2073,7 @@ mod tests {
         let avoid = Route {
             lid_closed: false,
             avoid_bluetooth: true,
+            ..Default::default()
         };
 
         // Lid closed, only the built-in microphone and Teams: say why.
@@ -2089,6 +2394,7 @@ mod tests {
         // A dropped sender reads as a failed stream.
         std::mem::forget(samples);
         input.device_name = name.into();
+        input.device_label = name.into();
         input
     }
 
