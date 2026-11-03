@@ -31,9 +31,15 @@ fn toggle_diagnostics(ui: &mut Ui) {
     row.error = None;
     if row.open {
         let provider = crate::transcription::cloud::route_for_choice(ui.settings.engine);
-        row.text =
-            crate::diagnostics::Diagnostics::collect(provider, ui.platform.activity_log.as_deref())
-                .text();
+        // Every OS keeps the log in the logs folder; only macOS's host also
+        // hands the window the path. Unit tests never read the real folder.
+        let log = ui.platform.activity_log.clone().or_else(|| {
+            (!cfg!(test))
+                .then(|| crate::app_paths::logs_dir().ok())
+                .flatten()
+                .map(|directory| directory.join("live.ndjson"))
+        });
+        row.text = crate::diagnostics::Diagnostics::collect(provider, log.as_deref()).text();
     } else {
         row.text.clear();
     }

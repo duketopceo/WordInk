@@ -1253,6 +1253,9 @@ impl Ui {
         explainer::close(self);
         sound_sets::close(self);
         vocabulary::close(self);
+        // The summary is made when the row opens; leaving Privacy drops it so
+        // the next visit reads the engine and errors as they are then.
+        self.diagnostics = Default::default();
         self.output.prompt_copied = false;
         if pane == Pane::Replacements {
             replacements::open(self);

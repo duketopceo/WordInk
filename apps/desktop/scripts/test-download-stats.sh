@@ -51,6 +51,12 @@ echo '[]' > "$temporary/empty.json"
 out=$(sh "$root/scripts/download-stats.sh" --fixture "$temporary/empty.json")
 has '^No releases\.$'
 
+# Input jq rejects stops the report with a failure, not an empty success.
+echo 'not json' > "$temporary/bad.json"
+if sh "$root/scripts/download-stats.sh" --fixture "$temporary/bad.json" >/dev/null 2>&1; then
+  fail "a malformed fixture should fail"
+fi
+
 # A missing fixture is an error.
 if sh "$root/scripts/download-stats.sh" --fixture "$temporary/none.json" >/dev/null 2>&1; then
   fail "a missing fixture should fail"

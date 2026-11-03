@@ -48,7 +48,7 @@ else
 fi
 
 # `gh api --paginate` prints one JSON array per page; slurp and join them.
-printf '%s\n' "$releases" | jq -rs '
+report=$(printf '%s\n' "$releases" | jq -rs '
   def kind:
     if test("\\.sig$") or test("^SHA256SUMS") or test("\\.json$") or test("sbom"; "i") then "skip"
     elif test("\\.(tar\\.gz|tgz|zip)$") then "install"
@@ -81,4 +81,5 @@ printf '%s\n' "$releases" | jq -rs '
       "  installs\t\([$all[].rows[]] | sum("install"))",
       "  updates (bare Linux binary)\t\([$all[].rows[]] | sum("update"))"
     end
-' | awk -F '\t' 'NF == 2 { printf "%-34s %s\n", $1, $2; next } { print }'
+')
+printf '%s\n' "$report" | awk -F '\t' 'NF == 2 { printf "%-34s %s\n", $1, $2; next } { print }'

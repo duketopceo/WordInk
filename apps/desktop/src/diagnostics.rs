@@ -28,6 +28,9 @@ pub struct Diagnostics {
     pub engine: String,
     pub install: String,
     pub errors: Vec<String>,
+    /// Why the event log could not be read (the error kind, never a path);
+    /// the summary then says so instead of claiming there were no errors.
+    pub log_unreadable: Option<String>,
 }
 
 /// The engine kind in words: `local`, `Groq`, or `cloud (<provider>)`.
@@ -68,6 +71,12 @@ impl Diagnostics {
     /// dictation uses now (`None` is local); `event_log` is `live.ndjson`.
     pub fn collect(provider: Option<Provider>, event_log: Option<&Path>) -> Self {
         let (channel, install) = crate::updater::install_summary();
+        let read = event_log.map(|path| recent_errors(path, &Redactions::from_environment()));
+        let (errors, log_unreadable) = match read {
+            None => (Vec::new(), None),
+            Some(Ok(errors)) => (errors, None),
+            Some(Err(kind)) => (Vec::new(), Some(kind.to_string())),
+        };
         Self {
             version: crate::VERSION.to_owned(),
             channel,
@@ -75,9 +84,8 @@ impl Diagnostics {
             arch: std::env::consts::ARCH.to_owned(),
             engine: engine_kind(provider),
             install,
-            errors: event_log
-                .map(|path| recent_errors(path, &Redactions::from_environment()))
-                .unwrap_or_default(),
+            errors,
+            log_unreadable,
         }
     }
 
@@ -87,7 +95,11 @@ impl Diagnostics {
             "WordInk diagnostics\nVersion: {}\nUpdate channel: {}\nOS: {}\nArchitecture: {}\nEngine: {}\nInstall method: {}\n",
             self.version, self.channel, self.os, self.arch, self.engine, self.install
         );
-        if self.errors.is_empty() {
+        if let Some(kind) = &self.log_unreadable {
+            text.push_str(&format!(
+                "Recent errors: unavailable (could not read the event log: {kind})\n"
+            ));
+        } else if self.errors.is_empty() {
             text.push_str("Recent errors: none\n");
         } else {
             text.push_str("Recent errors:\n");
@@ -104,11 +116,9 @@ impl Diagnostics {
 /// The newest failures in the event log, newest first, scrubbed. Only the
 /// failure messages are read: transcripts, commands heard and pasted text in
 /// the same log never reach the summary.
-fn recent_errors(path: &Path, redactions: &Redactions) -> Vec<String> {
+fn recent_errors(path: &Path, redactions: &Redactions) -> Result<Vec<String>, std::io::ErrorKind> {
     let mut reader = EventReader::open(path);
-    if reader.refresh().is_err() {
-        return Vec::new();
-    }
+    reader.refresh().map_err(|error| error.kind())?;
     let mut errors: Vec<String> = Vec::new();
     for event in reader.events().iter().rev() {
         let message = match event {
@@ -133,7 +143,7 @@ fn recent_errors(path: &Path, redactions: &Redactions) -> Vec<String> {
             break;
         }
     }
-    errors
+    Ok(errors)
 }
 
 /// `message` on one line with paths, key-like tokens and this machine's user
@@ -266,6 +276,7 @@ mod tests {
             engine: engine_kind(Some(Provider::Groq)),
             install: "direct".into(),
             errors,
+            log_unreadable: None,
         }
     }
 
@@ -295,7 +306,7 @@ mod tests {
     #[test]
     fn recent_errors_are_listed_without_transcripts_paths_or_keys() {
         let path = fixture_log();
-        let errors = recent_errors(&path, &redactions());
+        let errors = recent_errors(&path, &redactions()).unwrap();
         let text = state(errors.clone()).text();
         assert_eq!(errors.len(), 2, "{errors:?}");
         assert!(text.contains("command: paste helper exited 1"));
@@ -313,8 +324,24 @@ mod tests {
     #[test]
     fn a_missing_event_log_means_no_recent_errors() {
         let missing = std::env::temp_dir().join("wordink-diagnostics-none/live.ndjson");
-        assert!(recent_errors(&missing, &redactions()).is_empty());
+        assert!(recent_errors(&missing, &redactions()).unwrap().is_empty());
         assert!(state(Vec::new()).text().contains("Recent errors: none"));
+    }
+
+    #[test]
+    fn an_unreadable_event_log_is_reported_not_called_none() {
+        // A directory where the log should be: opening it as a file fails
+        // with something other than NotFound.
+        let dir =
+            std::env::temp_dir().join(format!("wordink-diag-unreadable-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(recent_errors(&dir, &redactions()).is_err());
+        let mut unreadable = state(Vec::new());
+        unreadable.log_unreadable = Some("permission denied".into());
+        let text = unreadable.text();
+        assert!(text.contains("Recent errors: unavailable"), "{text}");
+        assert!(!text.contains("Recent errors: none"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

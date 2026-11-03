@@ -232,3 +232,16 @@ fn a_failed_diagnostics_copy_shows_the_error_and_keeps_the_text() {
     assert!(present(&rt, "privacy-diagnostics-text"));
     assert!(shown.contains("Version: "));
 }
+
+#[test]
+fn leaving_privacy_closes_the_diagnostics_row() {
+    let mut rt = runtime("privacy", true, (PANE_SIZE.0, 1400.0));
+    tap(&mut rt, "privacy-diagnostics-toggle");
+    assert!(present(&rt, "privacy-diagnostics-text"));
+    tap(&mut rt, "nav-general");
+    tap(&mut rt, "nav-privacy");
+    assert!(
+        !present(&rt, "privacy-diagnostics-text"),
+        "the summary is rebuilt on the next open"
+    );
+}
