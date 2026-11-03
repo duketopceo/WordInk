@@ -6,6 +6,8 @@ topic: wordink-one-app
 artifact_contract: ce-unified-plan/v1
 product_contract_source: ce-brainstorm
 execution: code
+status: done
+pr: [111]
 ---
 
 # WordInk one app (Hex base, Voxtype parity, open-source ready) - Plan

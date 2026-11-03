@@ -22,8 +22,7 @@ override shipped behavior.
   components, Hex pieces, copy rules, and `--snap` scene verification.
 - [`features/README.md`](features/README.md): existing user-facing capabilities,
   entry points, available verification, and gaps; detailed dictation and recovery maps.
-- [`downloads.md`](downloads.md): public download paths, R2 custom domains,
-  GitHub release mirrors, and network recovery.
+- [`downloads.md`](downloads.md): installers, release assets, channels, signing status, and network recovery.
 - [`opencode-compatibility.md`](opencode-compatibility.md): audited OpenCode V2
   source and CLI baseline, integration contract, and validation limits.
 - [`plans/personal-commands.md`](plans/personal-commands.md): shipped personal

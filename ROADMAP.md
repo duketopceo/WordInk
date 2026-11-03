@@ -1,64 +1,68 @@
 # WordInk Roadmap
 
-WordInk now has **one desktop app** (`apps/desktop`, based on [Hex](https://github.com/anomalyco/hex), MIT) for Linux, Windows and macOS. The app foundation is merged on `master` (PR #111); its active implementation plan is `docs/plans/2026-11-02-0136-feat-wordink-one-app-plan.md`. The default HUD will merge Hex's status pill with Voxtype's audio-reactive meter in one popup. Earlier plans are in [`docs/archive/`](docs/archive/) or superseded.
+WordInk is one desktop app (`apps/desktop`, based on [Hex](https://github.com/anomalyco/hex), MIT) for Linux, Windows and macOS. It is on `master` at version 1.0.0. The first release candidate, `desktop-v1.0.0-rc.1`, is a published prerelease, built and install-tested on Linux x86_64 and aarch64, macOS arm64 and Windows x64. The final 1.0.0 tag is not cut yet. The active plan is [`docs/plans/2026-11-02-1907-feat-wordink-1-0-release-plan.md`](docs/plans/2026-11-02-1907-feat-wordink-1-0-release-plan.md). Earlier plans are in [`docs/archive/`](docs/archive/) or marked `status: done`.
 
-This page lists themes, not tickets. "Done" means merged to `master`. "Planned" means not started or not merged yet.
+This page lists themes, not tickets. "Done" means merged to `master`.
 
 ## Direction
 
-- **Groq by default.** Bring your own Groq key and dictation works. A local model needs no key: Parakeet v3 is the planned local default.
-- **Open source, no telemetry, no WordInk servers.** MIT licensed.
-- **Linux on any Wayland desktop** (Omarchy gets extras), **Windows**, and **macOS on Apple silicon**.
-- **`wordink-dictd` stays** (Python, `sdks/python`) until the desktop app reaches parity on each OS. Then it is retired there.
-- **Separate products, not merged into the app:** the web SDK (`packages/*`), the gateway (`packages/server`). The iOS app is paused.
+- **Groq by default.** Bring your own Groq key and dictation works. A local Parakeet model needs no key.
+- **Open source, no telemetry, no WordInk servers.** MIT licensed. The only opt-in is "Copy diagnostics"; download counts come from GitHub.
+- **Linux on any Wayland desktop**, **Windows**, and **macOS on Apple silicon**.
+- **`wordink-dictd` stays** (Python, `sdks/python`) until the desktop app is verified as its replacement on each OS.
+- **Separate products, not merged into the app:** the web SDK (`packages/*`) and the gateway (`packages/server`).
 
-## Now
+## Now: finish 1.0
 
-- **Desktop app foundation.** Hex's MIT app is in `apps/desktop` with WordInk branding, Groq cloud transcription, local models, settings and indicator styles (PR #111; settings fixes #119 and #121). The current gap is the combined default HUD and real-device acceptance; no desktop release is tagged yet.
-- **Repo hygiene.** The superseded `legacy/` app is removed, old plans are archived, and personal details were scrubbed (PR #110).
-- **Open-source basics.** Third-party notices, security policy, DCO contribution guide, code of conduct, issue templates and CodeQL are merged (PR #109).
+- Merge the open PRs: developer-mode debug logs, coded errors and earbud reliability (#139); the OpenRouter transcription engine, p50/p95 latency and the meeting engine setting (#142).
+- Cut `desktop-v1.0.0-rc.2`, run [`docs/release-checklist.md`](docs/release-checklist.md), then tag `desktop-v1.0.0`. The flow is in [`docs/releasing.md`](docs/releasing.md).
 
 ## Next
 
-- **Parity with the interim daemon.** Text replacements, filler removal, media pause, more cloud providers, meeting mode, usage and history. Planned.
-- **Cross-OS install.** Complete and verify install/update paths, then publish signed Linux releases; macOS and Windows remain unsigned until paid signing is available.
-- **Retire `wordink-dictd` per OS** once the app matches it there, starting with Linux. Planned.
-- **Publish the web SDK and gateway to npm.** The release workflow exists; publishing is switched off until an npm scope is set up. Planned.
+- Make Parakeet v3 the installed local default (today it is Parakeet Unified).
+- Find the roughly 9 s of app overhead on Groq requests.
+- Pick the top three OpenRouter engines per use: dictation (Groq turbo, MAI-Transcribe 2, hosted Parakeet v3) and meetings (Nemotron 3.5, Voxtral Small 3, MAI-Transcribe 2).
+- Show Groq quota in the app.
+- Opus uploads, and larger chunks for cloud meeting transcription.
+- A Compare engines screen, building on `wordink compare`.
+- Publish the web SDK and gateway to npm (the workflow exists; publishing is off until a scope is set up).
 
 ## Later
 
-- macOS notarization and Windows Authenticode signing (both need paid accounts). Until then macOS and Windows builds are unsigned and the docs say so.
-- Live-API hardening for OpenAI and Deepgram in the web SDK, and a manual cross-browser handcheck.
-- Rebuild the iOS app, lightweight (the earlier app is preserved on branch `archive/ios-2026-11-03`).
-- Stronger local engines in the browser SDK.
+- Signed macOS (notarization) and Windows (Authenticode) builds. Both need paid accounts.
+- Self-hosted release runners.
+- A lightweight iOS rebuild. The earlier app is preserved on branch `archive/ios-2026-11-03`.
+- Vocabulary generation during onboarding.
+- Live-API hardening for OpenAI and Deepgram in the web SDK; stronger local engines in the browser SDK.
 
 ## Platform support
 
-| Platform | Desktop app (`apps/desktop`) | `wordink-dictd` today | Notes |
+| Platform | Desktop app (`apps/desktop`) | Install | Signing and updates |
 |---|---|---|---|
-| Linux, Wayland (any desktop) | App code in `master`; device acceptance and release pending | Works; text insertion and binds are Hyprland-first (see `examples/omarchy-dictation`) | Omarchy smoke test remains; Linux release signing is planned |
-| Windows | App code in `master`; device acceptance and release pending | Works (`examples/windows-dictation`) | Real-hardware acceptance remains; unsigned |
-| macOS, Apple silicon | App code in `master`; device acceptance and release pending | Works; first-run verified on a real Mac (`examples/macos-dictation`) | Real-app acceptance remains; unsigned, not notarized |
-| iOS | Paused | n/a | The earlier app is preserved on branch `archive/ios-2026-11-03` and will be rebuilt later |
-| Web | Separate product (`packages/*`) | n/a | `<wordink-mic>` and React; not on npm yet |
+| Linux x86_64, aarch64 (Wayland; glibc 2.39+, OpenSSL 3) | 1.0.0-rc.1 | `install.sh` one-liner | ed25519-verified; self-updating |
+| macOS, Apple silicon | 1.0.0-rc.1 | `install-macos.sh` one-liner (`WordInk.app` in `~/Applications`) | Unsigned, not notarized; updates are download-only |
+| Windows x64 | 1.0.0-rc.1 | `install.ps1` one-liner (per-user) | Unsigned (SmartScreen warns); updates are download-only |
+| iOS | Paused | n/a | Preserved on `archive/ios-2026-11-03` |
+| Web | Separate product (`packages/*`) | `<wordink-mic>` and React; not on npm yet | n/a |
 
-## Model and provider support
+`wordink-dictd` still works on Linux, Windows and macOS (`examples/*-dictation`).
+
+## Engines
 
 | Engine | Where | State |
 |---|---|---|
-| Groq Whisper | `wordink-dictd`, gateway, web relay | Done. Default |
-| Groq Whisper | Desktop app | Implemented in `apps/desktop`; default when a Groq key is set |
-| Parakeet v3 (local, no key) | Desktop app | In the app's model path; intended no-key default |
-| OpenAI transcription | Gateway, web relay | Done; live-API check still to do |
-| Deepgram | Gateway, web relay | Done; live-API check still to do |
-| More cloud providers | Desktop app | Planned |
+| Groq `whisper-large-v3-turbo` | Desktop app, `wordink-dictd`, gateway, web relay | Done. Default when a Groq key is set |
+| OpenRouter | Desktop app | Audio-chat models today; first-party transcription endpoint (29 models, including MAI-Transcribe 2 and Nemotron 3.5) in open PR #142 |
+| Parakeet (local, no key) | Desktop app | Done. v3 is recommended; the installed default is Parakeet Unified until the switch. GPU through Vulkan on Linux |
+| OpenAI transcription, Deepgram | Gateway, web relay | Done; live-API check still to do |
 | Moonshine (in the browser, offline) | `@wordink/local` | Done |
 
 ## Done so far
 
-- **Foundation.** Monorepo tooling, CI, docs site with live demo.
-- **Web SDK.** `@wordink/core` (Rust core as WebAssembly plus a TypeScript host), `<wordink-mic>`, `useDictation`, the credential relay.
+- **Desktop app 1.0 line.** App merged (#111), terminal auto-paste (#126), usage stats (#123), vocabulary suggestions (#125), copy diagnostics and download counts (#132), Bluetooth earbuds and clean mic names (#134), shorter first run (#138), FLAC uploads and `wordink compare` (#143), cross-OS installers and release workflow.
+- **Foundation.** Monorepo tooling, CI, docs site with live demo, open-source basics.
+- **Web SDK.** `@wordink/core`, `<wordink-mic>`, `useDictation`, the credential relay.
 - **Gateway.** `wordink-gateway`: OpenAI-compatible endpoint, provider fallback, per-device tokens, runtime vocabulary.
-- **Python tooling.** `wordink` CLI and `wordink-mcp`; `wordink-dictd` on Linux, Windows and macOS.
+- **Python tooling.** `wordink` CLI and `wordink-mcp`; `wordink-dictd`.
 
-Background: [`docs/research/2026-10-10-landscape.md`](docs/research/2026-10-10-landscape.md) (landscape), [`DESIGN.md`](DESIGN.md) (design direction).
+Background: [`docs/research/2026-10-10-landscape.md`](docs/research/2026-10-10-landscape.md), [`DESIGN.md`](DESIGN.md).

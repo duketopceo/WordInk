@@ -60,16 +60,7 @@ corrections, optional OpenCode rewriting, and ordered text transformations;
 stage failures preserve the preceding pipeline output. Do not add a generalized
 processor framework without a concrete need beyond this shipped sequence.
 
-Keep Swift and Rust separate. Prefer the old app's existing Sparkle update window
-with a website-only informational item to install the new app manually, with no
-data import or automatic replacement.
-Follow [`docs/plans/swift-app-handoff.md`](docs/plans/swift-app-handoff.md).
-The new app uses identity `com.kitlangton.hex2`, display name `Hex`, and filename
-`Hex.app`, with data in `hex`. Use Kit's approved
-Developer ID signing team and validate the new identity before release. The legacy
-S3 feed must never install a Rust payload. Publish
-the updated Rust artifact first, then the separately validated legacy feed notice.
-No Swift rebuild should be necessary for the notice.
+The product roadmap lives in the repository root: [`ROADMAP.md`](../../ROADMAP.md).
 
 ## Validate The Linux Beta
 

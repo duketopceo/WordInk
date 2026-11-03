@@ -6,6 +6,7 @@ topic: desktop-1-0-release
 artifact_contract: ce-unified-plan/v1
 product_contract_source: ce-plan-bootstrap
 execution: code
+status: active
 ---
 
 # WordInk desktop 1.0.0 release - Plan
@@ -139,38 +140,51 @@ Release flow: a tag runs one gated pipeline; candidates feed the Dev channel, fi
 
 ```mermaid
 flowchart LR
-  T[push tag desktop-v*] --> G{on master and Desktop\ngreen on tag commit?}
+  T[push tag desktop-v*] --> G{on master and Desktop
+green on tag commit?}
   G -- no --> X[fail, nothing published]
-  G -- yes --> B[build 4 targets\n+ WordInk.app]
-  B --> S[sign Linux binaries\nrelease environment]
-  S --> D[draft release with assets\ninstallers, stable.json or dev.json]
-  D --> M[smoke from draft assets via loopback\nlinux x64, linux arm64, macOS, Windows]
+  G -- yes --> B[build 4 targets
++ WordInk.app]
+  B --> S[sign Linux binaries
+release environment]
+  S --> D[draft release with assets
+installers, stable.json or dev.json]
+  D --> M[smoke from draft assets via loopback
+linux x64, linux arm64, macOS, Windows]
   M -- fail --> K[keep draft, report]
   M -- pass --> P{tag has -rc.N?}
-  P -- yes --> R1[publish prerelease\nrefresh desktop-dev/dev.json]
-  P -- no --> R2[publish as latest\nstable.json, refresh dev.json]
+  P -- yes --> R1[publish prerelease
+refresh desktop-dev/dev.json]
+  P -- no --> R2[publish as latest
+stable.json, refresh dev.json]
 ```
 
 Linux bootstrap install path (KTD2, KTD10):
 
 ```mermaid
 flowchart TD
-  A[curl install.sh / sh] --> B{preflight: arch, glibc>=2.39,\nOpenSSL 3, not root}
+  A[curl install.sh / sh] --> B{preflight: arch, glibc>=2.39,
+OpenSSL 3, not root}
   B -- fail --> F[one line: requirement + releases link]
-  B -- ok --> C[download SHA256SUMS + .sig\nprogress bar on a TTY]
-  C --> V{ed25519 verify with\nembedded key}
+  B -- ok --> C[download SHA256SUMS + .sig
+progress bar on a TTY]
+  C --> V{ed25519 verify with
+embedded key}
   V -- fail --> F2[one line: signature failed, nothing changed]
-  V -- ok --> E[download tarball, check its hash\nagainst SHA256SUMS]
+  V -- ok --> E[download tarball, check its hash
+against SHA256SUMS]
   E --> I{existing install?}
   I -- source build --> MIG[stop service, back up current]
   I -- package-owned /usr/bin/wordink --> F3[one line: already installed by package]
   I -- same or newer release --> N[already installed, no change]
   I -- none or older --> L[lay out versions/v, current, receipt]
   MIG --> L
-  L --> U[install unit, desktop entry, icons\nrestart service]
+  L --> U[install unit, desktop entry, icons
+restart service]
   U --> H{service active?}
   H -- yes --> OK[WordInk 1.0.0 installed. Open it with: wordink app]
-  H -- no --> W[installed; autostart not running: run wordink app\nrestore backup if migrating]
+  H -- no --> W[installed; autostart not running: run wordink app
+restore backup if migrating]
 ```
 
 ### Assumptions

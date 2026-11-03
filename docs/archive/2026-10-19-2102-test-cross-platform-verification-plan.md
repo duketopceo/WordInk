@@ -121,7 +121,7 @@ flowchart LR
 
 ### Sources
 
-- `docs/solutions/ios-ci-github-actions.md` — sim-only signing recipe; device deploy needs real provisioning (KTD4).
+- `docs/archive/ios-ci-github-actions.md` — sim-only signing recipe; device deploy needs real provisioning (KTD4).
 - `docs/solutions/best-practices/read-the-target-apps-openai-compatible-engine-first.md` — TypeWhisper contract facts; base-URL `/v1` omission is the top failure (R5).
 - `docs/solutions/best-practices/operator-config-is-hostile-input.md` — assertable fail-closed checks for the verify tool (U1 test scenarios).
 - `docs/solutions/test-failures/chromium-fake-mic-loops-from-launch.md` — fuzzy transcript assertions; mechanism note: `fakeMicFromClip` now substitutes the AudioWorklet, not the learning's older BufferSource stub (KTD5).
