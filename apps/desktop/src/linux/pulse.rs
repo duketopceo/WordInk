@@ -86,6 +86,10 @@ const UNLINKED: u32 = u32::MAX;
 /// EasyEffects move every new capture stream into their own chain a moment
 /// after it is placed.
 const STABLE_POLLS: u32 = 3;
+/// A stream that already followed the default source, with no move of ours
+/// to undo, needs less: there is no re-link race of our own making.
+const STABLE_POLLS_UNMOVED: u32 = 2;
+const STABLE_FOR_UNMOVED: Duration = Duration::from_millis(150);
 const UNLINKED_GRACE_POLLS: u32 = 5;
 const STABLE_FOR: Duration = Duration::from_millis(300);
 
@@ -228,7 +232,12 @@ pub(crate) fn route_until_confirmed(
                         stable_since = waited;
                     }
                     stable_polls += 1;
-                    if stable_polls >= STABLE_POLLS && waited - stable_since >= STABLE_FOR {
+                    let (need_polls, need_for) = if moved == 0 {
+                        (STABLE_POLLS_UNMOVED, STABLE_FOR_UNMOVED)
+                    } else {
+                        (STABLE_POLLS, STABLE_FOR)
+                    };
+                    if stable_polls >= need_polls && waited - stable_since >= need_for {
                         return Ok(Routed {
                             moved,
                             polls,
@@ -590,6 +599,19 @@ mod tests {
             routed.waited,
             Duration::from_millis(50) * (routed.polls - 1)
         );
+    }
+
+    #[test]
+    fn a_stream_that_followed_the_default_confirms_in_a_shorter_window() {
+        let mut server = Fake::new();
+        server.stream_on = Some(7);
+        let routed = route(&mut server).unwrap();
+        assert_eq!(routed.moved, 0);
+        assert!(routed.waited >= STABLE_FOR_UNMOVED);
+        assert!(routed.waited < STABLE_FOR, "{:?}", routed.waited);
+        // The watcher still catches a later hijack.
+        server.stream_on = Some(123);
+        assert!(check_still_routed(&mut server, NODE).is_err());
     }
 
     #[test]

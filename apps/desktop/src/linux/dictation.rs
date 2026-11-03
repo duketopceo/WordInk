@@ -888,7 +888,6 @@ pub(crate) fn run(
             if !std::mem::take(&mut headset_connecting) {
                 continue;
             }
-            indicator.earbuds_connecting(false);
             let switch_ms = headset_began
                 .take()
                 .map(|at| at.elapsed().as_millis() as u64);
@@ -903,6 +902,7 @@ pub(crate) fn run(
                 crate::linux::headset::Event::Ready => input.request_open(),
                 crate::linux::headset::Event::Failed(error) => {
                     start_pending = false;
+                    indicator.earbuds_connecting(false);
                     resume_audio(&suppressor, &mut headset);
                     // The attempt is over: the microphone stays closed.
                     if !timeline.wants_audio() {
@@ -954,8 +954,23 @@ pub(crate) fn run(
                         // The on-demand open finished while the shortcut is
                         // held: recording starts here, without pre-roll.
                         start_pending = false;
-                        start_capture(&mut capture, captured_through, || {
-                            feedback::play_provisional_start();
+                        let since_press = press_at.map(|at| at.elapsed());
+                        let cue = ready_cue(
+                            since_press,
+                            headset.as_ref().is_some_and(|flow| flow.is_active()),
+                        );
+                        crate::debug_log::dlog!(
+                            Info,
+                            "audio.ready",
+                            "capture confirmed and audio flowing",
+                            since_press_ms = since_press.map(|since| since.as_millis() as u64),
+                            cue = format!("{cue:?}"),
+                        );
+                        // The HUD stops saying "Connecting earbuds mic" now.
+                        indicator.earbuds_connecting(false);
+                        start_capture(&mut capture, captured_through, || match cue {
+                            ReadyCue::StartTone => feedback::play_provisional_start(),
+                            ReadyCue::ReadyTone => feedback::play(Tone::Ready),
                         });
                     }
                 }
@@ -1171,6 +1186,27 @@ fn begin_finishing(
         } else {
             now
         },
+    }
+}
+
+/// Which sound says the microphone is ready when the press had to wait for
+/// it to open.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReadyCue {
+    /// A quick open: the usual start tone.
+    StartTone,
+    /// A slow open (earbuds, or over [`SLOW_OPEN`]): a distinct "speak now".
+    ReadyTone,
+}
+
+/// A press that waited longer than this for the microphone gets the ready cue.
+const SLOW_OPEN: Duration = Duration::from_millis(400);
+
+fn ready_cue(since_press: Option<Duration>, earbuds: bool) -> ReadyCue {
+    if earbuds || since_press.is_some_and(|since| since > SLOW_OPEN) {
+        ReadyCue::ReadyTone
+    } else {
+        ReadyCue::StartTone
     }
 }
 
@@ -1789,6 +1825,28 @@ mod tests {
     #[test]
     fn speech_is_queued() {
         assert_eq!(submit_recorded(0.1).0, Submitted::Queued);
+    }
+
+    #[test]
+    fn a_slow_open_gets_the_ready_cue_and_a_quick_one_the_start_tone() {
+        assert_eq!(
+            ready_cue(Some(Duration::from_millis(120)), false),
+            ReadyCue::StartTone
+        );
+        assert_eq!(
+            ready_cue(Some(Duration::from_millis(400)), false),
+            ReadyCue::StartTone
+        );
+        assert_eq!(
+            ready_cue(Some(Duration::from_millis(401)), false),
+            ReadyCue::ReadyTone
+        );
+        assert_eq!(
+            ready_cue(Some(Duration::from_millis(50)), true),
+            ReadyCue::ReadyTone
+        );
+        assert_eq!(ready_cue(None, true), ReadyCue::ReadyTone);
+        assert_eq!(ready_cue(None, false), ReadyCue::StartTone);
     }
 
     mod earbuds {

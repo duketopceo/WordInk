@@ -145,7 +145,7 @@ struct Held {
 enum Suppressed {
     Muted(Mixer),
     Ducked(output_ducking::Guard),
-    Paused(Vec<String>),
+    Paused(PausedAudio),
     Nothing,
 }
 
@@ -160,7 +160,11 @@ fn suppress(behavior: RecordingAudioBehavior) -> Suppressed {
         outcome = match &held {
             Suppressed::Muted(_) => "muted".to_owned(),
             Suppressed::Ducked(_) => "ducked".to_owned(),
-            Suppressed::Paused(players) => format!("paused {} players", players.len()),
+            Suppressed::Paused(held) => format!(
+                "paused {} players, muted {} streams",
+                held.players.len(),
+                held.streams.len()
+            ),
             Suppressed::Nothing => "nothing".to_owned(),
         },
         ms = started.elapsed().as_millis() as u64,
@@ -205,7 +209,7 @@ fn restore(held: Held) {
             mixer.mute(false);
         }
         Suppressed::Ducked(mut guard) => guard.restore(),
-        Suppressed::Paused(players) => resume_players(&players),
+        Suppressed::Paused(held) => release_media(&held),
         Suppressed::Nothing => {}
     }
 }
@@ -416,6 +420,8 @@ trait PlayerBus {
     /// A player's identity (its display name), when it says.
     fn identity(&mut self, player: &str) -> Option<String>;
     fn status(&mut self, player: &str) -> Option<String>;
+    /// The process that owns the player's bus name.
+    fn pid(&mut self, player: &str) -> Option<u32>;
     fn pause(&mut self, player: &str) -> bool;
     fn wait(&mut self, how_long: Duration);
 }
@@ -543,6 +549,17 @@ impl PlayerBus for SessionBus {
         self.runtime.block_on(playback_status(&self.bus, player))
     }
 
+    fn pid(&mut self, player: &str) -> Option<u32> {
+        self.runtime.block_on(call(
+            &self.bus,
+            "org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            "GetConnectionUnixProcessID",
+            &(player,),
+        ))
+    }
+
     fn pause(&mut self, player: &str) -> bool {
         self.runtime
             .block_on(call::<_, ()>(
@@ -564,18 +581,193 @@ impl PlayerBus for SessionBus {
 /// Pauses every playing MPRIS player; returns the bus names that stopped,
 /// which are the only ones resumed later. A player that ignores Pause is
 /// warned about, not resumed.
-fn pause_players() -> Vec<String> {
+fn pause_players() -> PausedAudio {
     let Some(mut bus) = SessionBus::connect() else {
-        return Vec::new();
+        return PausedAudio::default();
     };
     let result = pause_playing(&mut bus);
-    for player in &result.stuck {
+    let (streams, unhandled) = mute_stuck(&result.stuck, &mut bus, &mut PactlInputs);
+    for player in &unhandled {
         let name = bus.identity(player).unwrap_or_else(|| player.clone());
         crate::linux::rune_hud::notify(&format!(
-            "[W-MEDIA-NOTPAUSED] {name} kept playing when WordInk asked it to pause. Pause it yourself, or set \"While dictating\" to Mute."
+            "[W-MEDIA-NOTPAUSED] {name} kept playing when WordInk asked it to pause, and its audio could not be muted. Pause it yourself, or set \"While dictating\" to Mute."
         ));
     }
-    result.paused
+    PausedAudio {
+        players: result.paused,
+        streams,
+    }
+}
+
+/// What a pause changed: the players WordInk paused, and the PipeWire
+/// streams it muted for players that ignored Pause. Restore undoes exactly
+/// these.
+#[derive(Debug, Default, Eq, PartialEq)]
+struct PausedAudio {
+    players: Vec<String>,
+    streams: Vec<u32>,
+}
+
+/// One playback stream, as the sound server lists it.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct SinkInput {
+    index: u32,
+    muted: bool,
+    pid: Option<u32>,
+    binary: String,
+    app_name: String,
+}
+
+/// The sound server's playback streams. `pactl` for real; faked in tests.
+trait SinkInputs {
+    fn list(&mut self) -> Vec<SinkInput>;
+    fn set_mute(&mut self, index: u32, mute: bool) -> bool;
+}
+
+struct PactlInputs;
+
+impl SinkInputs for PactlInputs {
+    fn list(&mut self) -> Vec<SinkInput> {
+        #[derive(serde::Deserialize)]
+        struct Input {
+            index: u32,
+            #[serde(default)]
+            mute: bool,
+            #[serde(default)]
+            properties: std::collections::HashMap<String, serde_json::Value>,
+        }
+        let Some(json) = run("pactl", &["-f", "json", "list", "sink-inputs"]) else {
+            return Vec::new();
+        };
+        serde_json::from_str::<Vec<Input>>(&json)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|input| {
+                let text = |key: &str| {
+                    input
+                        .properties
+                        .get(key)
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("")
+                        .to_owned()
+                };
+                SinkInput {
+                    index: input.index,
+                    muted: input.mute,
+                    pid: text("application.process.id").parse().ok(),
+                    binary: text("application.process.binary"),
+                    app_name: text("application.name"),
+                }
+            })
+            .collect()
+    }
+
+    fn set_mute(&mut self, index: u32, mute: bool) -> bool {
+        run(
+            "pactl",
+            &[
+                "set-sink-input-mute",
+                &index.to_string(),
+                if mute { "1" } else { "0" },
+            ],
+        )
+        .is_some()
+    }
+}
+
+/// A player's name without the MPRIS prefix and any `.instanceN` suffix:
+/// `org.mpris.MediaPlayer2.spotifast` is `spotifast`.
+fn player_key(bus_name: &str) -> String {
+    let name = bus_name.strip_prefix(MPRIS_PREFIX).unwrap_or(bus_name);
+    let name = name.split(".instance").next().unwrap_or(name);
+    name.to_lowercase()
+}
+
+/// Whether `input` is `player`'s stream: its process, or a binary or
+/// application name that names the player or its identity.
+fn belongs_to(input: &SinkInput, key: &str, pid: Option<u32>, identity: Option<&str>) -> bool {
+    if pid.is_some() && input.pid == pid {
+        return true;
+    }
+    let names = [input.binary.to_lowercase(), input.app_name.to_lowercase()];
+    let identity = identity.map(str::to_lowercase);
+    names.iter().any(|name| {
+        !name.is_empty()
+            && (name.contains(key)
+                || identity
+                    .as_deref()
+                    .is_some_and(|identity| !identity.is_empty() && name.contains(identity)))
+    })
+}
+
+/// For players that ignored Pause, mutes their playback streams. Returns the
+/// streams muted (an already muted one is left alone and never unmuted) and
+/// the players with no stream that could be muted.
+fn mute_stuck(
+    stuck: &[String],
+    bus: &mut impl PlayerBus,
+    inputs: &mut impl SinkInputs,
+) -> (Vec<u32>, Vec<String>) {
+    let mut muted = Vec::new();
+    let mut unhandled = Vec::new();
+    for player in stuck {
+        let key = player_key(player);
+        let pid = bus.pid(player);
+        let identity = bus.identity(player);
+        let mut handled = false;
+        for input in inputs.list() {
+            if !belongs_to(&input, &key, pid, identity.as_deref()) {
+                continue;
+            }
+            if input.muted {
+                // Already silent: nothing to do, and nothing to undo.
+                handled = true;
+                continue;
+            }
+            if inputs.set_mute(input.index, true)
+                && inputs
+                    .list()
+                    .iter()
+                    .any(|now| now.index == input.index && now.muted)
+            {
+                crate::debug_log::dlog!(
+                    Info,
+                    "media.suppress",
+                    "muted_stream",
+                    player = player,
+                    stream = input.index,
+                    application = input.app_name,
+                    binary = input.binary,
+                );
+                muted.push(input.index);
+                handled = true;
+            }
+        }
+        if !handled {
+            unhandled.push(player.clone());
+        }
+    }
+    (muted, unhandled)
+}
+
+/// Puts back exactly what a pause changed: resumes the players WordInk
+/// paused and unmutes the streams it muted.
+fn release_media(held: &PausedAudio) {
+    resume_players(&held.players);
+    unmute_streams(&held.streams, &mut PactlInputs);
+}
+
+fn unmute_streams(streams: &[u32], inputs: &mut impl SinkInputs) {
+    for stream in streams {
+        let ok = inputs.set_mute(*stream, false);
+        crate::debug_log::dlog!(
+            Info,
+            "media.restore",
+            "unmuted_stream",
+            stream = *stream,
+            ok = ok,
+        );
+    }
 }
 
 async fn playback_status(bus: &Connection, name: &str) -> Option<String> {
@@ -610,6 +802,7 @@ mod tests {
     struct FakeBus {
         /// (bus name, identity, status, ignores Pause)
         players: Vec<(&'static str, &'static str, &'static str, bool)>,
+        pids: Vec<(&'static str, u32)>,
         pauses: Vec<String>,
         waited: Duration,
     }
@@ -629,6 +822,9 @@ mod tests {
                 .iter()
                 .find(|p| p.0 == player)
                 .map(|p| p.2.to_owned())
+        }
+        fn pid(&mut self, player: &str) -> Option<u32> {
+            self.pids.iter().find(|p| p.0 == player).map(|p| p.1)
         }
         fn pause(&mut self, player: &str) -> bool {
             self.pauses.push(player.to_owned());
@@ -734,7 +930,7 @@ mod tests {
         let ran = order.clone();
         restore_then(
             Some(Held {
-                audio: Suppressed::Paused(Vec::new()),
+                audio: Suppressed::Paused(PausedAudio::default()),
                 _sleep: None,
             }),
             Box::new(move || ran.send("then").unwrap()),
@@ -775,5 +971,126 @@ mod tests {
             *log.lock().unwrap(),
             ["suppress", "restore", "suppress", "restore"]
         );
+    }
+
+    #[derive(Default)]
+    struct FakeInputs {
+        inputs: Vec<SinkInput>,
+        /// Streams whose mute the server refuses.
+        refuse: Vec<u32>,
+    }
+
+    impl SinkInputs for FakeInputs {
+        fn list(&mut self) -> Vec<SinkInput> {
+            self.inputs.clone()
+        }
+        fn set_mute(&mut self, index: u32, mute: bool) -> bool {
+            if self.refuse.contains(&index) {
+                return false;
+            }
+            self.inputs
+                .iter_mut()
+                .find(|input| input.index == index)
+                .map(|input| input.muted = mute)
+                .is_some()
+        }
+    }
+
+    fn stream(index: u32, pid: u32, binary: &str, app: &str, muted: bool) -> SinkInput {
+        SinkInput {
+            index,
+            muted,
+            pid: Some(pid),
+            binary: binary.into(),
+            app_name: app.into(),
+        }
+    }
+
+    const SPOTIFAST: &str = "org.mpris.MediaPlayer2.spotifast";
+
+    fn spotifast_bus() -> FakeBus {
+        FakeBus {
+            players: vec![(SPOTIFAST, "Spotifast", "Playing", true)],
+            pids: vec![(SPOTIFAST, 4242)],
+            ..FakeBus::default()
+        }
+    }
+
+    #[test]
+    fn a_player_that_ignores_pause_has_its_streams_muted_and_unmuted_after() {
+        let mut bus = spotifast_bus();
+        let result = pause_playing(&mut bus);
+        assert_eq!(result.stuck, [SPOTIFAST]);
+        let mut inputs = FakeInputs {
+            inputs: vec![
+                stream(7, 4242, "spotifast", "Spotifast", false),
+                stream(8, 99, "firefox", "Firefox", false),
+                stream(9, 4242, "spotifast", "Spotifast", true),
+            ],
+            ..FakeInputs::default()
+        };
+        let (muted, unhandled) = mute_stuck(&result.stuck, &mut bus, &mut inputs);
+        assert_eq!(muted, [7], "only its own unmuted stream");
+        assert!(unhandled.is_empty(), "no warning when the mute worked");
+        assert!(inputs.inputs[0].muted);
+        assert!(!inputs.inputs[1].muted, "other apps are left alone");
+        unmute_streams(&muted, &mut inputs);
+        assert!(!inputs.inputs[0].muted);
+        assert!(
+            inputs.inputs[2].muted,
+            "a stream that was already muted stays muted"
+        );
+    }
+
+    #[test]
+    fn a_stream_is_matched_by_pid_binary_name_or_identity() {
+        let input = |pid, binary: &str, app: &str| stream(1, pid, binary, app, false);
+        assert!(belongs_to(&input(5, "x", "y"), "spotifast", Some(5), None));
+        assert!(belongs_to(
+            &input(6, "Spotifast", ""),
+            "spotifast",
+            None,
+            None
+        ));
+        assert!(belongs_to(
+            &input(6, "", "Spotifast Player"),
+            "spotifast",
+            None,
+            None
+        ));
+        assert!(belongs_to(
+            &input(6, "", "My Music"),
+            "spotifast",
+            None,
+            Some("my music")
+        ));
+        assert!(!belongs_to(
+            &input(6, "firefox", "Firefox"),
+            "spotifast",
+            Some(5),
+            Some("Spotifast")
+        ));
+        assert_eq!(
+            player_key("org.mpris.MediaPlayer2.chromium.instance1234"),
+            "chromium"
+        );
+        assert_eq!(player_key(SPOTIFAST), "spotifast");
+    }
+
+    #[test]
+    fn a_player_with_no_mutable_stream_is_the_warning_case() {
+        let mut bus = spotifast_bus();
+        let mut none = FakeInputs::default();
+        let (muted, unhandled) = mute_stuck(&[SPOTIFAST.into()], &mut bus, &mut none);
+        assert!(muted.is_empty());
+        assert_eq!(unhandled, [SPOTIFAST]);
+        // A refused mute is the same.
+        let mut refusing = FakeInputs {
+            inputs: vec![stream(7, 4242, "spotifast", "Spotifast", false)],
+            refuse: vec![7],
+        };
+        let (muted, unhandled) = mute_stuck(&[SPOTIFAST.into()], &mut bus, &mut refusing);
+        assert!(muted.is_empty());
+        assert_eq!(unhandled, [SPOTIFAST]);
     }
 }

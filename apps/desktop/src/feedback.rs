@@ -77,6 +77,10 @@ pub enum Tone {
     Error,
     DictationStart,
     DictationStop,
+    /// A slow microphone (Bluetooth earbuds switching to headset mode) is
+    /// confirmed and audio flows: speak now. The start tone itself plays at
+    /// once only when the microphone was already live.
+    Ready,
     /// A dictation pasted at least [`DONE_MIN_AFTER_STOP`] after its stop
     /// sound, such as after a slow rewrite.
     DictationDone,
@@ -798,6 +802,8 @@ impl Sounds {
         let sounds = self.set(set);
         Some(match tone {
             Tone::DictationStart => &sounds.start,
+            // The set's own start sound, now meaning "ready".
+            Tone::Ready => &sounds.start,
             Tone::DictationStop => &sounds.stop,
             Tone::DictationDone => return sounds.done.as_ref(),
             Tone::OnboardingSuccess => {
