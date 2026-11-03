@@ -7,6 +7,8 @@ use rune::tok::motion::{SETTLE, SETTLE_EXIT};
 use rune::{El, SpringPair, TextEdit, Transition, Tx, col, edit_access, el, row, text};
 use rune_kit::{ControlSize, TextInput};
 
+pub(super) mod suggestions;
+
 use super::Ui;
 use super::controls::{
     ButtonKind, DESCRIPTION, Paint, button, modal_scrim_transition, modal_transition, note,
@@ -50,6 +52,13 @@ pub(super) struct VocabularyEditor {
     /// with motion, so opening the sheet never animates its rows.
     added: Option<u64>,
     pub(super) open: bool,
+    /// Proposed additions and the AI review (see [`suggestions`]).
+    pub(super) suggestions: suggestions::Suggestions,
+}
+
+/// Adopts finished suggestion work; true when anything shown changed.
+pub(super) fn poll(ui: &mut Ui) -> bool {
+    ui.vocabulary.open && suggestions::poll(ui)
 }
 
 impl VocabularyEditor {
@@ -158,6 +167,7 @@ pub(super) fn open(ui: &mut Ui) {
     super::sound_sets::close(ui);
     ui.open = None;
     ui.vocabulary.open = true;
+    suggestions::refresh(ui);
     if ui.vocabulary.rows.is_empty() {
         add_row(ui);
     }
@@ -354,7 +364,8 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         // Presses inside the panel stay inside.
         .on_press(|_: &mut Ui| {})
         .child(heading)
-        .child(terms);
+        .child(terms)
+        .child(suggestions::section(ui, p));
     if ui.vocabulary.clamped() {
         panel = panel.child(
             note(
@@ -416,6 +427,12 @@ pub(super) fn fixture(ui: &mut Ui, filled: bool) {
     if let Some(row) = ui.vocabulary.rows.last_mut() {
         row.term.focused = false;
     }
+}
+
+/// The sheet with a few proposed words.
+pub(super) fn fixture_suggestions(ui: &mut Ui) {
+    fixture(ui, true);
+    suggestions::fixture(ui);
 }
 
 #[cfg(test)]

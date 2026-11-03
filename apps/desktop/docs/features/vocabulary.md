@@ -26,6 +26,19 @@ General › Vocabulary   // vocabulary.settings; after Language
 ├── × -> Removes that row at any click speed or focus; rows keep an identity,
 │   so a late edit, focus change, or second × for a removed row touches nothing
 ├── Done, Escape, or a press outside -> Saves, drops blank rows, closes
+├── Suggestions (under the rows) -> words WordInk proposes; the person's Add or
+│   Dismiss is the ground truth, nothing is added on its own
+│   ├── 1. A replacement's output not in the list ("You fix this with a
+│   │   replacement"); Add also saves the phrase as its "sounds like"
+│   ├── 2. How often History shows that replacement firing (raw vs inserted
+│   │   text); more fixes rank higher
+│   ├── 3. Words from History's inserted text seen 3+ times that look like names
+│   │   or jargon: capitalised mid-sentence, CamelCase, digits, inner dots, ALL-CAPS
+│   │   (sentence-initial capitals and a tiny stoplist excluded); "Heard N times"
+│   ├── Dismiss -> remembered in settings.json `vocabulary_dismissed`; never proposed again
+│   └── Suggest with AI (opt-in button) -> sends the newest ~4,000 characters of
+│       inserted text and the list to Groq (llama-3.1-8b-instant) or else OpenRouter,
+│       whichever has a key; no key -> disabled; answers are labelled "AI guess"
 ├── Past the limits -> Keep the term (cut to 64 characters) and the spellings
 │   that fit; inline danger note    // never drops the term
 └── Boost -> no control in the window: Normal (default) unless changed with
