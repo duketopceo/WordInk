@@ -2482,6 +2482,20 @@ mod tests {
     }
 
     #[test]
+    fn a_speechless_chunk_makes_no_cloud_call() {
+        let _detector = crate::transcription::speech_detector::override_for_test(Some(false));
+        // A request would fail with no key; Done(empty) proves none was made.
+        crate::transcription::cloud::force_meeting_route(Some(
+            crate::transcription::cloud::Provider::OpenRouter,
+        ));
+        let mut model = ChunkModel::new(TranscriptionSelection::default());
+        let Chunked::Done(transcript) = model.transcribe(&[0.1; 16_000]).unwrap() else {
+            panic!("a speechless chunk must not be sent");
+        };
+        assert!(transcript.text.is_empty());
+    }
+
+    #[test]
     fn a_speechless_chunk_skips_the_shared_model() {
         let _detector = crate::transcription::speech_detector::override_for_test(Some(false));
         let mut model = ChunkModel::new(TranscriptionSelection::default());

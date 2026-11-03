@@ -479,6 +479,19 @@ fn the_catalogue_marks_transcription_models_and_prices_them_per_audio_hour() {
 }
 
 #[test]
+fn a_model_from_the_transcription_listing_is_a_transcription_model() {
+    // The shape of `?output_modalities=transcription`: no text output at all.
+    let listing = json!({ "data": [{
+        "id": MAI,
+        "architecture": { "modality": "audio->transcription",
+            "input_modalities": ["audio"], "output_modalities": ["transcription"] },
+        "pricing": { "prompt": "0.1", "completion": "0" },
+    }]});
+    let models = openrouter::parse_catalogue(&listing);
+    assert_eq!(models[0].kind, openrouter::Kind::Transcription);
+}
+
+#[test]
 fn the_bundled_catalogue_lists_mai_at_ten_cents_an_hour_and_the_table_agrees() {
     let bundled = openrouter::bundled();
     let mai = bundled.iter().find(|m| m.id == MAI).unwrap();

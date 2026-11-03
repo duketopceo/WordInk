@@ -1513,7 +1513,23 @@ pub fn set_meeting_engine(choice: Option<EngineChoice>, model: Option<&str>) {
 
 /// The cloud provider meeting chunks go to: `None` for the local model.
 pub fn meeting_route() -> Option<Provider> {
+    #[cfg(test)]
+    if let Some(forced) = MEETING_ROUTE_OVERRIDE.with(std::cell::Cell::get) {
+        return forced;
+    }
     route_meeting(meeting_chosen().choice, cached_key(Provider::Groq).is_some())
+}
+
+#[cfg(test)]
+thread_local! {
+    static MEETING_ROUTE_OVERRIDE: std::cell::Cell<Option<Option<Provider>>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Forces [`meeting_route`] on this thread, for tests.
+#[cfg(test)]
+pub(crate) fn force_meeting_route(route: Option<Provider>) {
+    MEETING_ROUTE_OVERRIDE.with(|forced| forced.set(Some(route)));
 }
 
 /// The cloud provider a meeting engine setting names, given whether a Groq
