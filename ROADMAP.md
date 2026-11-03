@@ -18,9 +18,10 @@ This page lists themes, not tickets. "Done" means merged to `master`.
 - Find the roughly 9 s of app overhead on Groq requests.
 - Pick the top three OpenRouter engines per use: dictation (Groq turbo, MAI-Transcribe 2, hosted Parakeet v3) and meetings (Nemotron 3.5, Voxtral Small 3, MAI-Transcribe 2).
 - Show Groq quota in the app.
-- Opus uploads, and larger chunks for cloud meeting transcription.
+- Larger chunks for cloud meeting transcription.
 - A Compare engines screen, building on `wordink compare`.
-- Publish the web SDK and gateway to npm (the workflow exists; publishing is off until a scope is set up).
+- **SDK:** publish the web SDK and gateway to npm (the workflow exists; publishing is off until the `@wordink` scope is set up), document the desktop app's local API, and add a small `@wordink/desktop` client so other apps can ask the running WordInk to dictate or transcribe. No native library. Plan: `docs/plans/2026-11-03-1800-feat-sdk-and-omarchy-plugin-plan.md`.
+- **Omarchy bar plugin:** a WordInk mic icon in the Omarchy bar that shows state, toggles dictation on click, and opens a small panel (engine, mic picker, last dictations, weekly usage). Ships in the omarchy-plugins catalog, not inside the app. Same plan.
 
 ## Later
 
