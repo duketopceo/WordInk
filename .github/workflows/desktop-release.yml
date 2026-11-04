@@ -117,7 +117,12 @@ jobs:
   build:
     name: Build ${{ matrix.label }}
     needs: [prepare, gate]
-    runs-on: ${{ matrix.os }}
+    # The macos-arm64 leg runs on Luke's own Mac (runner label `promax-macos`,
+    # registered on this repo only, started by tag push, never by pull_request).
+    # Hosted fallback: set the repo variable WORDINK_MACOS_RUNNER=hosted and the
+    # leg goes back to the GitHub-hosted `macos-26` image, no file change needed.
+    # The self-hosted Mac needs Xcode + Metal toolchain, rustup and cmake.
+    runs-on: ${{ (matrix.label == 'macos-arm64' && vars.WORDINK_MACOS_RUNNER != 'hosted') && fromJSON('["self-hosted","promax-macos"]') || matrix.os }}
     timeout-minutes: 90
     strategy:
       fail-fast: true
