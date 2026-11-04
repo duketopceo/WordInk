@@ -363,15 +363,21 @@ pub(crate) fn run(
             let started = Instant::now();
             let result = (|| -> Result<String> {
                 let transcribed = job.transcript.wait().map_err(|error| eyre!(error))?;
-                let inference_ms = started.elapsed().as_millis() as u64;
+                let waited_ms = started.elapsed().as_millis() as u64;
                 tracing::info!(
                     source = transcribed.source.label(),
                     finish_ms = transcribed.finish_ms,
                     audio_ms = job.audio_ms,
                     "transcribed Linux dictation"
                 );
-                let usage = transcribed.usage;
                 let text = transcribed.text;
+                let (inference_ms, usage) = attribute(
+                    transcribed.served,
+                    transcribed.usage,
+                    job.audio_ms,
+                    &text,
+                    waited_ms,
+                );
                 crate::debug_log::dlog!(
                     Info,
                     "engine.transcript",
@@ -1284,6 +1290,34 @@ enum NoAudioStep {
     Reopen,
     /// The reopened stream is silent too.
     Fail,
+}
+
+/// The time and usage record a local dictation is counted under. The model
+/// that answered is counted, with its own attempt's time: a dictation the
+/// Neural Engine handed to the GPU model belongs to the GPU model's row, not
+/// the saved selection's, and a worker wait that timed out is not charged to
+/// it. Without a `served` answer (every other local model) the waited time
+/// and the caller's own record stand.
+fn attribute(
+    served: Option<crate::transcription::engine::ServedBy>,
+    usage: Option<crate::history::UsageRecord>,
+    audio_ms: u64,
+    text: &str,
+    waited_ms: u64,
+) -> (u64, Option<crate::history::UsageRecord>) {
+    match served {
+        Some(served) => (
+            served.inference_ms,
+            usage.or_else(|| {
+                Some(crate::history::UsageRecord::local(
+                    served.model.as_str(),
+                    audio_ms,
+                    text,
+                ))
+            }),
+        ),
+        None => (waited_ms, usage),
+    }
 }
 
 /// How long a confirmed route may stay silent before its stream is reopened,
@@ -2204,5 +2238,42 @@ mod tests {
             assert_eq!(marker.previous_source.as_deref(), Some(MAC_MIC));
             drop(flow);
         }
+    }
+
+    #[test]
+    fn a_dictation_is_counted_under_the_model_that_answered_with_its_own_time() {
+        use crate::transcription::engine::ServedBy;
+        use crate::transcription::models::TranscriptionModelId;
+        // Handed to the GPU model after the worker timed out: the GPU row,
+        // with only the GPU attempt's time, though 7 s were waited.
+        let (ms, usage) = attribute(
+            Some(ServedBy {
+                model: TranscriptionModelId::ParakeetV3,
+                inference_ms: 840,
+            }),
+            None,
+            10_000,
+            "two words",
+            7_000,
+        );
+        let usage = usage.unwrap();
+        assert_eq!(
+            (ms, usage.model.as_str(), usage.words),
+            (840, "parakeet_v3", 2)
+        );
+        // Served by the worker: its own row.
+        let (_, usage) = attribute(
+            Some(ServedBy {
+                model: TranscriptionModelId::ParakeetV3Ane,
+                inference_ms: 600,
+            }),
+            None,
+            10_000,
+            "x",
+            600,
+        );
+        assert_eq!(usage.unwrap().model, "parakeet_v3_ane");
+        // Every other model: the wait, and no record of its own here.
+        assert_eq!(attribute(None, None, 10_000, "x", 650), (650, None));
     }
 }

@@ -87,10 +87,11 @@ pub enum Feature {
     StandaloneSpecialKeys,
     HistoryStats,
     RecentDictations,
+    NeuralEngine,
 }
 
 impl Feature {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 30] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -120,6 +121,7 @@ impl Feature {
         Self::StandaloneSpecialKeys,
         Self::HistoryStats,
         Self::RecentDictations,
+        Self::NeuralEngine,
     ];
 
     /// The features this OS and build have.
@@ -171,19 +173,25 @@ impl Feature {
             | Self::ParakeetUltra
             | Self::StandaloneSpecialKeys
             | Self::HistoryStats
+            | Self::NeuralEngine
             | Self::RecentDictations => Audience::Everyone,
         }
     }
 
-    /// Why turning this feature off is refused now: Parakeet Ultra stays on
-    /// while it is the dictation model, until a switch to another succeeds.
+    /// Why turning this feature off is refused now: Parakeet Ultra and the
+    /// Neural Engine model stay on while they are the dictation model, until
+    /// a switch to another succeeds.
     pub fn off_refusal(self, settings: &AppSettings) -> Option<&'static str> {
-        (self == Self::ParakeetUltra
-            && settings.transcription.model
-                == crate::transcription::models::TranscriptionModelId::ParakeetUltra)
-            .then_some(
+        use crate::transcription::models::TranscriptionModelId;
+        let model = settings.transcription.model;
+        if self == Self::ParakeetUltra && model == TranscriptionModelId::ParakeetUltra {
+            return Some(
                 "Parakeet Ultra is the dictation model; choose another model before turning it off",
-            )
+            );
+        }
+        (self == Self::NeuralEngine && model == TranscriptionModelId::ParakeetV3Ane).then_some(
+            "Parakeet v3 (Neural Engine) is the dictation model; choose another model before turning it off",
+        )
     }
 
     /// The feature `hex settings` key `key` switches (its toggle, or
@@ -231,6 +239,7 @@ impl Feature {
             | Self::ParakeetUltra
             | Self::HistoryStats
             | Self::FillerWords => true,
+            Self::NeuralEngine => cfg!(all(target_os = "linux", target_arch = "aarch64")),
         }
     }
 
@@ -266,6 +275,7 @@ impl Feature {
             Self::StandaloneSpecialKeys => "special-keys",
             Self::HistoryStats => "history-stats",
             Self::RecentDictations => "recent-dictations",
+            Self::NeuralEngine => "neural-engine",
         }
     }
 
@@ -301,6 +311,7 @@ impl Feature {
             Self::StandaloneSpecialKeys => "labs.standalone_special_keys",
             Self::HistoryStats => "labs.history_stats",
             Self::RecentDictations => "labs.recent_dictations",
+            Self::NeuralEngine => "labs.neural_engine",
         }
     }
 
@@ -378,6 +389,9 @@ impl Feature {
             Self::RecentDictations => {
                 "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"
             }
+            Self::NeuralEngine => {
+                "Offer Parakeet v3 on the Apple Neural Engine (Linux on Apple silicon, with the mlx-omarchy runtime) in the Local transcription picker"
+            }
         }
     }
 
@@ -419,6 +433,7 @@ impl Feature {
             Self::StandaloneSpecialKeys => settings.labs.standalone_special_keys,
             Self::HistoryStats => settings.labs.history_stats,
             Self::RecentDictations => settings.labs.recent_dictations,
+            Self::NeuralEngine => settings.labs.neural_engine,
         }
     }
 
@@ -458,6 +473,7 @@ impl Feature {
             Self::ParakeetUltra => settings.labs.parakeet_ultra = on,
             Self::HistoryStats => settings.labs.history_stats = on,
             Self::RecentDictations => settings.labs.recent_dictations = on,
+            Self::NeuralEngine => settings.labs.neural_engine = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -484,6 +500,7 @@ const SMART_SPACING: u32 = 1 << 12;
 const SPOKEN_SYMBOLS: u32 = 1 << 13;
 const SIDED_CHORDS: u32 = 1 << 14;
 const TAP_OR_HOLD: u32 = 1 << 15;
+const NEURAL_ENGINE: u32 = 1 << 16;
 const PARAKEET_ULTRA: u32 = 1 << 17;
 const HISTORY_STATS: u32 = 1 << 18;
 const RECENT_DICTATIONS: u32 = 1 << 19;
@@ -600,6 +617,12 @@ pub fn parakeet_ultra() -> bool {
     on(PARAKEET_ULTRA)
 }
 
+/// The Neural Engine Parakeet model may be offered (read wherever a model is
+/// listed, chosen, or run).
+pub fn neural_engine() -> bool {
+    on(NEURAL_ENGINE)
+}
+
 /// History's summary of retained dictations and `hex history stats` (read
 /// when the History pane reloads and when the command starts).
 pub fn history_stats() -> bool {
@@ -689,6 +712,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             settings.recent_dictations,
             RECENT_DICTATIONS,
         ),
+        (Feature::NeuralEngine, settings.neural_engine, NEURAL_ENGINE),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -1037,6 +1061,21 @@ mod tests {
         assert_ne!(state & RECENT_DICTATIONS, 0);
         assert_eq!(state & HISTORY_STATS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn neural_engine_is_its_own_bit_off_by_default_and_listed_only_on_linux_arm() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & NEURAL_ENGINE, 0);
+        labs.neural_engine = true;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & NEURAL_ENGINE, 0);
+        assert_eq!(state & PARAKEET_ULTRA, 0);
+        assert_eq!(
+            Feature::NeuralEngine.on_this_os(),
+            cfg!(all(target_os = "linux", target_arch = "aarch64"))
+        );
+        assert_eq!(Feature::NeuralEngine.name(), "neural-engine");
     }
 
     #[test]

@@ -25,6 +25,19 @@ Notice supplied with the files:
 
 The weights are provided as-is, without warranties, as the licence states.
 
+## Parakeet v3 on the Apple Neural Engine
+
+Labs › Neural Engine (Linux on Apple silicon) runs NVIDIA Parakeet TDT 0.6B v3
+(Creative Commons Attribution 4.0 International, CC BY 4.0, unmodified by Hex)
+through software the user installs separately: the `mlx-omarchy` runtime (MIT
+License) and the Apple Neural Engine kernel driver and userspace
+(`GPL-2.0-only OR MIT`). Hex runs the runtime as a separate process and does
+not bundle, link, or redistribute the runtime, the driver, or the model
+weights; the weights are fetched only by the user's own run of the runtime's
+`download` command.
+
+License of the model: https://creativecommons.org/licenses/by/4.0/legalcode.en
+
 ## Lucide And Feather
 
 The settings sidebar icons in `assets/icons/` (`settings`, `modes`,

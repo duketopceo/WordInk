@@ -46,6 +46,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 ├── Benchmark details no  labs.benchmark_details        picker cards show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
+├── Neural Engine   no    labs.neural_engine           (Linux on Apple silicon) the picker offers Parakeet v3 on the Apple Neural Engine through the user-installed mlx-omarchy runtime; the GPU model answers while it warms or fails; stays on while it dictates
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
 ├── Dictation stats no    labs.history_stats           History shows a summary of retained dictations; hex history stats prints it (#790)
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
@@ -445,6 +446,45 @@ Checks: `parakeet_ultra_is_offered_only_with_its_lab_and_a_saved_choice_survives
 in [models.rs](../../src/transcription/models.rs) and
 `parakeet_ultras_published_scores_cover_its_languages_once` in
 [model_details.rs](../../src/transcription/model_details.rs).
+
+Neural Engine (`neural-engine`, Linux on Apple silicon only): a catalog entry,
+`parakeet_v3_ane` ("Parakeet v3 (Neural Engine)"), that transcribes dictations
+on the Apple Neural Engine by driving the user's own `mlx-omarchy` runtime
+through one resident worker process (`resources/ane/ane_worker.py`, supervised
+by `src/transcription/ane/worker.rs`). It is listed only with the toggle on and
+a probe that finds the driver's device node usable and the runtime resolvable;
+it is selectable only once the runtime's reference model is downloaded. It
+shares Parakeet v3's GGUF file, because that is the GPU fallback.
+
+```ts
+Picker card -> "Parakeet v3 (Neural Engine)" + Labs tag; the same card as its neighbours
+├── Runtime not downloaded -> card is listed with no Use button; its detail line names
+│   `mlx-omarchy-parakeet download` (WordInk never downloads the reference model)
+├── Worker warming or paused after an error -> the detail line says so; dictation runs on
+│   Parakeet v3 on the GPU meanwhile (no dialog, no lost dictation)
+├── A dictation -> worker when ready; else, or on any worker failure, Parakeet v3 on the GPU
+│   once, in the same dictation; the worker then waits out a doubling backoff
+├── Usage -> the model that answered is counted: `wordink usage` shows the Neural Engine
+│   and the GPU model as separate rows, each with its own p50, p95, and real-time factor
+├── Meetings, captures, streams, local API word times -> the GPU model (the runtime returns
+│   text only, no word timestamps and no streaming)
+├── Vocabulary biasing -> not applied (the runtime has no biasing input)
+└── Toggle off while it is the dictation model -> refused; a saved choice with the toggle off
+    some other way stays saved and the listener runs the fallback
+```
+
+The runtime (MIT) and the Neural Engine driver (`GPL-2.0-only OR MIT`) are the
+user's to install and are never bundled or linked; the model is NVIDIA
+Parakeet TDT 0.6B v3 under CC BY 4.0
+([notices](../../THIRD_PARTY_NOTICES.md)). The Neural Engine runs the encoder;
+the runtime's mel frontend and decoder still use the GPU through MLX, so this
+engine uses less of it, not none.
+Checks: `the_neural_engine_model_is_offered_only_with_its_lab_and_a_ready_runtime`
+in [models.rs](../../src/transcription/models.rs); the probe, shim, supervisor,
+and routing tests under `src/transcription/ane/` and
+`tests/ane_worker_protocol.rs`. Not covered in CI: a real runtime and device;
+the warm-session numbers are measured by hand with the ignored
+`spike_warm_session` test.
 
 Special keys alone (`special-keys`, issue 767, Linux): for holding Caps Lock
 to dictate on GNOME Wayland by remapping it to Menu (GNOME's "Caps Lock is

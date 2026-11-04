@@ -1496,6 +1496,9 @@ pub struct LabsSettings {
     pub standalone_special_keys: bool,
     pub history_stats: bool,
     pub recent_dictations: bool,
+    /// Parakeet v3 on the Apple Neural Engine joins the Local transcription
+    /// picker (Linux on Apple silicon).
+    pub neural_engine: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1528,6 +1531,7 @@ impl Default for LabsSettings {
             standalone_special_keys: false,
             history_stats: false,
             recent_dictations: false,
+            neural_engine: false,
         }
     }
 }

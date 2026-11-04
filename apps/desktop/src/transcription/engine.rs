@@ -330,6 +330,18 @@ pub struct Transcribed {
     /// What a cloud engine used and cost; `None` for a local model.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub usage: Option<crate::history::UsageRecord>,
+    /// Which local model actually produced the text, when it can differ from
+    /// the saved selection (the Neural Engine model hands a dictation to the
+    /// GPU model when its worker cannot take it).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub served: Option<ServedBy>,
+}
+
+/// The local model that answered a dictation and that attempt's own time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServedBy {
+    pub model: crate::transcription::models::TranscriptionModelId,
+    pub inference_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -762,6 +774,7 @@ impl TranscriptionEngine {
                     source: Source::Cloud,
                     finish_ms: started.elapsed().as_millis() as u64,
                     usage: Some(usage),
+                    served: None,
                 });
                 if thread_cancel.is_cancelled() {
                     // The waiter gave up; its answer is no longer wanted.
@@ -1025,6 +1038,18 @@ pub(crate) fn held<'a>(
         .active()
         .filter(|model| matches!(model, crate::transcription::Transcriber::Gguf(_)))?;
     model.matches_selection(selection).then_some(model)
+}
+
+/// The model that answered the last clip, when it may not be the one the
+/// engine holds (Linux: the Neural Engine model's GPU fallback).
+fn take_served(model: &mut HeldModel) -> Option<ServedBy> {
+    #[cfg(target_os = "linux")]
+    return model.take_served();
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = model;
+        None
+    }
 }
 
 /// Transcribes a complete 16 kHz clip with a held model, padded as a
@@ -1339,6 +1364,7 @@ impl Worker {
                         source: Source::Stream,
                         finish_ms: started.elapsed().as_millis() as u64,
                         usage: None,
+                        served: None,
                     })),
                     Err(_) if job.cancel.is_cancelled() => {
                         job.finish(Err("transcription was abandoned".into()));
@@ -1417,6 +1443,7 @@ impl Worker {
             source,
             finish_ms: started.elapsed().as_millis() as u64,
             usage: None,
+            served: take_served(model),
         });
         // An offline run may switch the model (macOS activates a selection).
         self.publish_streams();
@@ -1637,6 +1664,7 @@ mod tests {
             source: Source::Stream,
             finish_ms: 0,
             usage: None,
+            served: None,
         }));
         assert_eq!(dictation.wait().unwrap().source, Source::Stream);
         // The chunk waits to run after the stream.
@@ -2042,6 +2070,7 @@ mod tests {
                 source: Source::Offline,
                 finish_ms: 0,
                 usage: None,
+                served: None,
             }));
         });
         assert_eq!(pending.wait().unwrap().text, "late but fine");

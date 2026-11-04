@@ -404,6 +404,11 @@ const KEYS: &[Key] = &[
         "Labs: a summary of retained dictations at the top of History, and wordink history stats",
     ),
     key(
+        "labs.neural_engine",
+        Kind::Bool,
+        "Labs: Parakeet v3 on the Apple Neural Engine in the Local transcription picker (Linux on Apple silicon, with the mlx-omarchy runtime); stays on while it is the dictation model",
+    ),
+    key(
         "labs.recent_dictations",
         Kind::Bool,
         "Labs: a Copy Recent Dictation submenu in the menu bar that copies one of the last five dictations (macOS)",
@@ -990,6 +995,11 @@ pub fn apply(
         "labs.standalone_special_keys" => candidate.repair_special_keys(),
         "labs.parakeet_ultra" if !candidate.labs.parakeet_ultra => {
             if let Some(why) = crate::labs::Feature::ParakeetUltra.off_refusal(settings) {
+                return Err(invalid(name, why));
+            }
+        }
+        "labs.neural_engine" if !candidate.labs.neural_engine => {
+            if let Some(why) = crate::labs::Feature::NeuralEngine.off_refusal(settings) {
                 return Err(invalid(name, why));
             }
         }

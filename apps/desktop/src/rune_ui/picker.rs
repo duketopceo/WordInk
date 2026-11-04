@@ -827,7 +827,11 @@ fn model_card(
         && !preparing
         && !imported
         && matches!(model.runtime, ModelRuntime::Gguf(_))
-        && ui.settings.transcription.model != model.id;
+        && ui.settings.transcription.model != model.id
+        // Parakeet v3's file is also the Neural Engine model's GPU fallback.
+        && !(model.id == TranscriptionModelId::ParakeetV3
+            && ui.settings.transcription.model == TranscriptionModelId::ParakeetV3Ane)
+        && model.id != TranscriptionModelId::ParakeetV3Ane;
     let confirming = ui.picker.deletion == Some(model.id);
     let metadata = if imported {
         super::model_import::metadata(model)
@@ -843,6 +847,13 @@ fn model_card(
             ])
             .chain((installed && !active && !in_place).then(|| tr("Installed")))
             .chain((in_place || (found_here && !installed)).then(|| tr("Found on this computer")))
+            // Why the Neural Engine model cannot be used yet, or is warming.
+            .chain(
+                (model.id == TranscriptionModelId::ParakeetV3Ane)
+                    .then(crate::transcription::ane::card_note)
+                    .flatten()
+                    .map(tr),
+            )
             .collect::<Vec<_>>()
             .join(" · ")
     };
@@ -951,7 +962,10 @@ fn model_card(
         title = title.child(Badge::new(tr("Streams")).build(p.k));
     }
     // A catalog model behind its own Labs toggle says so.
-    if model.id == TranscriptionModelId::ParakeetUltra {
+    if matches!(
+        model.id,
+        TranscriptionModelId::ParakeetUltra | TranscriptionModelId::ParakeetV3Ane
+    ) {
         title = title.child(Badge::new(tr("Labs")).build(p.k));
     }
     // The licence the weights are published under, as its source names it.
@@ -1048,7 +1062,9 @@ fn model_card(
     }
     if matches!(
         model.id,
-        TranscriptionModelId::ParakeetV3 | TranscriptionModelId::ParakeetUltra
+        TranscriptionModelId::ParakeetV3
+            | TranscriptionModelId::ParakeetUltra
+            | TranscriptionModelId::ParakeetV3Ane
     ) {
         card = card.child(
             text(

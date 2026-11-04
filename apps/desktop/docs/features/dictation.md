@@ -11,6 +11,12 @@ every timing, input, or recovery guarantee; see the
 verified end-to-end driver. Linked checks are locators; no tests or previews
 were run for this rewrite.
 
+On Linux on Apple silicon, Labs › Neural Engine adds a model that transcribes
+dictations on the Apple Neural Engine through the user's own `mlx-omarchy`
+runtime. A dictation it cannot take (worker still starting, an error, a
+timeout) runs on Parakeet v3 on the GPU instead, and the saved choice stays
+([labs.md](labs.md)).
+
 ## How To Get To It
 
 Settings shortcut capture persists the candidate before showing Saved. If the

@@ -252,7 +252,7 @@ impl Shared {
     fn fail(&self, inner: &mut Inner) {
         inner.failures = inner.failures.saturating_add(1);
         inner.retry_at = Some(Instant::now() + self.config.backoff(inner.failures));
-        inner.state = State::Degraded;
+        set_state(inner, State::Degraded);
         if let Some(pgid) = inner.pgid.take() {
             kill_group(pgid);
         }
@@ -294,11 +294,13 @@ impl Supervisor {
         Ok(Self { shared })
     }
 
+    #[cfg(test)]
     pub(crate) fn state(&self) -> State {
         self.shared.lock().state
     }
 
     /// The worker's process id while one is alive.
+    #[cfg(test)]
     pub(crate) fn worker_pid(&self) -> Option<u32> {
         self.shared.lock().pgid.map(|pgid| pgid as u32)
     }
@@ -389,7 +391,7 @@ impl Supervisor {
         shared.stopped.store(true, Ordering::SeqCst);
         let (conn, pgid) = {
             let mut inner = shared.lock();
-            inner.state = State::Stopped;
+            set_state(&mut inner, State::Stopped);
             (inner.conn.take(), inner.pgid.take())
         };
         if let Some(mut conn) = conn {
@@ -428,7 +430,7 @@ fn begin_start(shared: &Arc<Shared>) {
         if matches!(inner.state, State::Starting) || shared.stopped.load(Ordering::SeqCst) {
             return;
         }
-        inner.state = State::Starting;
+        set_state(&mut inner, State::Starting);
     }
     let shared = Arc::clone(shared);
     std::thread::spawn(move || {
@@ -456,7 +458,7 @@ fn begin_start(shared: &Arc<Shared>) {
             Ok((conn, pgid)) => {
                 inner.pgid = Some(pgid);
                 inner.conn = Some(conn);
-                inner.state = State::Ready;
+                set_state(&mut inner, State::Ready);
             }
             Err(_) => shared.fail(&mut inner),
         }
@@ -489,6 +491,12 @@ fn sweep_runtime_scratch(config: &Config, before: &[PathBuf]) {
             let _ = fs::remove_dir_all(path);
         }
     }
+}
+
+/// Changes the state and tells the card.
+fn set_state(inner: &mut Inner, state: State) {
+    inner.state = state;
+    super::publish(state);
 }
 
 fn make_private_dir(path: &Path) -> std::io::Result<()> {
@@ -828,7 +836,7 @@ mod tests {
     #[ignore = "needs the real runtime and Neural Engine; run by hand"]
     fn spike_warm_session() {
         let clips = std::env::var("WORDINK_ANE_SPIKE_CLIPS").expect("WORDINK_ANE_SPIKE_CLIPS");
-        let probe = super::super::probe::probe();
+        let probe = super::super::probe::current();
         eprintln!("probe: {:?}", probe.verdict);
         let runtime = probe.runtime.expect("a runtime");
         let run_dir =

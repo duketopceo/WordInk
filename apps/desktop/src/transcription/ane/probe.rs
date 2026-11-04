@@ -5,7 +5,7 @@
 //! CLI script that launcher names), the runtime's own `mlx-omarchy-info
 //! --json` Neural Engine fields, and whether the runtime's reference model is
 //! prepared. It blocks on a short subprocess, so callers run it off the UI
-//! thread; [`cached`] remembers the verdict for a short while.
+//! thread; [`current`] remembers the verdict for a short while.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -114,33 +114,65 @@ impl Inputs {
     }
 }
 
-/// Probe this machine.
-pub(crate) fn probe() -> Probe {
-    probe_with(&Inputs::from_host(), &run_info)
+/// What [`current`] does with the remembered verdict at `now`.
+#[derive(Debug, PartialEq)]
+enum Remembered {
+    /// Still fresh.
+    Fresh(Probe),
+    /// Older than [`TTL`]: usable now, refresh in the background.
+    Stale(Probe),
+    /// Nothing yet.
+    Missing,
 }
 
-/// The verdict, reused for [`TTL`].
-pub(crate) fn cached() -> Probe {
-    static CACHE: Mutex<Option<(Instant, Probe)>> = Mutex::new(None);
-    let mut slot = CACHE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    reuse_or_probe(&mut slot, Instant::now(), probe)
-}
-
-fn reuse_or_probe(
-    slot: &mut Option<(Instant, Probe)>,
-    now: Instant,
-    compute: impl FnOnce() -> Probe,
-) -> Probe {
-    if let Some((at, probe)) = slot.as_ref()
-        && now.saturating_duration_since(*at) < TTL
-    {
-        return probe.clone();
+fn recall(slot: &Option<(Instant, Probe)>, now: Instant) -> Remembered {
+    match slot {
+        Some((at, probe)) if now.saturating_duration_since(*at) < TTL => {
+            Remembered::Fresh(probe.clone())
+        }
+        Some((_, probe)) => Remembered::Stale(probe.clone()),
+        None => Remembered::Missing,
     }
-    let fresh = compute();
-    *slot = Some((now, fresh.clone()));
-    fresh
+}
+
+/// The remembered verdict. The first call probes (tens of milliseconds, a
+/// cheap native tool); later calls return what is remembered and, once it is
+/// older than [`TTL`], refresh it on a background thread, so a render or menu
+/// never waits on the probe twice.
+pub(crate) fn current() -> Probe {
+    static SLOT: Mutex<Option<(Instant, Probe)>> = Mutex::new(None);
+    static REFRESHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let lock = || SLOT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let remembered = recall(&lock(), Instant::now());
+    match remembered {
+        Remembered::Fresh(probe) => probe,
+        Remembered::Stale(probe) => {
+            use std::sync::atomic::Ordering;
+            if !REFRESHING.swap(true, Ordering::AcqRel) {
+                let spawned =
+                    std::thread::Builder::new()
+                        .name("ane-probe".into())
+                        .spawn(move || {
+                            let fresh = probe_host();
+                            *lock() = Some((Instant::now(), fresh));
+                            REFRESHING.store(false, Ordering::Release);
+                        });
+                if spawned.is_err() {
+                    REFRESHING.store(false, Ordering::Release);
+                }
+            }
+            probe
+        }
+        Remembered::Missing => {
+            let fresh = probe_host();
+            *lock() = Some((Instant::now(), fresh.clone()));
+            fresh
+        }
+    }
+}
+
+fn probe_host() -> Probe {
+    probe_with(&Inputs::from_host(), &run_info)
 }
 
 /// `run_info` runs the info tool and returns its stdout.
@@ -558,19 +590,19 @@ mod tests {
     }
 
     #[test]
-    fn verdict_is_reused_within_the_ttl_and_recomputed_after() {
-        let calls = Cell::new(0);
-        let compute = || {
-            calls.set(calls.get() + 1);
-            Probe::unavailable("x")
-        };
-        let mut slot = None;
+    fn a_verdict_is_fresh_within_the_ttl_stale_after_and_missing_at_first() {
+        let probe = Probe::unavailable("x");
         let start = Instant::now();
-        reuse_or_probe(&mut slot, start, compute);
-        reuse_or_probe(&mut slot, start + TTL / 2, compute);
-        assert_eq!(calls.get(), 1);
-        reuse_or_probe(&mut slot, start + TTL + Duration::from_secs(1), compute);
-        assert_eq!(calls.get(), 2);
+        let slot = Some((start, probe.clone()));
+        assert_eq!(recall(&None, start), Remembered::Missing);
+        assert_eq!(
+            recall(&slot, start + TTL / 2),
+            Remembered::Fresh(probe.clone())
+        );
+        assert_eq!(
+            recall(&slot, start + TTL + Duration::from_secs(1)),
+            Remembered::Stale(probe)
+        );
     }
 
     #[test]

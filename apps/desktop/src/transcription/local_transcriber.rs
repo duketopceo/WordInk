@@ -15,7 +15,8 @@ use crate::transcription::models::{
 /// A word or segment's start and end (ms from the clip's start) and text.
 pub type TimedSpan = (i64, i64, String);
 
-pub struct LocalTranscriber {
+/// A local model run through transcribe.cpp (GGUF), on the GPU or the CPU.
+pub(crate) struct GgufTranscriber {
     session: OfflineGgufSession,
     selection: TranscriptionSelection,
     options: RunOptions,
@@ -196,7 +197,7 @@ pub fn read_wav_for_parakeet(path: &Path) -> Result<Vec<f32>> {
     crate::transcription::compare::read_wav(path)
 }
 
-impl LocalTranscriber {
+impl GgufTranscriber {
     /// Loads and prewarms `selection` where Settings › Speech engine says:
     /// on Auto a GPU unless it failed before under its current driver
     /// ([`gpu_health`], #856), on GPU the best GPU, on CPU the CPU. A GPU load
@@ -382,12 +383,6 @@ impl LocalTranscriber {
         self.transcribe(&vec![0.0; PREWARM_SAMPLES])
             .wrap_err("could not prewarm transcription model")
             .map(drop)
-    }
-
-    /// Transcribes a complete 16 kHz clip, padded as a dictation's clip is.
-    pub(crate) fn transcribe_clip(&mut self, mut samples: Vec<f32>) -> Result<String> {
-        crate::dictation::pad_for_parakeet(&mut samples);
-        self.transcribe(&samples)
     }
 
     /// A warm 1.5 s run's time once loaded, in milliseconds: what Auto
@@ -588,6 +583,213 @@ impl LocalTranscriber {
     }
 }
 
+/// The engine's local model: a GGUF model on the GPU or CPU, or on Linux on
+/// Apple silicon the Neural Engine worker with the GGUF Parakeet v3 behind
+/// it as its fallback.
+pub struct LocalTranscriber {
+    inner: Inner,
+    /// Who answered the last clip, until the engine takes it.
+    served: Option<crate::transcription::engine::ServedBy>,
+}
+
+enum Inner {
+    Gguf(Box<GgufTranscriber>),
+    #[cfg(target_os = "linux")]
+    Ane(Box<crate::transcription::ane::backend::AneTranscriber>),
+}
+
+/// A dictation's text and the engine that actually produced it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Served {
+    pub(crate) text: String,
+    /// The model that served it: the Neural Engine model, or the GPU model
+    /// that answered in its place.
+    pub(crate) model: crate::transcription::models::TranscriptionModelId,
+    /// That attempt's own time, in milliseconds.
+    pub(crate) inference_ms: u64,
+}
+
+impl LocalTranscriber {
+    /// Loads `selection`: a GGUF model as [`GgufTranscriber::load`] does, or
+    /// the Neural Engine model, which returns at once with its worker still
+    /// starting.
+    pub fn load(selection: &TranscriptionSelection) -> Result<Self> {
+        #[cfg(target_os = "linux")]
+        if selection.model == crate::transcription::models::TranscriptionModelId::ParakeetV3Ane {
+            let ane = crate::transcription::ane::backend::AneTranscriber::load(selection)?;
+            return Ok(Self::new(Inner::Ane(Box::new(ane))));
+        }
+        GgufTranscriber::load(selection).map(|gguf| Self::new(Inner::Gguf(Box::new(gguf))))
+    }
+
+    fn new(inner: Inner) -> Self {
+        Self {
+            inner,
+            served: None,
+        }
+    }
+
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn from_ane(ane: crate::transcription::ane::backend::AneTranscriber) -> Self {
+        Self::new(Inner::Ane(Box::new(ane)))
+    }
+
+    /// Who answered the last clip and how long that attempt took, once.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn take_served(&mut self) -> Option<crate::transcription::engine::ServedBy> {
+        self.served.take()
+    }
+
+    pub(crate) fn stream_options(&self) -> Option<&transcribe_cpp::StreamOptions> {
+        match &self.inner {
+            Inner::Gguf(gguf) => gguf.stream_options(),
+            #[cfg(target_os = "linux")]
+            Inner::Ane(_) => None,
+        }
+    }
+
+    pub(crate) fn with_stream<R>(
+        &mut self,
+        stream_options: &transcribe_cpp::StreamOptions,
+        cancel: &transcribe_cpp::CancelToken,
+        drive: impl FnOnce(&mut transcribe_cpp::Stream<'_>) -> R,
+    ) -> transcribe_cpp::Result<R> {
+        match &mut self.inner {
+            Inner::Gguf(gguf) => gguf.with_stream(stream_options, cancel, drive),
+            // It never offers stream options, so a caller has none to pass.
+            #[cfg(target_os = "linux")]
+            Inner::Ane(_) => Err(transcribe_cpp::Error::Unsupported(
+                "the Neural Engine model does not stream".to_string(),
+            )),
+        }
+    }
+
+    /// The selection this model was loaded for, so the transcription engine
+    /// can say which model it holds.
+    pub(crate) fn gguf_selection(&self) -> Option<&TranscriptionSelection> {
+        match &self.inner {
+            Inner::Gguf(gguf) => gguf.gguf_selection(),
+            #[cfg(target_os = "linux")]
+            Inner::Ane(ane) => Some(ane.selection()),
+        }
+    }
+
+    pub(crate) fn matches_selection(&self, selection: &TranscriptionSelection) -> bool {
+        match &self.inner {
+            Inner::Gguf(gguf) => gguf.matches_selection(selection),
+            #[cfg(target_os = "linux")]
+            Inner::Ane(ane) => ane.selection() == selection,
+        }
+    }
+
+    /// The device setting this model loaded for.
+    fn preference(&self) -> TranscriptionDevice {
+        match &self.inner {
+            Inner::Gguf(gguf) => gguf.preference,
+            #[cfg(target_os = "linux")]
+            Inner::Ane(ane) => ane.preference(),
+        }
+    }
+
+    pub(crate) fn prewarm(&mut self) -> Result<()> {
+        match &mut self.inner {
+            Inner::Gguf(gguf) => gguf.prewarm(),
+            // The worker warms itself in the background.
+            #[cfg(target_os = "linux")]
+            Inner::Ane(_) => Ok(()),
+        }
+    }
+
+    /// Transcribes a complete 16 kHz clip, padded as a dictation's clip is.
+    pub(crate) fn transcribe_clip(&mut self, samples: Vec<f32>) -> Result<String> {
+        self.transcribe_clip_served(samples)
+            .map(|served| served.text)
+    }
+
+    /// [`Self::transcribe_clip`] with the engine that served it and its own
+    /// time: a dictation the Neural Engine could not take reports the GPU
+    /// model and only the GPU attempt's time.
+    pub(crate) fn transcribe_clip_served(&mut self, mut samples: Vec<f32>) -> Result<Served> {
+        crate::dictation::pad_for_parakeet(&mut samples);
+        self.transcribe_served(&samples)
+    }
+
+    fn transcribe_served(&mut self, samples: &[f32]) -> Result<Served> {
+        let served = self.run_served(samples)?;
+        // A GGUF model is always the one the engine holds; only the Neural
+        // Engine model can hand a dictation to a different one.
+        #[cfg(target_os = "linux")]
+        if matches!(self.inner, Inner::Ane(_)) {
+            self.served = Some(crate::transcription::engine::ServedBy {
+                model: served.model,
+                inference_ms: served.inference_ms,
+            });
+        }
+        Ok(served)
+    }
+
+    fn run_served(&mut self, samples: &[f32]) -> Result<Served> {
+        match &mut self.inner {
+            Inner::Gguf(gguf) => {
+                let started = Instant::now();
+                let text = gguf.transcribe(samples)?;
+                Ok(Served {
+                    text,
+                    model: gguf.selection.model,
+                    inference_ms: started.elapsed().as_millis() as u64,
+                })
+            }
+            #[cfg(target_os = "linux")]
+            Inner::Ane(ane) => ane.serve_clip(samples),
+        }
+    }
+
+    /// A warm 1.5 s run's time once loaded, in milliseconds.
+    pub fn warm_ms(&self) -> u128 {
+        match &self.inner {
+            Inner::Gguf(gguf) => gguf.warm_ms(),
+            #[cfg(target_os = "linux")]
+            Inner::Ane(_) => 0,
+        }
+    }
+
+    pub fn device_label(&self) -> &str {
+        match &self.inner {
+            Inner::Gguf(gguf) => gguf.device_label(),
+            #[cfg(target_os = "linux")]
+            Inner::Ane(_) => "Apple Neural Engine",
+        }
+    }
+
+    /// Text and word times for a capture. The Neural Engine runtime returns
+    /// text only, so the GPU model answers.
+    pub fn transcribe_words(&mut self, samples: &[f32]) -> Result<(String, Vec<TimedSpan>)> {
+        match &mut self.inner {
+            Inner::Gguf(gguf) => gguf.transcribe_words(samples),
+            #[cfg(target_os = "linux")]
+            Inner::Ane(ane) => ane.gpu()?.transcribe_words(samples),
+        }
+    }
+
+    /// One meeting chunk with segment and word timings; on the Neural Engine
+    /// model the GPU model answers.
+    pub(crate) fn transcribe_segments(
+        &mut self,
+        samples: Vec<f32>,
+    ) -> Result<crate::transcription::transcript::Transcript> {
+        match &mut self.inner {
+            Inner::Gguf(gguf) => gguf.transcribe_segments(samples),
+            #[cfg(target_os = "linux")]
+            Inner::Ane(ane) => ane.gpu()?.transcribe_segments(samples),
+        }
+    }
+
+    /// A complete clip, unpadded, for the local API and the CLI.
+    pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {
+        self.transcribe_served(samples).map(|served| served.text)
+    }
+}
+
 /// The local API's own model, loaded for the selection a host asks for
 /// when the dictation engine holds another one.
 #[derive(Default)]
@@ -665,7 +867,7 @@ impl ModelSwap {
     fn target(&self) -> (&TranscriptionSelection, TranscriptionDevice) {
         self.ready
             .as_ref()
-            .map(|(selection, model)| (selection, model.preference))
+            .map(|(selection, model)| (selection, model.preference()))
             .or(self
                 .loading
                 .as_ref()
@@ -742,7 +944,7 @@ impl ModelSwap {
     pub(crate) fn take_ready(&mut self) -> Option<LocalTranscriber> {
         let (selection, transcriber) = self.ready.take()?;
         self.loaded = selection;
-        self.device = transcriber.preference;
+        self.device = transcriber.preference();
         Some(transcriber)
     }
 }

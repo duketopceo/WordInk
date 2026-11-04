@@ -842,6 +842,41 @@ mod tests {
     }
 
     #[test]
+    fn the_neural_engine_and_its_gpu_fallback_are_separate_rows_with_their_own_times() {
+        let local = |id, model: &str, audio_ms, inference_ms| {
+            dictation(
+                id,
+                9,
+                "x",
+                None,
+                Some(("local", model)),
+                audio_ms,
+                inference_ms,
+            )
+        };
+        // Four served by the Neural Engine, one that fell back to the GPU.
+        let entries = vec![
+            local(1, "parakeet_v3_ane", 10_000, 600),
+            local(2, "parakeet_v3_ane", 10_000, 620),
+            local(3, "parakeet_v3_ane", 10_000, 580),
+            local(4, "parakeet_v3_ane", 10_000, 900),
+            local(5, "parakeet_v3", 10_000, 840),
+        ];
+        let latency = dictation_stats(&entries, &[], 0, 20_000, utc_day, utc_hour).latency;
+        let row = |model: &str| latency.iter().find(|row| row.model == model).unwrap();
+        let ane = row("parakeet_v3_ane");
+        let gpu = row("parakeet_v3");
+        assert_eq!((ane.dictations, gpu.dictations), (4, 1));
+        assert_eq!(ane.p50_ms, Some(610));
+        // Percentiles interpolate: 620 + 0.85 * (900 - 620).
+        assert_eq!(ane.p95_ms, Some(858));
+        assert_eq!((gpu.p50_ms, gpu.p95_ms), (Some(840), Some(840)));
+        // Real-time factor is each row's own time over its own audio.
+        assert!((ane.real_time_factor.unwrap() - 2_700.0 / 40_000.0).abs() < 1e-9);
+        assert!((gpu.real_time_factor.unwrap() - 840.0 / 10_000.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn hours_and_latencies_read_for_a_person() {
         assert_eq!(hour_range_label(9), "9–10 am");
         assert_eq!(hour_range_label(11), "11 am–12 pm");

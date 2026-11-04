@@ -326,6 +326,36 @@ and short taps never do; Hex restores only what it changed.
 Cancelling shortcut capture preserves the old binding unless the new binding
 has already been saved; listening resumes only if it was previously running.
 
+### Apple Neural Engine (Labs)
+
+On Linux on Apple silicon, **Settings > Labs > Parakeet v3 (Neural Engine)**
+(`wordink labs on neural-engine`) adds a model to the Local transcription
+picker that runs Parakeet v3 on the Neural Engine. It needs three things you
+install yourself; WordInk bundles none of them:
+
+- the Neural Engine kernel driver, so `/dev/accel/accel0` exists and your user
+  can open it;
+- the `mlx-omarchy` runtime, with `mlx-omarchy-parakeet` on your `PATH` (or in
+  `~/.local/bin`);
+- the runtime's reference model, downloaded once with
+  `mlx-omarchy-parakeet download`.
+
+Until the last step is done the card is listed without a Use button and says
+what is missing. WordInk keeps one warm worker process while the model is
+selected. While it starts, after an error, or when it times out, that
+dictation runs on Parakeet v3 on the GPU instead, with no dialog, and the
+worker retries after a short backoff; keep Parakeet v3 installed. Meetings and
+captures always use the GPU model, because the runtime returns no word
+timestamps.
+
+Warm, the Neural Engine runs a dictation of about five seconds or more faster
+than the GPU model; a dictation of a few seconds is faster on the GPU. The
+runtime's mel frontend and decoder still use the GPU, so expect less GPU load,
+not none. `wordink usage` lists the Neural Engine and the GPU model as separate
+rows, each counted for the dictations it actually answered. To run the worker
+from a custom install, set `WORDINK_ANE_RUNTIME` to the launcher's full path
+or `WORDINK_ANE_PYTHON` to the interpreter.
+
 ### Diagnosing a microphone that records nothing
 
 Hex records through ALSA's default device, then has PipeWire move its capture
