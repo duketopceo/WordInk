@@ -2166,6 +2166,12 @@ const SCENES: &[Scene] = &[
         ui.modes.reload(&ui.settings);
         ui.pane = Pane::Replacements;
     }),
+    ("general-advanced", |ui| {
+        *ui = portal_fixture();
+        ui.pane = Pane::General;
+        ui.advanced.push(Pane::General);
+        ui.settings.engine = crate::transcription::cloud::EngineChoice::Local;
+    }),
     ("sounds", |ui| {
         *ui = portal_fixture();
         ui.pane = Pane::Sounds;

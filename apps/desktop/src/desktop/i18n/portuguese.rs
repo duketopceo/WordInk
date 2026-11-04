@@ -112,6 +112,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Unknown", "Desconhecido"),
     ("Parakeet Ultra", "Parakeet Ultra"),
     ("Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker", "Oferece o Parakeet Ultra, o Parakeet v3 com treinamento adicional da Moondream, na lista de transcrição local"),
+    ("If local fails, use", "Se o local falhar, usar"),
+    ("Off: a failed local dictation never leaves this computer", "Desligado: um ditado local que falha nunca sai deste computador"),
     ("Parakeet v3 (Neural Engine)", "Parakeet v3 (Neural Engine)"),
     ("Offer Parakeet v3 on the Apple Neural Engine in the Local transcription picker; needs the mlx-omarchy runtime", "Oferece o Parakeet v3 no Apple Neural Engine na lista de transcrição local; requer o ambiente mlx-omarchy"),
     ("Not ready: download its reference model first with mlx-omarchy-parakeet download", "Não está pronto: baixe primeiro o modelo de referência com mlx-omarchy-parakeet download"),

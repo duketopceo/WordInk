@@ -13,7 +13,7 @@ use super::general::quiet_select;
 use super::icons::WAVE;
 use super::{Menu, Ui};
 use crate::desktop::i18n::{tr, tr_fill};
-use crate::transcription::cloud::{self, EngineChoice, Provider};
+use crate::transcription::cloud::{self, EngineChoice, LocalFallback, Provider};
 
 /// A `'static` copy of a model name for the select, which takes static
 /// labels. One copy per distinct name, so redrawing leaks nothing.
@@ -100,6 +100,9 @@ pub(super) fn rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         )
         .into(),
     ];
+    if matches!(choice, EngineChoice::Local | EngineChoice::Auto) {
+        rows.push(fallback_row(ui, p, layer).into());
+    }
     if let Some(provider) = choice.provider() {
         let models = cloud::models_for(provider);
         if models.len() > 1 {
@@ -143,6 +146,44 @@ pub(super) fn rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     }
     rows.extend(meeting_rows(ui, p, layer));
     rows
+}
+
+/// "If local fails, use": the opt-in cloud retry for a failed local
+/// dictation. None keeps the audio on this computer.
+fn fallback_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> impl Into<CardRow> {
+    let current = ui.settings.local_cloud_fallback;
+    let labels: Vec<&'static str> = LocalFallback::ALL.iter().map(|c| tr(c.label())).collect();
+    let selected = LocalFallback::ALL
+        .iter()
+        .position(|c| *c == current)
+        .unwrap_or(0);
+    let control = quiet_select(
+        ui,
+        p,
+        Menu::Pick("local-fallback"),
+        "local-fallback-control".to_owned(),
+        labels,
+        selected,
+        |ui, index| {
+            let choice = LocalFallback::ALL[index];
+            if ui.settings.local_cloud_fallback != choice {
+                ui.update(|settings| settings.local_cloud_fallback = choice);
+            }
+        },
+        layer,
+    );
+    let note = match current.provider() {
+        Some(provider) => tr_fill("Set the key with `wordink keys set {}`", provider.id()),
+        None => tr("Off: a failed local dictation never leaves this computer").to_owned(),
+    };
+    icon_row(
+        p,
+        "local-fallback",
+        &WAVE,
+        tr("If local fails, use"),
+        Some(&note),
+        control,
+    )
 }
 
 /// The engines a meeting can be given: the local model (the default, and no

@@ -1985,6 +1985,10 @@ pub struct AppSettings {
     /// Which engine dictation uses: Groq when a key resolves, else local
     /// (`auto`), or one of them always. Keys are never stored here.
     pub engine: crate::transcription::cloud::EngineChoice,
+    /// Retry a local dictation once on this cloud provider when the local
+    /// path fails (`none`, `groq`, `openrouter`). Off by default; audio never
+    /// leaves the computer unless this is set and the provider's key resolves.
+    pub local_cloud_fallback: crate::transcription::cloud::LocalFallback,
     /// The model the named cloud engine is sent (an OpenRouter id,
     /// `whisper-1`, ...). Unset, or not one the provider takes: its default.
     pub engine_model: Option<String>,
@@ -2145,6 +2149,7 @@ impl Default for AppSettings {
             transcription: default_transcription(),
             transcription_device: TranscriptionDevice::Auto,
             engine: crate::transcription::cloud::EngineChoice::default(),
+            local_cloud_fallback: crate::transcription::cloud::LocalFallback::None,
             engine_model: None,
             meeting_engine: None,
             meeting_engine_model: None,
@@ -2478,6 +2483,7 @@ impl AppSettings {
             self.engine_model.as_deref(),
             self.gateway_url.as_deref(),
         );
+        crate::transcription::cloud::set_local_fallback(self.local_cloud_fallback);
         crate::transcription::cloud::set_meeting_engine(
             self.meeting_engine,
             self.meeting_engine_model.as_deref(),

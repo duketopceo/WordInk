@@ -547,6 +547,11 @@ const KEYS: &[Key] = &[
         ]),
         "Which engine dictation uses: auto (Groq when a key is set, else the local model), local, or a cloud provider. Keys are set with `wordink keys set <provider>`",
     ),
+    key(
+        "local_cloud_fallback",
+        Kind::Choice(&["none", "groq", "openrouter"]),
+        "If a local dictation fails, retry that clip once on this cloud provider: none (default, audio stays on this computer), groq or openrouter. Needs the provider's key (`wordink keys set <provider>`); meetings never fall back",
+    ),
     optional(
         "engine_model",
         Kind::Text,
@@ -1967,6 +1972,24 @@ mod tests {
         base.cancel_hotkey = Some(base.capture.hotkey.clone());
         let refused = apply(&base, "capture.enabled", "true", &rules()).unwrap_err();
         assert_eq!(refused.code, "shortcut-in-use");
+    }
+
+    #[test]
+    fn the_local_cloud_fallback_is_off_by_default_and_set_from_the_cli() {
+        use crate::transcription::cloud::LocalFallback;
+        let defaults = AppSettings::default();
+        assert_eq!(defaults.local_cloud_fallback, LocalFallback::None);
+        let set = |settings: &AppSettings, value: &str| {
+            apply(settings, "local_cloud_fallback", value, &rules())
+        };
+        let on = set(&defaults, "groq").unwrap().settings;
+        assert_eq!(on.local_cloud_fallback, LocalFallback::Groq);
+        let off = set(&on, "none").unwrap().settings;
+        assert_eq!(off.local_cloud_fallback, LocalFallback::None);
+        assert_eq!(
+            set(&on, "openai").unwrap_err().code,
+            "invalid-value"
+        );
     }
 
     #[test]
