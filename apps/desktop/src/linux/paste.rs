@@ -123,7 +123,7 @@ impl WaylandKeys {
     }
 
     fn choose() -> Self {
-        if offers_virtual_keyboard() && on_path("wtype") {
+        if wtype_pastes() {
             Self::Wtype
         } else {
             Self::Portal(Arc::new(Mutex::new(PortalSession {
@@ -187,6 +187,17 @@ impl WaylandKeys {
             }
         }
     }
+}
+
+/// Whether this session pastes through the desktop's RemoteDesktop portal,
+/// whose dialog asks once before the first paste: Wayland without `wtype`'s
+/// virtual keyboard (GNOME, KDE).
+pub(crate) fn pastes_through_portal() -> bool {
+    LinuxSession::detect().is_wayland() && !wtype_pastes()
+}
+
+fn wtype_pastes() -> bool {
+    offers_virtual_keyboard() && on_path("wtype")
 }
 
 /// Whether the compositor advertises `zwp_virtual_keyboard_manager_v1`.
@@ -368,10 +379,7 @@ impl LinuxPaster {
                 "paste failed"
             },
             method = method,
-            terminal_setting = format!(
-                "{:?}",
-                crate::terminal_paste::load(&self.paste_with_shift)
-            ),
+            terminal_setting = format!("{:?}", crate::terminal_paste::load(&self.paste_with_shift)),
             bytes = bytes.len(),
             ok = result.is_ok(),
             error = result.as_ref().err().map(|error| format!("{error:#}")),

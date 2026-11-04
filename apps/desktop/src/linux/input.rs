@@ -1131,7 +1131,7 @@ impl Backend {
                     "{}",
                     crate::linux::portal::MISSING_SHORTCUTS_PORTAL
                 );
-                match self.wait_for_portal(&mut dispatcher)? {
+                match self.wait_for_portal(&mut dispatcher, true)? {
                     Some(portal) => portal,
                     None => return Ok(()),
                 }
@@ -1140,22 +1140,25 @@ impl Backend {
         self.run_portal(portal, dispatcher, binding, options)
     }
 
-    /// Serves `hex` commands while looking for the shortcuts portal again
-    /// from time to time: a portal started before the desktop's session
-    /// environment exposes none until it is restarted (#875). Returns the
-    /// portal once it appears, or `None` when the listener stops.
+    /// Serves `hex` commands, and with `probe` looks for the shortcuts
+    /// portal again from time to time: a portal started before the desktop's
+    /// session environment exposes none until it is restarted (#875).
+    /// Returns the portal once it appears, or `None` when the listener stops.
     fn wait_for_portal(
         &self,
         dispatcher: &mut Dispatcher,
+        probe: bool,
     ) -> Result<Option<crate::linux::portal::Portal>> {
         self.mark_ready(DesktopShortcuts::Commands);
-        let mut probe = crate::linux::portal::PortalProbe::new(self.stop.clone());
+        let mut probe = probe.then(|| crate::linux::portal::PortalProbe::new(self.stop.clone()));
         while !self.stopping() {
             dispatcher.commands();
             if !dispatcher.flush()? {
                 return Ok(None);
             }
-            if let Some(portal) = probe.poll()? {
+            if let Some(probe) = probe.as_mut()
+                && let Some(portal) = probe.poll()?
+            {
                 return Ok(Some(portal));
             }
             thread::sleep(POLL_INTERVAL);
@@ -1221,6 +1224,21 @@ impl Backend {
         let granted = match portal.bind(&shortcuts, &self.stop) {
             Ok(granted) => granted,
             Err(error) if self.stopping() => return Err(error),
+            // The backend failed the bind rather than the person refusing it
+            // (niri with the GNOME backend and no GNOME Shell, #1014): treat
+            // the desktop as having no usable shortcuts portal. Binding again
+            // would fail the same way, so this run doesn't look for it again;
+            // a listener restart (Enable, a settings change) tries once more.
+            Err(error) if crate::linux::portal::is_backend_failure(&error) => {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
+                    "the shortcuts portal's backend could not bind WordInk's shortcuts; dictation follows the hex commands"
+                );
+                drop(portal);
+                self.wait_for_portal(&mut dispatcher, false)?;
+                return Ok(());
+            }
             Err(error) => {
                 return Err(error.wrap_err(
                     "the desktop did not approve WordInk's shortcuts; choose Enable to ask again",
@@ -1299,7 +1317,9 @@ impl Backend {
                         dispatcher.keys.released_all();
                         dispatcher.input(Input::Lost);
                         let _ = dispatcher.flush();
-                        return Err(eyre!("the desktop closed WordInk's shortcuts portal session"));
+                        return Err(eyre!(
+                            "the desktop closed WordInk's shortcuts portal session"
+                        ));
                     }
                 };
                 dispatcher.input(input);
@@ -2870,7 +2890,11 @@ mod tests {
         let masks = lock_variants(ModMask::default(), ModMask::M2);
         let lock_bits = u16::from(ModMask::LOCK) | u16::from(ModMask::M2);
         for mask in masks {
-            assert_ne!(mask, ModMask::ANY, "ANY would take Ctrl+Esc from other apps");
+            assert_ne!(
+                mask,
+                ModMask::ANY,
+                "ANY would take Ctrl+Esc from other apps"
+            );
             assert_eq!(u16::from(mask) & !lock_bits, 0, "only lock keys vary");
         }
     }
@@ -2999,12 +3023,15 @@ mod tests {
         let worker = thread::spawn(move || {
             // Stopped well before its first portal check.
             backend
-                .wait_for_portal(&mut Dispatcher::new(
-                    &HotkeyOptions::default(),
-                    sender,
-                    receiver.into(),
-                    ShortcutKeys::default(),
-                ))
+                .wait_for_portal(
+                    &mut Dispatcher::new(
+                        &HotkeyOptions::default(),
+                        sender,
+                        receiver.into(),
+                        ShortcutKeys::default(),
+                    ),
+                    true,
+                )
                 .map(|portal| assert!(portal.is_none()))
         });
         readiness.recv().unwrap().unwrap();

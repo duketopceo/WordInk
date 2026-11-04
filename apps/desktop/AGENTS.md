@@ -187,8 +187,10 @@ substitute for source inspection or a second roadmap.
   app serves it on every OS, as does `hex service [--embedded]`; the discovery
   file is `local-api.json` in the data folder (mode 0600 on Unix, the per-user
   `%APPDATA%` ACL on Windows). `/dictations` (`local_api::dictation`) runs on
-  the macOS recognition loop only; elsewhere it answers
-  `service-capture-unavailable` at runtime, and `/profile/vitals` answers 503.
+  the macOS recognition loop and the Linux listener, sharing the protocol,
+  owner tokens, lease, and levels in `dictation::service`; on Windows and
+  `hex service` it answers `service-capture-unavailable`, and off macOS
+  `/profile/vitals` answers 503.
   `/control` carries the `hex` control commands on every OS (`control`).
 - `control`: the release `hex` control surface on every OS: the versioned
   `ControlRequest`/`ControlReply` protocol, the settings registry behind
@@ -251,6 +253,11 @@ substitute for source inspection or a second roadmap.
 - `desktop/login_item`: the native `SMAppService.mainAppService` adapter and its worker
   thread. macOS owns registration state; it is deliberately not duplicated in
   `settings.json`.
+- `policy`: macOS managed-preference feature locks in `anomaly.hex`
+  (`DisableMeetings`, `DisableAnnotate`, `DisableOpenCodeProcessing`,
+  `DisableTransforms`, `DisableLabs`, `RestrictTransformsToLoopback`), forced
+  values only. Locked switches read off at load and keep their saved values on
+  save; list-driven work checks the policy where it starts.
 - `app_paths`: the Application Support owner (`hex` on every OS) for runtime
   logs and shared state.
 - `desktop/onboarding`, `desktop/permission_guide`: required permission health, the native
@@ -753,7 +760,15 @@ CoreAudio formats, AppleScript details, or event serialization.
   (resumed at its saved step), or an upgrader from 2.3.1 or earlier whose
   setup isn't ready (#475). Run setup again (Labs) and `hex onboarding reset`
   replay it from the start on every build. Start using Hex records completion
-  only once setup is ready.
+  only once setup is ready. A quiet Skip shows only on the optional pages,
+  the demo and the practice: it passes over that part to the next step setup
+  still needs (permissions, then the model), else Hex is ready, and never
+  records completion. Permissions, the model step and download, and the paste
+  permission have no Skip. The one way past a model that can't be had (#894)
+  is Continue without a model, shown on the download step only once every
+  permission is ready and the download failed or stalled (30 s without
+  bytes); it records completion, and Settings › General then says no model
+  is installed, with Download and Add model file….
 - Onboarding shows its model step only when the scan found a compatible
   model; otherwise Setting up Hex is unchanged and the recommended model
   downloads by itself. The step is one card of radio rows with no buttons or
@@ -1220,7 +1235,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   changes in its own settings arrive as ShortcutsChanged and work at once; Hex
   shows the granted trigger in Settings (row note and the Status hint) and in
   `hex status --json` (`listener.shortcuts`). On GNOME the Linux dictation
-  default is Ctrl+Alt+Space (GNOME keeps Alt+Space), Settings flags a shortcut
+  default is Ctrl+Alt+Space (GNOME keeps Alt+Space; so does KDE Plasma's
+  KRunner, #898), Settings flags a shortcut
   on a key GNOME keeps for itself, and Annotate's shortcut shows beside
   dictation's in General (#723). Enable and Disable
   (window, tray) also save `enable_on_launch`, so a disabled Hex stays disabled

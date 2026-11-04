@@ -11,9 +11,9 @@ use rune::{Color, El, Tx, col, el, row, text};
 use rune_kit::{Placement, Select, SelectAppearance, TextInput};
 
 use super::controls::{
-    self, ButtonKind, CardRow, DEVICE_SELECT_WIDTH, KeySize, METRICS, Paint, button, card,
-    copy_row, folding, icon_button, icon_described_row, icon_row, icon_toggle_row, key_tray,
-    keycap, note, page, pressable_row, row_switch, section,
+    self, ButtonKind, CardRow, DEVICE_SELECT_WIDTH, KeySize, METRICS, Paint, button, card, folding,
+    icon_button, icon_described_row, icon_row, icon_toggle_row, key_tray, keycap, note, page,
+    pressable_row, row_switch, section,
 };
 use super::icons::*;
 use super::lists::{PermissionControl, permission_control, slider};
@@ -28,7 +28,6 @@ use crate::desktop::host::DesktopAction;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::desktop::login_item::LoginItemStatus;
 use crate::desktop::onboarding::PermissionKind;
-use crate::dictation::ShortcutMode;
 use crate::transcription::models as transcription_models;
 
 /// The missing permissions, the listener (Windows and Linux), the basics,
@@ -154,6 +153,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             ShortcutTarget::Dictation,
             None,
         ));
+        rows.push(super::shortcut_mode::row(ui, p).into());
         // Labs › Second dictation shortcut (macOS): another key that
         // dictates like the one above, such as on an external keyboard.
         #[cfg(target_os = "macos")]
@@ -176,7 +176,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 ui,
                 p,
                 "annotate-shortcut",
-                &super::SCRAWL_ICON,
+                &super::sidebar::SCRAWL_ICON,
                 tr("Annotate"),
                 ShortcutTarget::Capture,
                 None,
@@ -201,49 +201,51 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     };
     let (description, control) = match local_missing {
         // Hex can't listen without the selected model: say so, with the
-        // download's progress, or a Download button when none runs.
+        // download's progress, or Download and Add model file… when none
+        // runs, as after Continue without a model (#894).
         Some(progress) => {
-            let error = ui
-                .view
-                .as_ref()
-                .and_then(|view| view.transcription.error.clone())
-                .filter(|_| progress.downloading.is_none());
-            let description = match error {
-                Some(error) => (error, p.danger()),
-                None => (
+            let description = match (
+                progress.downloading,
+                super::model_import::download_failure(ui),
+            ) {
+                (Some(_), _) => (
                     tr("WordInk can't listen until the speech model has downloaded").to_string(),
                     p.muted(),
                 ),
-            };
-            let action = match progress.downloading {
-                Some(fraction) => rune_kit::Progress::new(Some(fraction))
-                    .show_value()
-                    .build(p.k)
-                    .key("transcription-progress")
-                    .w(120.0),
-                None => button(
-                    p,
-                    "transcription-download",
-                    tr("Download"),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| {
-                        let selection = ui.settings.transcription.clone();
-                        ui.send(Request::ChooseModel {
-                            model: selection.model,
-                            language: selection.language,
-                        });
-                    },
+                (None, Some(error)) => {
+                    (tr_fill("No speech model installed: {}", &error), p.danger())
+                }
+                (None, None) => (
+                    tr("No speech model installed. Download one or add a model file.").to_string(),
+                    p.danger(),
                 ),
             };
-            (
-                Some(description),
-                row()
-                    .key("transcription-controls")
-                    .gap(8.0)
-                    .center_y()
-                    .child(action)
-                    .child(picker_button),
-            )
+            let controls = row().key("transcription-controls").gap(8.0).center_y();
+            let controls = match progress.downloading {
+                Some(fraction) => controls.child(
+                    rune_kit::Progress::new(Some(fraction))
+                        .show_value()
+                        .build(p.k)
+                        .key("transcription-progress")
+                        .w(120.0),
+                ),
+                None => controls
+                    .child(button(
+                        p,
+                        "transcription-download",
+                        tr("Download"),
+                        ButtonKind::Secondary,
+                        |ui: &mut Ui, _| {
+                            let selection = ui.settings.transcription.clone();
+                            ui.send(Request::ChooseModel {
+                                model: selection.model,
+                                language: selection.language,
+                            });
+                        },
+                    ))
+                    .child(super::model_import::use_file_button(ui, p)),
+            };
+            (Some(description), controls.child(picker_button))
         }
         None => match &cloud_model {
             Some(_) => (
@@ -292,7 +294,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 /// The selected speech model's download, while it is not installed, so
 /// Hex can't listen yet. Fixtures that name no installed models say nothing,
 /// so their rows never depend on this machine's models.
-fn missing_model(ui: &Ui) -> Option<crate::desktop::onboarding::ModelProgress> {
+pub(super) fn missing_model(ui: &Ui) -> Option<crate::desktop::onboarding::ModelProgress> {
     if !ui.live() && ui.picker.installed.is_none() {
         return None;
     }
@@ -997,67 +999,6 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             layer,
         ));
     }
-    let toggle_mode = settings.shortcut_mode == ShortcutMode::Toggle;
-    rows.push(
-        copy_row(
-            p,
-            "shortcut-mode",
-            Some(&HAND),
-            tr("Shortcut mode"),
-            Some(super::explainer::link(p)),
-            pick_select(
-                ui,
-                p,
-                "shortcut-mode",
-                vec![tr("Hold"), tr("Toggle")],
-                usize::from(toggle_mode),
-                |ui, index| {
-                    let mode = if index == 1 {
-                        ShortcutMode::Toggle
-                    } else {
-                        ShortcutMode::Hold
-                    };
-                    if ui.settings.shortcut_mode != mode {
-                        ui.update(|settings| settings.shortcut_mode = mode);
-                    }
-                },
-                layer,
-            ),
-            true,
-        )
-        .into(),
-    );
-    rows.push(folding(
-        "double-tap-fold",
-        (!toggle_mode).then(|| {
-            icon_toggle_row(
-                p,
-                "double-tap",
-                &LOCK,
-                tr("Double-tap to lock"),
-                None,
-                settings.double_tap_lock,
-                super::explainer::flip_lock,
-            )
-        }),
-    ));
-    rows.push(folding(
-        "double-tap-only-fold",
-        s::double_tap_only_applies(settings).then(|| {
-            icon_toggle_row(
-                p,
-                "double-tap-only",
-                &TIMER,
-                tr("Double-tap only"),
-                tr("Wait for two complete shortcut taps before recording"),
-                settings.double_tap_only,
-                |ui: &mut Ui| {
-                    let enabled = !ui.settings.double_tap_only;
-                    ui.update(|settings| settings.double_tap_only = enabled);
-                },
-            )
-        }),
-    ));
     // Labs › Switch model with keyboard language: its mappings, while on.
     if ui.platform.caps.keyboard_model_switching {
         rows.push(folding(

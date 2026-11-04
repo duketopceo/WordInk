@@ -88,7 +88,9 @@ impl RemoteDesktop {
             .unwrap_or(0);
         if devices & KEYBOARD == 0 {
             bus.close_session(&session);
-            return Err(eyre!("the desktop did not allow WordInk to use the keyboard"));
+            return Err(eyre!(
+                "the desktop did not allow WordInk to use the keyboard"
+            ));
         }
         let prompted = restore.is_none() || began.elapsed() >= DIALOG_THRESHOLD;
         // Restore tokens are single-use: each start hands out the next one.
@@ -112,6 +114,18 @@ impl RemoteDesktop {
             prompted,
             ended: false,
         })
+    }
+
+    /// Asks the desktop for the keyboard ahead of the first paste, from
+    /// onboarding or Settings. The saved grant lets later pastes start
+    /// without a dialog.
+    pub(crate) fn ask() -> Result<()> {
+        Self::start(&AtomicBool::new(false)).map(drop)
+    }
+
+    /// Whether the desktop granted the keyboard before: a saved grant.
+    pub(crate) fn granted() -> bool {
+        load_restore_token().is_some()
     }
 
     /// Whether a later session restores this grant without a dialog.

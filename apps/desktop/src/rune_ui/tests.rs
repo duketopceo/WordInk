@@ -231,15 +231,19 @@ fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
 #[test]
 fn each_panes_advanced_fold_starts_closed_and_stays_its_own() {
     let mut rt = runtime("portal", true, TALL_SIZE);
-    assert!(rt.find("double-tap-only").is_none(), "closed at first");
-    tap(&mut rt, "advanced-toggle");
-    tap(&mut rt, "advanced-toggle");
-    tap(&mut rt, "advanced-toggle");
-    rt.state.settings.double_tap_lock = true;
-    rt.state.settings.double_tap_only = true;
+    // Linux has its Bluetooth earbuds row under Microphone, so this row
+    // (every other OS's Advanced) needs another OS's capabilities.
+    rt.state.platform.caps = platform::Capabilities::WINDOWS;
     rt.invalidate();
+    assert!(
+        rt.find("avoid-bluetooth-microphone").is_none(),
+        "closed at first"
+    );
+    tap(&mut rt, "advanced-toggle");
+    tap(&mut rt, "advanced-toggle");
+    tap(&mut rt, "advanced-toggle");
     settle(&mut rt);
-    assert!(rt.find("double-tap-only").is_some());
+    assert!(rt.find("avoid-bluetooth-microphone").is_some());
     assert_eq!(rt.state.advanced, vec![Pane::General]);
 }
 
@@ -680,7 +684,7 @@ fn every_scene_stops_asking_for_frames() {
         for _ in 0..150 {
             rt.frame(1.0 / 30.0);
         }
-        if *scene != "shortcut-explainer-motion" {
+        if *scene != "shortcut-mode-motion" {
             moving.extend(
                 rt.elements()
                     .into_iter()
@@ -897,20 +901,26 @@ fn a_press_in_a_sidebar_gap_selects_the_nearest_item() {
 #[test]
 fn a_settings_row_shows_no_hover_or_press_of_its_own() {
     let mut rt = runtime("portal", true, TALL_SIZE);
+    // Linux has its Bluetooth earbuds row under Microphone, so this row
+    // (every other OS's Advanced) needs another OS's capabilities.
+    rt.state.platform.caps = platform::Capabilities::WINDOWS;
+    rt.invalidate();
     open_advanced(&mut rt, Pane::General);
-    let before = rt.state.settings.double_tap_lock;
-    let (x, y) = rt.find("double-tap/lead/copy").expect("the row's title");
+    let before = rt.state.settings.avoid_bluetooth_microphone;
+    let (x, y) = rt
+        .find("avoid-bluetooth-microphone/lead/copy")
+        .expect("the row's title");
     rt.pointer_move(x, y);
     rt.frame(1.0 / 120.0);
-    let row = element(&rt, "double-tap");
+    let row = element(&rt, "avoid-bluetooth-microphone");
     assert_eq!((row.hover, row.fill), (0.0, rune::Color::TRANSPARENT));
     rt.pointer_down(x, y);
     rt.frame(1.0 / 120.0);
-    assert_eq!(element(&rt, "double-tap").press, 0.0);
+    assert_eq!(element(&rt, "avoid-bluetooth-microphone").press, 0.0);
     rt.pointer_up(x, y);
     settle(&mut rt);
     assert_ne!(
-        rt.state.settings.double_tap_lock, before,
+        rt.state.settings.avoid_bluetooth_microphone, before,
         "pressing the row still flips it"
     );
 }
@@ -945,10 +955,14 @@ fn assert_hover_is_binary(rt: &Runtime<Ui>, what: &str) {
 #[test]
 fn segments_and_switch_tracks_hover_at_once() {
     let mut rt = runtime("portal", true, TALL_SIZE);
+    // Linux has its Bluetooth earbuds row under Microphone, so this row
+    // (every other OS's Advanced) needs another OS's capabilities.
+    rt.state.platform.caps = platform::Capabilities::WINDOWS;
+    rt.invalidate();
     open_advanced(&mut rt, Pane::General);
     let targets = [
-        rt.find("shortcut-mode-control-trigger"),
-        rt.find("double-tap/switch"),
+        rt.find("speech-engine-control-trigger"),
+        rt.find("avoid-bluetooth-microphone/switch"),
     ];
     for (target, name) in targets.into_iter().zip(["select", "switch"]) {
         let (x, y) = target.unwrap_or_else(|| panic!("no {name}"));
@@ -1438,29 +1452,42 @@ fn mode_applications_refuse_one_another_modes_use() {
 #[test]
 fn the_transcription_picker_asks_the_service_for_a_model() {
     let mut rt = runtime("picker", true, PANE_SIZE);
-    tap(&mut rt, "model3/top/actions/choose-model");
+    // The comparison shows Parakeet v3 (the default), Parakeet Unified
+    // English, and Cohere Transcribe.
+    tap(&mut rt, "model2/action/cell/slot/choose-model");
     assert!(matches!(
         sent(&rt),
         [Request::ChooseModel {
-            model: TranscriptionModelId::WhisperLargeV3Turbo,
+            model: TranscriptionModelId::CohereTranscribe,
             ..
         }]
     ));
     assert_eq!(
         rt.state.picker.fallback, None,
-        "Whisper keeps the saved English"
+        "Cohere keeps the saved English"
     );
     tap(&mut rt, "close-picker");
     assert!(!rt.state.picker.open);
 }
 
-/// The card index of `model` in the picker over `language`.
-fn picker_card(language: &str, model: TranscriptionModelId) -> String {
-    let index = crate::transcription::models::picker_models(language)
-        .iter()
-        .position(|(candidate, _)| candidate.id == model)
-        .expect("every available model is listed");
-    format!("model{index}")
+/// Scrolls the full model list until `key` is inside it, then presses it.
+fn tap_in_model_list(rt: &mut Runtime<Ui>, key: &str) {
+    for _ in 0..400 {
+        let target = element(rt, key).rect;
+        let list = element(rt, "model-scroll").rect;
+        let middle = target[1] + target[3] / 2.0;
+        if middle > list[1] && middle < list[1] + list[3] {
+            break;
+        }
+        let dy = if middle > list[1] + list[3] {
+            20.0
+        } else {
+            -20.0
+        };
+        rt.wheel(list[0] + list[2] / 2.0, list[1] + list[3] / 2.0, dy);
+        rt.frame(1.0 / 60.0);
+    }
+    tap(rt, key);
 }
 
 #[test]
@@ -1473,13 +1500,15 @@ fn a_model_without_the_saved_language_falls_back_to_its_own_visibly() {
     rt.state.picker.installed = Some(Vec::new());
     rt.invalidate();
     settle(&mut rt);
-    let card = picker_card("he", TranscriptionModelId::ParakeetUnifiedEnglish);
+    // Parakeet is folded away with the models that don't speak Hebrew.
+    tap(&mut rt, "more-models");
+    tap(&mut rt, "other-languages");
     let shown = texts(&rt);
     assert!(
-        shown.contains(&"Doesn't support Hebrew; switches the language to English".to_owned()),
+        shown.contains(&"Choosing it switches the language to English".to_owned()),
         "{shown:?}"
     );
-    tap(&mut rt, &format!("{card}/top/actions/choose-model"));
+    tap_in_model_list(&mut rt, "model-parakeet_unified_en/actions/choose-model");
     assert_eq!(
         sent(&rt),
         [Request::ChooseModel {
@@ -1638,10 +1667,11 @@ fn the_wheel_scrolls_a_long_term_list() {
     }
 }
 
-/// The model picker sheet's list scrolls with the wheel too.
+/// The model picker's full list scrolls with the wheel too. The picker opens
+/// on the comparison, which fits without scrolling, so this opens every model.
 #[test]
 fn the_wheel_scrolls_the_model_picker() {
-    let mut rt = runtime("picker-downloading", true, (900.0, 480.0));
+    let mut rt = runtime("picker-custom-models", true, (900.0, 480.0));
     let list = element(&rt, "model-scroll").rect;
     let first = |rt: &Runtime<Ui>| {
         rt.elements()
@@ -1773,7 +1803,7 @@ fn the_sound_sets_sheet_plays_and_chooses_sets() {
 #[test]
 fn a_download_in_progress_can_be_cancelled() {
     let mut rt = runtime("picker-downloading", true, PANE_SIZE);
-    tap(&mut rt, "model2/top/actions/cancel-model");
+    tap(&mut rt, "model2/action/cell/slot/preparing/cancel-model");
     assert!(matches!(sent(&rt), [Request::CancelModel]));
 }
 
@@ -2578,14 +2608,15 @@ fn suggest_with_ai_asks_only_when_pressed_and_labels_the_guesses() {
     assert_eq!(rows, 3);
 }
 
-/// The picker lists cloud models above the local ones, marks only the
-/// model that transcribes as Active, and picking moves dictation there.
+/// The full list shows the Cloud group above the local models while a cloud
+/// engine runs, marks only the model that transcribes as Active, and picking
+/// moves dictation there.
 #[test]
 fn the_picker_offers_cloud_models_and_one_active_choice() {
     use crate::transcription::cloud::{EngineChoice, Provider, force_keys, force_route};
     force_route(Some(Provider::Groq));
     force_keys(&[Provider::Groq]);
-    let mut rt = runtime("picker", true, PANE_SIZE);
+    let mut rt = runtime("picker-custom-models", true, PANE_SIZE);
     rt.state.settings.engine = EngineChoice::Auto;
     rt.invalidate();
     settle(&mut rt);
@@ -2595,13 +2626,7 @@ fn the_picker_offers_cloud_models_and_one_active_choice() {
     // Groq's default model is the one Active card; no local card is.
     assert!(rt.find("cloud0/top/actions/active").is_some());
     assert!(rt.find("cloud1/top/actions/active").is_none());
-    let local_active = rt.elements().iter().any(|e| {
-        e.path.ends_with("/top/actions/active")
-            && e.path.split('/').any(|part| {
-                part.strip_prefix("model")
-                    .is_some_and(|n| n.parse::<usize>().is_ok())
-            })
-    });
+    let local_active = rt.elements().iter().any(|e| e.path.ends_with("/in-use"));
     assert!(!local_active, "a cloud model is transcribing");
     // A provider without a key offers no Use, only how to add one.
     let openai = rt
@@ -2628,8 +2653,13 @@ fn the_picker_offers_cloud_models_and_one_active_choice() {
     rt.state.picker.open = true;
     rt.invalidate();
     settle(&mut rt);
-    scroll_into_view(&mut rt, "model3");
-    tap(&mut rt, "model3/top/actions/choose-model");
+    rt.update(|ui, _| {
+        picker::choose(
+            ui,
+            crate::transcription::models::definition(TranscriptionModelId::WhisperLargeV3Turbo),
+        )
+    });
+    settle(&mut rt);
     assert_eq!(rt.state.settings.engine, EngineChoice::Local);
 }
 
@@ -2657,26 +2687,39 @@ fn the_picker_lists_openrouter_transcription_models_with_their_hourly_price() {
     ]);
     force_route(None);
     force_keys(&[Provider::OpenRouter]);
-    let mut rt = runtime("picker", true, PANE_SIZE);
+    let mut rt = runtime("picker-custom-models", true, PANE_SIZE);
     rt.state.settings.engine = EngineChoice::Local;
     rt.invalidate();
     settle(&mut rt);
     // Groq has two cards (0, 1); OpenRouter's default chat model is the
     // third, then its transcription models in catalogue order.
     let metadata = |rt: &Runtime<Ui>, index: usize| -> String {
-        element(rt, &format!("cloud{index}/metadata")).text.clone().unwrap_or_default()
+        element(rt, &format!("cloud{index}/metadata"))
+            .text
+            .clone()
+            .unwrap_or_default()
     };
-    assert!(metadata(&rt, 3).contains("$0.036 / hour"), "{}", metadata(&rt, 3));
+    assert!(
+        metadata(&rt, 3).contains("$0.036 / hour"),
+        "{}",
+        metadata(&rt, 3)
+    );
     assert!(
         !metadata(&rt, 4).contains("/ hour"),
         "a model billed by token shows no hourly price: {}",
         metadata(&rt, 4)
     );
     let mai = metadata(&rt, 5);
-    assert!(mai.contains("OpenRouter") && mai.contains("$0.100 / hour"), "{mai}");
+    assert!(
+        mai.contains("OpenRouter") && mai.contains("$0.100 / hour"),
+        "{mai}"
+    );
     assert!(mai.contains("Audio is sent to this provider"), "{mai}");
     let shown = texts(&rt);
-    assert!(shown.iter().any(|t| t == "microsoft/mai-transcribe-2"), "{shown:?}");
+    assert!(
+        shown.iter().any(|t| t == "microsoft/mai-transcribe-2"),
+        "{shown:?}"
+    );
     // Choosing it makes OpenRouter the dictation engine with that model.
     scroll_into_view(&mut rt, "cloud5");
     tap(&mut rt, "cloud5/top/actions/choose-cloud-model");
@@ -2699,4 +2742,31 @@ fn scroll_into_view(rt: &mut Runtime<Ui>, key: &str) {
         wheel_down(rt, list[0] + list[2] / 2.0, list[1] + list[3] / 2.0, true);
     }
     panic!("{key} never scrolled into view");
+}
+
+/// Labs › Fix results in Output: the Try card offers Vocabulary and Fix
+/// this only with the toggle on, and Fix this copies for the sentence typed.
+#[test]
+fn output_fixes_show_only_with_their_lab_and_fix_this_copies_for_the_sentence() {
+    let output = |on: bool| {
+        let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+        output::fixture(&mut state);
+        state.pane = Pane::Output;
+        state.settings.labs.output_fixes = on;
+        runtime_for(state, false, TALL_SIZE)
+    };
+    let off = output(false);
+    assert!(off.find("output-vocabulary").is_none());
+    assert!(off.find("fix-this").is_none());
+
+    let mut on = output(true);
+    assert!(on.find("output-vocabulary").is_some());
+    tap(&mut on, "fix-this");
+    assert!(on.state.output.prompt_copied);
+    assert_eq!(
+        on.state.output.fix_copied.as_deref(),
+        Some("Um, open code shipped the wordink app today.")
+    );
+    tap(&mut on, "output-vocabulary");
+    assert!(on.state.vocabulary.open);
 }

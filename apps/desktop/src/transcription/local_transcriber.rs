@@ -203,6 +203,14 @@ impl LocalTranscriber {
     /// or prewarm that fails retries on the CPU, and when the CPU works the
     /// GPU is remembered as failed.
     pub fn load(selection: &TranscriptionSelection) -> Result<Self> {
+        let loaded = Self::load_where(selection)?;
+        gpu_health::set_auto_on_cpu(
+            loaded.preference == TranscriptionDevice::Auto && loaded.gpu.is_none(),
+        );
+        Ok(loaded)
+    }
+
+    fn load_where(selection: &TranscriptionSelection) -> Result<Self> {
         let backend = init_backends()?;
         let preference = device();
         if backend == Backend::Cpu || preference == TranscriptionDevice::Cpu {
@@ -333,7 +341,7 @@ impl LocalTranscriber {
             warm_ms: 0,
         };
         let started = Instant::now();
-        transcriber.transcribe(&vec![0.0; PREWARM_SAMPLES])?;
+        transcriber.warm_on_silence()?;
         tracing::info!(
             prewarm_ms = started.elapsed().as_millis(),
             "prewarmed local transcription model"
@@ -344,9 +352,26 @@ impl LocalTranscriber {
         // Warm now, so this times the device rather than its first run's
         // shader compiles.
         let started = Instant::now();
-        transcriber.transcribe(&vec![0.0; PREWARM_SAMPLES])?;
+        transcriber.warm_on_silence()?;
         transcriber.warm_ms = started.elapsed().as_millis();
         Ok(transcriber)
+    }
+
+    /// Runs [`PREWARM_SAMPLES`] of silence through the model. A decoder
+    /// that runs to its generation cap on silence (Qwen3-ASR 1.7B, #968)
+    /// still ran the whole graph on the device, so that is a warm model,
+    /// not a failed device.
+    fn warm_on_silence(&mut self) -> Result<()> {
+        match self.transcribe(&vec![0.0; PREWARM_SAMPLES]) {
+            Err(error) if output_truncated(&error) => {
+                tracing::info!(
+                    error = format!("{error:#}"),
+                    "the warm-up run on silence hit the output limit; the model is warm"
+                );
+                Ok(())
+            }
+            result => result.map(drop),
+        }
     }
 
     pub(crate) fn stream_options(&self) -> Option<&transcribe_cpp::StreamOptions> {
@@ -379,9 +404,8 @@ impl LocalTranscriber {
         if self.session.ran_recently() {
             return Ok(());
         }
-        self.transcribe(&vec![0.0; PREWARM_SAMPLES])
+        self.warm_on_silence()
             .wrap_err("could not prewarm transcription model")
-            .map(drop)
     }
 
     /// Transcribes a complete 16 kHz clip, padded as a dictation's clip is.
@@ -521,6 +545,7 @@ impl LocalTranscriber {
         if let Some(gpu) = &gpu {
             gpu_health::record(gpu, &format!("{error:#}"));
         }
+        gpu_health::set_auto_on_cpu(self.preference == TranscriptionDevice::Auto);
         *self = cpu;
         Ok(())
     }
@@ -586,6 +611,16 @@ impl LocalTranscriber {
             result => result,
         }
     }
+}
+
+/// Whether `error` is a decode stopped at its output limit.
+fn output_truncated(error: &color_eyre::eyre::Report) -> bool {
+    error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<transcribe_cpp::Error>(),
+            Some(transcribe_cpp::Error::OutputTruncated { .. })
+        )
+    })
 }
 
 /// The local API's own model, loaded for the selection a host asks for
@@ -777,6 +812,22 @@ mod model_swap_tests {
         );
         assert!(message.contains("wordink model install"), "{message}");
         assert!(!message.contains("cargo"), "{message}");
+    }
+
+    #[test]
+    fn a_truncated_decode_is_recognised_through_its_context() {
+        let truncated: Result<()> = Err(transcribe_cpp::Error::OutputTruncated {
+            message: "budget".into(),
+            partial: None,
+        })
+        .wrap_err("transcription failed");
+        assert!(output_truncated(&truncated.unwrap_err()));
+        let other: Result<()> = Err(transcribe_cpp::Error::OutputRepetition {
+            message: "loop".into(),
+            partial: None,
+        })
+        .wrap_err("transcription failed");
+        assert!(!output_truncated(&other.unwrap_err()));
     }
 
     #[test]

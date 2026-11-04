@@ -31,8 +31,10 @@ fn description(enabled: bool) -> &'static str {
 /// collides with another, and leaves the shortcuts as they are.
 fn set_enabled(settings: &mut AppSettings, enabled: bool) -> Result<(), &'static str> {
     if enabled
-        && settings
-            .hotkey_overlaps_others(crate::app_settings::HotkeySlot::Capture, &settings.capture.hotkey)
+        && settings.hotkey_overlaps_others(
+            crate::app_settings::HotkeySlot::Capture,
+            &settings.capture.hotkey,
+        )
     {
         return Err(tr(
             "The capture shortcut is already in use. Change it below before turning captures on.",
@@ -43,6 +45,9 @@ fn set_enabled(settings: &mut AppSettings, enabled: bool) -> Result<(), &'static
 }
 
 pub(super) fn toggle(ui: &mut Ui) {
+    if crate::policy::Policy::current().locks(crate::policy::Lock::Annotate) {
+        return;
+    }
     cancel_capture(ui);
     let enabled = !ui.settings.capture.enabled;
     let mut candidate = ui.drafted();
@@ -270,7 +275,9 @@ fn recordings_row(ui: &Ui, p: Paint) -> El {
         p,
         "capture-show-in-recordings",
         tr("Show in screen recordings"),
-        tr("Lets recordings, annotations included, show WordInk's capsule, ink, and HUD, for demos"),
+        tr(
+            "Lets recordings, annotations included, show WordInk's capsule, ink, and HUD, for demos",
+        ),
         ui.settings.capture.show_overlays_in_recordings,
         |ui: &mut Ui| {
             ui.update(|settings| {
@@ -387,14 +394,18 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         p,
         "enable",
         vec![
-            toggle_row(
-                p,
-                "capture-enabled",
-                tr("Annotate"),
-                description(enabled),
-                enabled,
-                toggle,
-            )
+            if crate::policy::Policy::current().locks(crate::policy::Lock::Annotate) {
+                super::controls::managed_row(p, "capture-enabled", None, tr("Annotate"))
+            } else {
+                toggle_row(
+                    p,
+                    "capture-enabled",
+                    tr("Annotate"),
+                    description(enabled),
+                    enabled,
+                    toggle,
+                )
+            }
             .into(),
             folding(
                 "capture-error-fold",
@@ -448,7 +459,10 @@ mod tests {
     #[test]
     fn captures_default_off_and_refuse_a_shortcut_in_use() {
         let settings = AppSettings::default();
-        assert!(!settings.capture.enabled, "WordInk turns captures off by default");
+        assert!(
+            !settings.capture.enabled,
+            "WordInk turns captures off by default"
+        );
         let mut taken = AppSettings::default();
         taken.capture.hotkey = taken.dictation_hotkey.clone();
         let before = serde_json::to_value(&taken).unwrap();

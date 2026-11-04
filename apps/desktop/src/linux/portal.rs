@@ -41,6 +41,10 @@ const MANAGED_MARK: &str = "X-Hex-Managed=true";
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 /// A request can wait for the user to approve a desktop dialog.
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+/// BindShortcuts waits as long as the desktop's approval dialog may
+/// reasonably stay open. Giving up closes Hex's session, and KDE then keeps
+/// every shortcut with no key and never asks again (#898).
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// How often a pending request checks for cancellation.
 const STOP_POLL: Duration = Duration::from_millis(50);
 /// The ids Cancel dictation had until it was removed (#786): `cancel`,
@@ -137,6 +141,26 @@ fn unknown(error: &zbus::Error) -> bool {
         _ => return false,
     };
     name.starts_with("org.freedesktop.DBus.Error.Unknown")
+}
+
+/// The portal's backend failed a request: it answered Response code 2, or
+/// the call itself failed on the bus. Unlike a dismissal (code 1), the
+/// desktop never asked the person; on niri with the GNOME backend and no
+/// GNOME Shell, BindShortcuts always fails this way (#1014).
+#[derive(Debug)]
+pub(crate) struct BackendFailure(String);
+
+impl std::fmt::Display for BackendFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for BackendFailure {}
+
+/// Whether `error` is the portal's backend failing, not a refusal.
+pub(crate) fn is_backend_failure(error: &color_eyre::eyre::Report) -> bool {
+    error.downcast_ref::<BackendFailure>().is_some()
 }
 
 /// A private session-bus connection registered with the portal as Hex.
@@ -319,19 +343,40 @@ impl PortalBus {
     where
         B: serde::Serialize + zbus::Type,
     {
+        self.request_within(method, body, stop, RESPONSE_TIMEOUT)
+    }
+
+    /// [`Self::request`], waiting up to `timeout` for the answer.
+    fn request_within<B>(
+        &mut self,
+        method: &str,
+        body: impl FnOnce(&str) -> B,
+        stop: &AtomicBool,
+        timeout: Duration,
+    ) -> Result<Results>
+    where
+        B: serde::Serialize + zbus::Type,
+    {
         let token = self.token();
         let path = format!("{DESKTOP_PATH}/request/{}/{token}", self.sender);
         let interface = self.interface;
-        self.call::<_, OwnedObjectPath>(DESKTOP_PATH, interface, method, &body(&token))
-            .wrap_err_with(|| format!("the {interface} portal refused {method}"))?;
-        let deadline = Instant::now() + RESPONSE_TIMEOUT;
+        if let Err(error) =
+            self.call::<_, OwnedObjectPath>(DESKTOP_PATH, interface, method, &body(&token))
+        {
+            return Err(color_eyre::eyre::Report::new(BackendFailure(format!(
+                "the {interface} portal refused {method}: {error}"
+            ))));
+        }
+        let deadline = Instant::now() + timeout;
         loop {
             match self.signals.recv_timeout(STOP_POLL) {
                 Ok(Signal::Response(answered, code, results)) if answered == path => {
                     return match code {
                         0 => Ok(results),
                         1 => Err(eyre!("the {interface} request {method} was dismissed")),
-                        _ => Err(eyre!("the {interface} portal could not complete {method}")),
+                        _ => Err(color_eyre::eyre::Report::new(BackendFailure(format!(
+                            "the {interface} portal could not complete {method}"
+                        )))),
                     };
                 }
                 Ok(Signal::Session(session, event)) => self.pending.push_back((session, event)),
@@ -702,7 +747,22 @@ impl Portal {
     ) -> Result<HashMap<String, Option<String>>> {
         let session = self.bus.create_session(stop)?;
         self.session = Some(session.clone());
-        self.bind_session(session, shortcuts, stop)
+        let bound = self.bind_session(session, shortcuts, stop);
+        if desktop_is("KDE") {
+            match &bound {
+                // Approved: whatever KDE keeps now, the person chose.
+                Ok(granted) if granted.values().any(Option::is_some) => {
+                    kde_unapproved::clear();
+                }
+                Ok(_) => {}
+                // The backend failed: no dialog was shown.
+                Err(error) if is_backend_failure(error) => {}
+                // Dismissed, canceled, or abandoned: KDE keeps these ids
+                // with no key and never asks for them again (#898).
+                Err(_) => kde_unapproved::remember(shortcuts),
+            }
+        }
+        bound
     }
 
     /// Clears the shortcuts GNOME keeps listed for Hex once its session
@@ -761,11 +821,57 @@ impl Portal {
                     "unregister",
                     &(component, action),
                 )
-                .wrap_err_with(|| format!("could not remove WordInk's old KDE shortcut {action}"))?;
+                .wrap_err_with(|| {
+                    format!("could not remove WordInk's old KDE shortcut {action}")
+                })?;
             if removed {
-                tracing::info!(component, action, "removed an old WordInk shortcut from KDE");
+                tracing::info!(
+                    component,
+                    action,
+                    "removed an old WordInk shortcut from KDE"
+                );
             }
         }
+        // Shortcuts a bind left unapproved, which KDE keeps with no key: gone,
+        // KDE's dialog asks for them again. A key set since in System Settings
+        // stays (#898).
+        let unapproved = kde_unapproved::ids();
+        for action in current
+            .iter()
+            .filter_map(|action| action.get(1))
+            .filter(|action| unapproved.iter().any(|id| id == *action))
+        {
+            let keys: Vec<(Vec<i32>,)> = self
+                .bus
+                .call_service(
+                    KGLOBALACCEL,
+                    KGLOBALACCEL_PATH,
+                    KGLOBALACCEL_INTERFACE,
+                    "shortcutKeys",
+                    &(vec![APP_ID, action.as_str()],),
+                )
+                .wrap_err_with(|| format!("could not read WordInk's KDE shortcut {action}"))?;
+            if keys.iter().any(|(keys,)| keys.iter().any(|key| *key != 0)) {
+                continue;
+            }
+            let removed: bool = self
+                .bus
+                .call_service(
+                    KGLOBALACCEL,
+                    KGLOBALACCEL_PATH,
+                    KGLOBALACCEL_INTERFACE,
+                    "unregister",
+                    &(APP_ID, action.as_str()),
+                )
+                .wrap_err_with(|| format!("could not remove WordInk's KDE shortcut {action}"))?;
+            if removed {
+                tracing::info!(
+                    action,
+                    "removed a WordInk shortcut KDE kept without a key after its dialog went unanswered; KDE asks again"
+                );
+            }
+        }
+        kde_unapproved::clear();
         Ok(())
     }
 
@@ -797,7 +903,7 @@ impl Portal {
             })
             .collect::<Vec<_>>();
         let handle = session.into_inner();
-        let results = self.bus.request(
+        let results = self.bus.request_within(
             "BindShortcuts",
             |token| {
                 (
@@ -808,6 +914,7 @@ impl Portal {
                 )
             },
             stop,
+            APPROVAL_TIMEOUT,
         )?;
         let bound = results
             .get("shortcuts")
@@ -815,6 +922,43 @@ impl Portal {
             .and_then(|shortcuts| Vec::<(String, Results)>::try_from(shortcuts).ok())
             .unwrap_or_default();
         Ok(triggers(bound))
+    }
+}
+
+/// The shortcut ids of a KDE bind whose approval dialog was dismissed,
+/// canceled, or abandoned (Hex stopped while it was open), kept in
+/// Application Support until the next bind on KDE (#898).
+mod kde_unapproved {
+    use std::path::PathBuf;
+
+    fn path() -> Option<PathBuf> {
+        crate::app_paths::support_dir()
+            .ok()
+            .map(|dir| dir.join("kde-unapproved-shortcuts"))
+    }
+
+    pub(super) fn remember(shortcuts: &[super::Shortcut]) {
+        let Some(path) = path() else { return };
+        let ids = shortcuts
+            .iter()
+            .map(|shortcut| format!("{}\n", shortcut.id))
+            .collect::<String>();
+        if let Err(error) = std::fs::write(&path, ids) {
+            tracing::warn!(%error, "could not note WordInk's unapproved KDE shortcuts");
+        }
+    }
+
+    pub(super) fn ids() -> Vec<String> {
+        path()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .map(|text| text.lines().map(str::to_owned).collect())
+            .unwrap_or_default()
+    }
+
+    pub(super) fn clear() {
+        if let Some(path) = path() {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 
@@ -881,7 +1025,9 @@ impl PortalProbe {
         {
             match self.running.take().map(std::thread::JoinHandle::join) {
                 Some(Ok(Ok(Some(portal)))) => {
-                    tracing::info!("the GlobalShortcuts portal appeared; binding WordInk's shortcuts");
+                    tracing::info!(
+                        "the GlobalShortcuts portal appeared; binding WordInk's shortcuts"
+                    );
                     return Ok(Some(portal));
                 }
                 Some(Ok(Err(error))) if !self.warned => {
@@ -911,6 +1057,13 @@ impl PortalProbe {
 /// Whether the session's desktop is GNOME.
 pub(crate) fn gnome() -> bool {
     desktop_is("GNOME")
+}
+
+/// Whether the desktop keeps Alt+Space for itself: GNOME's window menu
+/// (#723) and KDE Plasma's KRunner (#898), which the KDE portal's approval
+/// dialog flags as a conflict and then leaves WordInk without.
+pub(crate) fn desktop_takes_alt_space() -> bool {
+    gnome() || desktop_is("KDE")
 }
 
 /// Whether the desktop assigns portal shortcuts their keys in its own
@@ -977,6 +1130,20 @@ mod tests {
         assert!(!gone(zbus::fdo::Error::AccessDenied("no".into())));
     }
 
+    /// A bind the backend failed falls back to the `hex` commands; one the
+    /// person dismissed or Hex canceled stays a refusal (#1014).
+    #[test]
+    fn only_backend_failures_count_as_a_missing_portal() {
+        let failed = color_eyre::eyre::Report::new(BackendFailure(
+            "the org.freedesktop.portal.GlobalShortcuts portal could not complete BindShortcuts"
+                .into(),
+        ));
+        assert!(is_backend_failure(&failed));
+        assert!(!is_backend_failure(&eyre!(
+            "the org.freedesktop.portal.GlobalShortcuts request BindShortcuts was dismissed"
+        )));
+    }
+
     #[test]
     fn a_loose_binary_gets_a_quoted_exec_line() {
         assert_eq!(
@@ -990,9 +1157,11 @@ mod tests {
         assert!(desktop_entry("/opt/hex", false).contains("\nExec=\"/opt/hex\"\n"));
         assert!(!desktop_entry("/opt/hex", false).contains("NoDisplay"));
         assert!(desktop_entry("/opt/hex", true).contains("\nNoDisplay=true\n"));
-        assert!(desktop_entry("/opt/hex", false).contains("\nStartupWMClass=io.github.duketopceo.wordink\n"));
+        assert!(
+            desktop_entry("/opt/hex", false)
+                .contains("\nStartupWMClass=io.github.duketopceo.wordink\n")
+        );
     }
-
 
     fn entries(name: &str) -> (PathBuf, DesktopEntries) {
         let unique = std::time::SystemTime::now()
@@ -1018,7 +1187,10 @@ mod tests {
         .unwrap();
         entries.tidy().unwrap();
         let named = std::fs::read_to_string(entries.entry()).unwrap();
-        assert!(named.contains("\nIcon=io.github.duketopceo.wordink\n"), "{named}");
+        assert!(
+            named.contains("\nIcon=io.github.duketopceo.wordink\n"),
+            "{named}"
+        );
         assert!(desktop_entry("/opt/hex", false).contains("\nIcon=io.github.duketopceo.wordink\n"));
         // Someone else's entry keeps its icon.
         std::fs::write(entries.entry(), "[Desktop Entry]\nIcon=mine\n").unwrap();
