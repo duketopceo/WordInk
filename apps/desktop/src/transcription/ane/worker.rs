@@ -22,6 +22,10 @@ use std::time::{Duration, Instant};
 use super::probe::Runtime;
 use super::protocol::{self, MAX_REPLY_LINE, ProtocolError, Reply, Request};
 
+/// The runtime makes its per-request scratch in its cache root under this
+/// prefix, and a killed worker leaves it behind.
+const RUNTIME_SCRATCH_PREFIX: &str = "parakeet-transcribe-";
+
 /// Clips reach the worker as 16 kHz mono.
 const SAMPLE_RATE: u32 = 16_000;
 
@@ -320,6 +324,7 @@ impl Supervisor {
                 None => return Outcome::NotReady,
             }
         };
+        let scratch_before = runtime_scratch(&shared.config);
         let clip = Duration::from_secs_f64(samples.len() as f64 / f64::from(SAMPLE_RATE));
         let timeout = shared.config.request_timeout(clip);
         let wav = shared.work.join(format!(
@@ -352,11 +357,13 @@ impl Supervisor {
             Ok(Reply::Failed { code, message }) => {
                 inner.conn = Some(conn);
                 shared.fail(&mut inner);
+                sweep_runtime_scratch(&shared.config, &scratch_before);
                 Outcome::Failed(format!("{code}: {message}"))
             }
             Ok(_) => {
                 inner.conn = Some(conn);
                 shared.fail(&mut inner);
+                sweep_runtime_scratch(&shared.config, &scratch_before);
                 Outcome::Failed("unexpected reply".to_string())
             }
             Err(error) => {
@@ -367,6 +374,7 @@ impl Supervisor {
                 };
                 inner.conn = Some(conn);
                 shared.fail(&mut inner);
+                sweep_runtime_scratch(&shared.config, &scratch_before);
                 if shared.stopped.load(Ordering::SeqCst) {
                     return Outcome::NotReady;
                 }
@@ -453,6 +461,34 @@ fn begin_start(shared: &Arc<Shared>) {
             Err(_) => shared.fail(&mut inner),
         }
     });
+}
+
+fn runtime_scratch(config: &Config) -> Vec<PathBuf> {
+    let Some(root) = &config.runtime.cache_root else {
+        return Vec::new();
+    };
+    fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(RUNTIME_SCRATCH_PREFIX)
+        })
+        .map(|entry| entry.path())
+        .collect()
+}
+
+/// Remove the runtime scratch a killed request left: what exists now that
+/// did not exist before the request.
+fn sweep_runtime_scratch(config: &Config, before: &[PathBuf]) {
+    for path in runtime_scratch(config) {
+        if !before.contains(&path) {
+            let _ = fs::remove_dir_all(path);
+        }
+    }
 }
 
 fn make_private_dir(path: &Path) -> std::io::Result<()> {
@@ -549,6 +585,7 @@ mod tests {
             Runtime {
                 interpreter: PathBuf::from("python3"),
                 cli_script: PathBuf::from(STUB),
+                cache_root: None,
             },
             run_dir,
         );
@@ -769,6 +806,84 @@ mod tests {
         let outcome = requester.join().unwrap();
         assert_eq!(outcome, Outcome::NotReady);
         assert!(!alive(pid));
+    }
+
+    fn rss_mb(pid: u32) -> f64 {
+        let status = fs::read_to_string(format!("/proc/{pid}/status")).unwrap_or_default();
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix("VmRSS:"))
+            .and_then(|rest| rest.split_whitespace().next()?.parse::<f64>().ok())
+            .map_or(0.0, |kb| kb / 1024.0)
+    }
+
+    /// Manual measurement on the target hardware, not CI: pushes real clips
+    /// through the installed runtime with the real supervisor and prints the
+    /// wall-clock round trip, the runtime's own pipeline time, resident
+    /// memory, and whether the worker respawned between clips.
+    ///
+    /// `WORDINK_ANE_SPIKE_CLIPS=a.wav,b.wav cargo test --bin wordink
+    /// ane::worker::tests::spike -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs the real runtime and Neural Engine; run by hand"]
+    fn spike_warm_session() {
+        let clips = std::env::var("WORDINK_ANE_SPIKE_CLIPS").expect("WORDINK_ANE_SPIKE_CLIPS");
+        let probe = super::super::probe::probe();
+        eprintln!("probe: {:?}", probe.verdict);
+        let runtime = probe.runtime.expect("a runtime");
+        let run_dir =
+            std::env::temp_dir().join(format!("wordink-ane-spike-{}", std::process::id()));
+        let started = Instant::now();
+        let supervisor = Supervisor::start(Config::new(runtime, run_dir.clone())).unwrap();
+        wait_for(&supervisor, State::Ready);
+        let first_pid = supervisor.worker_pid().unwrap();
+        eprintln!(
+            "cold start to Ready: {:.2}s, rss {:.0} MB",
+            started.elapsed().as_secs_f64(),
+            rss_mb(first_pid)
+        );
+        for path in clips.split(',') {
+            let samples: Vec<f32> = hound::WavReader::open(path)
+                .unwrap()
+                .into_samples::<i16>()
+                .map(|s| f32::from(s.unwrap()) / f32::from(i16::MAX))
+                .collect();
+            let seconds = samples.len() as f64 / 16_000.0;
+            let at = Instant::now();
+            let outcome = supervisor.try_transcribe(&samples);
+            let wall = at.elapsed().as_secs_f64();
+            let pid = supervisor.worker_pid();
+            match outcome {
+                Outcome::Text { text, pipeline_ms } => eprintln!(
+                    "clip {seconds:6.1}s  wall {wall:6.3}s  pipeline {:>8.1}ms  overhead {:5.0}ms  rtf {:5.1}x  rss {:5.0}MB  respawned {}  chars {}",
+                    pipeline_ms.unwrap_or(0.0),
+                    wall * 1000.0 - pipeline_ms.unwrap_or(0.0),
+                    seconds / wall,
+                    pid.map_or(0.0, rss_mb),
+                    pid != Some(first_pid),
+                    text.len()
+                ),
+                other => eprintln!("clip {seconds:.1}s -> {other:?}"),
+            }
+        }
+        supervisor.shutdown();
+        let _ = fs::remove_dir_all(run_dir);
+    }
+
+    #[test]
+    fn only_scratch_made_during_a_killed_request_is_swept() {
+        let mut config = config("scratch");
+        let root = config.run_dir.join("cache");
+        config.runtime.cache_root = Some(root.clone());
+        fs::create_dir_all(root.join("parakeet-transcribe-old")).unwrap();
+        fs::create_dir_all(root.join("model-cache")).unwrap();
+        let before = runtime_scratch(&config);
+        fs::create_dir_all(root.join("parakeet-transcribe-new/inner")).unwrap();
+        sweep_runtime_scratch(&config, &before);
+        assert!(root.join("parakeet-transcribe-old").exists());
+        assert!(root.join("model-cache").exists());
+        assert!(!root.join("parakeet-transcribe-new").exists());
+        let _ = fs::remove_dir_all(&config.run_dir);
     }
 
     #[test]

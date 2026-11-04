@@ -39,6 +39,8 @@ pub(crate) struct Runtime {
     pub(crate) interpreter: PathBuf,
     /// The CLI script the launcher runs.
     pub(crate) cli_script: PathBuf,
+    /// The runtime's cache root, where it makes per-request scratch.
+    pub(crate) cache_root: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -165,9 +167,10 @@ pub(crate) fn probe_with(
     let Some(launcher) = find_launcher(inputs) else {
         return Probe::unavailable("the mlx-omarchy runtime was not found");
     };
-    let Some(runtime) = read_launcher(&launcher, inputs.python_override.as_deref()) else {
+    let Some(mut runtime) = read_launcher(&launcher, inputs.python_override.as_deref()) else {
         return Probe::unavailable("the mlx-omarchy runtime launcher was not understood");
     };
+    runtime.cache_root = inputs.cache_root.clone();
     if !runtime.cli_script.is_file() {
         return Probe::unavailable("the mlx-omarchy runtime is incomplete (CLI script missing)");
     }
@@ -267,6 +270,7 @@ fn read_launcher(launcher: &Path, python_override: Option<&Path>) -> Option<Runt
     Some(Runtime {
         interpreter,
         cli_script,
+        cache_root: None,
     })
 }
 
