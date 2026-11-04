@@ -1,0 +1,48 @@
+{
+  "name": "@wordink/desktop",
+  "version": "0.1.0",
+  "description": "Typed Node client for the WordInk desktop app's local API: transcribe audio, start a dictation, and run control commands.",
+  "license": "MIT",
+  "homepage": "https://duketopceo.github.io/WordInk/",
+  "keywords": [
+    "dictation",
+    "speech-to-text",
+    "voice",
+    "transcription",
+    "local-api",
+    "wordink"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/duketopceo/WordInk.git",
+    "directory": "packages/desktop"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "vitest": "^5.0.3"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
