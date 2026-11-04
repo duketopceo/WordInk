@@ -339,6 +339,7 @@ pub struct Transcribed {
 
 /// The local model that answered a dictation and that attempt's own time.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub struct ServedBy {
     pub model: crate::transcription::models::TranscriptionModelId,
     pub inference_ms: u64,
@@ -1042,7 +1043,7 @@ pub(crate) fn held<'a>(
 
 /// The model that answered the last clip, when it may not be the one the
 /// engine holds (Linux: the Neural Engine model's GPU fallback).
-fn take_served(model: &mut HeldModel) -> Option<ServedBy> {
+fn take_served(model: &mut Model) -> Option<ServedBy> {
     #[cfg(target_os = "linux")]
     return model.take_served();
     #[cfg(not(target_os = "linux"))]

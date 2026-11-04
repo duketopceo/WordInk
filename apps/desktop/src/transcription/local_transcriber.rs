@@ -589,6 +589,7 @@ impl GgufTranscriber {
 pub struct LocalTranscriber {
     inner: Inner,
     /// Who answered the last clip, until the engine takes it.
+    #[cfg(target_os = "linux")]
     served: Option<crate::transcription::engine::ServedBy>,
 }
 
@@ -600,6 +601,7 @@ enum Inner {
 
 /// A dictation's text and the model that actually produced it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) struct Served {
     pub(crate) text: String,
     pub(crate) by: crate::transcription::engine::ServedBy,
@@ -621,6 +623,7 @@ impl LocalTranscriber {
     fn new(inner: Inner) -> Self {
         Self {
             inner,
+            #[cfg(target_os = "linux")]
             served: None,
         }
     }

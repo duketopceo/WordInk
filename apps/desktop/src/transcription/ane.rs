@@ -59,6 +59,7 @@ pub(crate) fn offer() -> Offer {
 static LIVE: AtomicU8 = AtomicU8::new(LIVE_NONE);
 const LIVE_NONE: u8 = 0;
 const LIVE_STARTING: u8 = 1;
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const LIVE_READY: u8 = 2;
 const LIVE_DEGRADED: u8 = 3;
 
