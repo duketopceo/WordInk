@@ -13,6 +13,7 @@ use color_eyre::eyre::{Result, bail, eyre};
 use super::probe::{self, Verdict};
 use super::worker::{Config, Outcome, Supervisor};
 use crate::app_settings::TranscriptionDevice;
+use crate::transcription::engine::ServedBy;
 use crate::transcription::local_transcriber::{GgufTranscriber, Served};
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection, validate};
 
@@ -40,8 +41,10 @@ pub(crate) fn serve(
         Outcome::Text { text, .. } => {
             return Ok(Served {
                 text,
-                model: TranscriptionModelId::ParakeetV3Ane,
-                inference_ms: started.elapsed().as_millis() as u64,
+                by: ServedBy {
+                    model: TranscriptionModelId::ParakeetV3Ane,
+                    inference_ms: started.elapsed().as_millis() as u64,
+                },
             });
         }
         Outcome::NotReady => {}
@@ -54,8 +57,10 @@ pub(crate) fn serve(
     let text = gpu(samples)?;
     Ok(Served {
         text,
-        model: TranscriptionModelId::ParakeetV3,
-        inference_ms: started.elapsed().as_millis() as u64,
+        by: ServedBy {
+            model: TranscriptionModelId::ParakeetV3,
+            inference_ms: started.elapsed().as_millis() as u64,
+        },
     })
 }
 
@@ -194,7 +199,7 @@ mod tests {
         let used = Cell::new(0);
         let served = serve(&worker, &mut gpu_says("from the gpu", &used), &[0.0]).unwrap();
         assert_eq!(served.text, "from the engine");
-        assert_eq!(served.model, TranscriptionModelId::ParakeetV3Ane);
+        assert_eq!(served.by.model, TranscriptionModelId::ParakeetV3Ane);
         assert_eq!(used.get(), 0);
     }
 
@@ -204,12 +209,12 @@ mod tests {
         let used = Cell::new(0);
         let first = serve(&worker, &mut gpu_says("first", &used), &[0.0]).unwrap();
         assert_eq!(
-            (first.text.as_str(), first.model),
+            (first.text.as_str(), first.by.model),
             ("first", TranscriptionModelId::ParakeetV3)
         );
         let second = serve(&worker, &mut gpu_says("unused", &used), &[0.0]).unwrap();
         assert_eq!(
-            (second.text.as_str(), second.model),
+            (second.text.as_str(), second.by.model),
             ("second", TranscriptionModelId::ParakeetV3Ane)
         );
         assert_eq!(used.get(), 1);
@@ -221,7 +226,7 @@ mod tests {
         let used = Cell::new(0);
         let served = serve(&worker, &mut gpu_says("rescued", &used), &[0.0]).unwrap();
         assert_eq!(served.text, "rescued");
-        assert_eq!(served.model, TranscriptionModelId::ParakeetV3);
+        assert_eq!(served.by.model, TranscriptionModelId::ParakeetV3);
         assert_eq!((worker.calls.get(), used.get()), (1, 1));
     }
 
@@ -249,7 +254,7 @@ mod tests {
             &[0.0],
         )
         .unwrap();
-        assert!(served.inference_ms >= 30 && served.inference_ms < 5_000);
+        assert!(served.by.inference_ms >= 30 && served.by.inference_ms < 5_000);
     }
 
     const STUB: &str = concat!(
@@ -278,7 +283,14 @@ mod tests {
             model: TranscriptionModelId::ParakeetV3Ane,
             language: "en".into(),
         };
-        let ane = AneTranscriber::with_supervisor(&selection, Supervisor::start(config).unwrap());
+        let supervisor = Supervisor::start(config).unwrap();
+        // Ready first, so no test reaches for the GPU model.
+        let started = Instant::now();
+        while supervisor.state() != super::super::worker::State::Ready {
+            assert!(started.elapsed() < std::time::Duration::from_secs(30));
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let ane = AneTranscriber::with_supervisor(&selection, supervisor);
         (
             crate::transcription::local_transcriber::LocalTranscriber::from_ane(ane),
             run_dir,
@@ -296,6 +308,18 @@ mod tests {
         assert!(model.matches_selection(&selection));
         assert_eq!(model.gguf_selection(), Some(&selection));
         assert_eq!(model.device_label(), "Apple Neural Engine");
+        drop(model);
+        let _ = std::fs::remove_dir_all(run_dir);
+    }
+
+    #[test]
+    fn the_answering_model_travels_from_the_worker_to_the_engine_once() {
+        let (mut model, run_dir) = stub_transcriber("served");
+        let served = model.transcribe_clip_served(vec![0.0; 16_000]).unwrap();
+        assert_eq!(served.by.model, TranscriptionModelId::ParakeetV3Ane);
+        let taken = model.take_served().unwrap();
+        assert_eq!(taken.model, TranscriptionModelId::ParakeetV3Ane);
+        assert!(model.take_served().is_none(), "taken once");
         drop(model);
         let _ = std::fs::remove_dir_all(run_dir);
     }

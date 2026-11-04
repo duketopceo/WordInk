@@ -34,13 +34,18 @@ pub(crate) enum Offer {
 /// platform it never reads the filesystem.
 #[cfg(target_os = "linux")]
 pub(crate) fn offer() -> Offer {
-    if !cfg!(target_arch = "aarch64") || !crate::labs::neural_engine() {
-        return Offer::Hidden;
-    }
-    match probe::current().verdict {
-        probe::Verdict::Unavailable(_) => Offer::Hidden,
-        probe::Verdict::NotPrepared => Offer::NotPrepared,
-        probe::Verdict::Available => Offer::Ready,
+    let verdict = (cfg!(target_arch = "aarch64") && crate::labs::neural_engine())
+        .then(|| probe::current().verdict);
+    offer_for(verdict.as_ref())
+}
+
+/// `None` when the toggle is off or the platform cannot have the engine.
+#[cfg(target_os = "linux")]
+fn offer_for(verdict: Option<&probe::Verdict>) -> Offer {
+    match verdict {
+        None | Some(probe::Verdict::Unavailable(_)) => Offer::Hidden,
+        Some(probe::Verdict::NotPrepared) => Offer::NotPrepared,
+        Some(probe::Verdict::Available) => Offer::Ready,
     }
 }
 
@@ -57,8 +62,21 @@ const LIVE_STARTING: u8 = 1;
 const LIVE_READY: u8 = 2;
 const LIVE_DEGRADED: u8 = 3;
 
+/// The supervisor that most recently started owns the published state, so a
+/// retiring one (a model swap) cannot overwrite its successor's.
 #[cfg(target_os = "linux")]
-pub(crate) fn publish(state: worker::State) {
+static LATEST_OWNER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(target_os = "linux")]
+pub(crate) fn register() -> u64 {
+    LATEST_OWNER.fetch_add(1, Ordering::AcqRel) + 1
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn publish(owner: u64, state: worker::State) {
+    if LATEST_OWNER.load(Ordering::Acquire) != owner {
+        return;
+    }
     let value = match state {
         worker::State::Stopped => LIVE_NONE,
         worker::State::Starting => LIVE_STARTING,
@@ -86,3 +104,35 @@ pub(crate) fn card_note() -> Option<&'static str> {
 /// (`mlx-omarchy-parakeet download`); WordInk never downloads it.
 const NOT_PREPARED_NOTE: &str =
     "Not ready: download its reference model first with mlx-omarchy-parakeet download";
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_offer_follows_the_toggle_and_the_probe() {
+        use probe::Verdict;
+        assert_eq!(
+            offer_for(None),
+            Offer::Hidden,
+            "toggle off or wrong platform"
+        );
+        assert_eq!(
+            offer_for(Some(&Verdict::Unavailable("no device".into()))),
+            Offer::Hidden
+        );
+        assert_eq!(offer_for(Some(&Verdict::NotPrepared)), Offer::NotPrepared);
+        assert_eq!(offer_for(Some(&Verdict::Available)), Offer::Ready);
+    }
+
+    #[test]
+    fn a_retired_supervisor_cannot_overwrite_its_successor_on_the_card() {
+        let old = register();
+        let new = register();
+        publish(new, worker::State::Starting);
+        publish(old, worker::State::Degraded);
+        assert_eq!(LIVE.load(Ordering::Acquire), LIVE_STARTING);
+        publish(new, worker::State::Ready);
+        assert_eq!(LIVE.load(Ordering::Acquire), LIVE_READY);
+    }
+}

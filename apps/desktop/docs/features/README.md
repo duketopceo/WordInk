@@ -267,6 +267,9 @@ Settings picker or setup > model card     // setup.model-card; shared by every d
 ├── Labs > Parakeet Ultra (off) -> its card with a Labs tag and Details: languages,  // setup.parakeet-ultra
 │   measured memory, the CC BY 4.0 credit, notice, Source/License links, folded
 │   published benchmarks "not measured in Hex" (labs.md)
+├── Labs > Neural Engine (off, Linux on Apple silicon) -> picker card with a Labs tag; listed
+│   without Use until the runtime's reference model is downloaded; its detail line says
+│   when it is warming or paused and the GPU model answers meanwhile (labs.md)
 ├── "Add model file…" in the header -> imported cards after the catalog:  // setup.custom-models
 │   Imported · family · languages · Not benchmarked · file · licence · SHA-256
 │   prefix; Speed and Accuracy "Unknown"; Rename, Remove (not the active

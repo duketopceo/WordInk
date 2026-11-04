@@ -240,6 +240,8 @@ struct Shared {
     inner: Mutex<Inner>,
     stopped: AtomicBool,
     request_seq: AtomicU64,
+    /// This supervisor's claim on the card's published state.
+    owner: u64,
 }
 
 impl Shared {
@@ -249,10 +251,17 @@ impl Shared {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// Changes the state and tells the card, unless a newer supervisor has
+    /// since taken over the card.
+    fn set_state(&self, inner: &mut Inner, state: State) {
+        inner.state = state;
+        super::publish(self.owner, state);
+    }
+
     fn fail(&self, inner: &mut Inner) {
         inner.failures = inner.failures.saturating_add(1);
         inner.retry_at = Some(Instant::now() + self.config.backoff(inner.failures));
-        set_state(inner, State::Degraded);
+        self.set_state(inner, State::Degraded);
         if let Some(pgid) = inner.pgid.take() {
             kill_group(pgid);
         }
@@ -269,8 +278,14 @@ impl Supervisor {
     /// begin starting the worker in the background.
     pub(crate) fn start(config: Config) -> std::io::Result<Self> {
         sweep_stale(&config.run_dir);
-        let own = config.run_dir.join(std::process::id().to_string());
-        let _ = fs::remove_dir_all(&own);
+        // One directory per supervisor: a model swap starts the next one
+        // while the old one is still shutting down.
+        static INSTANCES: AtomicU64 = AtomicU64::new(0);
+        let own = config.run_dir.join(format!(
+            "{}-{}",
+            std::process::id(),
+            INSTANCES.fetch_add(1, Ordering::Relaxed)
+        ));
         make_private_dir(&own)?;
         let work = own.join("work");
         make_private_dir(&work)?;
@@ -289,6 +304,7 @@ impl Supervisor {
             }),
             stopped: AtomicBool::new(false),
             request_seq: AtomicU64::new(1),
+            owner: super::register(),
         });
         begin_start(&shared);
         Ok(Self { shared })
@@ -341,6 +357,7 @@ impl Supervisor {
                 let _ = fs::remove_file(&wav);
                 let mut inner = shared.lock();
                 inner.conn = Some(conn);
+                shared.fail(&mut inner);
                 return Outcome::Failed("could not write the clip".to_string());
             }
         };
@@ -391,7 +408,7 @@ impl Supervisor {
         shared.stopped.store(true, Ordering::SeqCst);
         let (conn, pgid) = {
             let mut inner = shared.lock();
-            set_state(&mut inner, State::Stopped);
+            shared.set_state(&mut inner, State::Stopped);
             (inner.conn.take(), inner.pgid.take())
         };
         if let Some(mut conn) = conn {
@@ -430,13 +447,22 @@ fn begin_start(shared: &Arc<Shared>) {
         if matches!(inner.state, State::Starting) || shared.stopped.load(Ordering::SeqCst) {
             return;
         }
-        set_state(&mut inner, State::Starting);
+        shared.set_state(&mut inner, State::Starting);
     }
     let shared = Arc::clone(shared);
     std::thread::spawn(move || {
         let started =
             Conn::spawn(&shared.config, &shared.shim, &shared.work).and_then(|mut conn| {
                 let pgid = conn.pgid;
+                {
+                    // Recorded before the slow hello, so a shutdown can kill
+                    // a worker that is still starting.
+                    let mut inner = shared.lock();
+                    if shared.stopped.load(Ordering::SeqCst) {
+                        return Err(std::io::Error::other("stopped while starting"));
+                    }
+                    inner.pgid = Some(pgid);
+                }
                 match conn.call(shared.config.start_timeout, RequestOwned::Hello) {
                     Ok(Reply::Hello { .. }) => Ok((conn, pgid)),
                     Ok(Reply::Failed { code, message }) => {
@@ -458,7 +484,7 @@ fn begin_start(shared: &Arc<Shared>) {
             Ok((conn, pgid)) => {
                 inner.pgid = Some(pgid);
                 inner.conn = Some(conn);
-                set_state(&mut inner, State::Ready);
+                shared.set_state(&mut inner, State::Ready);
             }
             Err(_) => shared.fail(&mut inner),
         }
@@ -491,12 +517,6 @@ fn sweep_runtime_scratch(config: &Config, before: &[PathBuf]) {
             let _ = fs::remove_dir_all(path);
         }
     }
-}
-
-/// Changes the state and tells the card.
-fn set_state(inner: &mut Inner, state: State) {
-    inner.state = state;
-    super::publish(state);
 }
 
 fn make_private_dir(path: &Path) -> std::io::Result<()> {
@@ -554,7 +574,12 @@ fn sweep_stale(run_dir: &Path) {
     };
     for entry in entries.flatten() {
         let name = entry.file_name();
-        let Some(pid) = name.to_str().and_then(|name| name.parse::<i32>().ok()) else {
+        // Directories are `<pid>-<n>`; a bare pid is an older layout.
+        let Some(pid) = name
+            .to_str()
+            .and_then(|name| name.split('-').next())
+            .and_then(|pid| pid.parse::<i32>().ok())
+        else {
             continue;
         };
         if pid != std::process::id() as i32 && !pid_alive(pid) {
@@ -626,6 +651,16 @@ mod tests {
     /// the clip's directory; tests set the mode through that file.
     fn set_mode(supervisor: &Supervisor, mode: &str) {
         fs::write(supervisor.shared.work.join("mode"), mode).unwrap();
+    }
+
+    fn entries(dir: &Path) -> Vec<String> {
+        fs::read_dir(dir)
+            .map(|read| {
+                read.flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn alive(pid: u32) -> bool {
@@ -895,6 +930,73 @@ mod tests {
     }
 
     #[test]
+    fn two_supervisors_keep_separate_directories_through_a_swap() {
+        if !python_available() {
+            return;
+        }
+        let first_config = config("swap");
+        let run_dir = first_config.run_dir.clone();
+        let mut second_config = first_config.clone();
+        second_config.run_dir = run_dir.clone();
+        let first = Supervisor::start(first_config).unwrap();
+        let second = Supervisor::start(second_config).unwrap();
+        wait_for(&first, State::Ready);
+        wait_for(&second, State::Ready);
+        first.shutdown();
+        // The old one going away leaves the new one fully working.
+        assert!(matches!(
+            second.try_transcribe(&clip(1.0)),
+            Outcome::Text { .. }
+        ));
+        drop(second);
+        let _ = fs::remove_dir_all(run_dir);
+    }
+
+    #[test]
+    fn shutdown_while_starting_kills_the_starting_worker() {
+        if !python_available() {
+            return;
+        }
+        let config = config("startkill");
+        let run_dir = config.run_dir.clone();
+        let supervisor = Supervisor::start(config).unwrap();
+        // Wait until the process exists but before it answers hello.
+        let started = Instant::now();
+        let pid = loop {
+            if let Some(pid) = supervisor.worker_pid() {
+                break pid;
+            }
+            assert!(started.elapsed() < Duration::from_secs(10));
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        supervisor.shutdown();
+        let waited = Instant::now();
+        while alive(pid) {
+            assert!(
+                waited.elapsed() < Duration::from_secs(10),
+                "worker survived"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = fs::remove_dir_all(run_dir);
+    }
+
+    #[test]
+    fn a_clip_that_cannot_be_written_backs_the_worker_off() {
+        if !python_available() {
+            return;
+        }
+        let supervisor = Supervisor::start(config("nowrite")).unwrap();
+        wait_for(&supervisor, State::Ready);
+        fs::remove_dir_all(&supervisor.shared.work).unwrap();
+        assert!(matches!(
+            supervisor.try_transcribe(&clip(1.0)),
+            Outcome::Failed(_)
+        ));
+        assert_eq!(supervisor.state(), State::Degraded);
+    }
+
+    #[test]
     fn shutdown_leaves_no_child_and_no_files() {
         if !python_available() {
             return;
@@ -907,8 +1009,10 @@ mod tests {
         supervisor.shutdown();
         assert_eq!(supervisor.state(), State::Stopped);
         assert!(!alive(pid), "worker still alive");
-        let own = run_dir.join(std::process::id().to_string());
-        assert!(!own.exists(), "private directory left behind");
+        assert!(
+            entries(&run_dir).is_empty(),
+            "private directory left behind"
+        );
         assert_eq!(supervisor.try_transcribe(&clip(1.0)), Outcome::NotReady);
         let _ = fs::remove_dir_all(run_dir);
     }

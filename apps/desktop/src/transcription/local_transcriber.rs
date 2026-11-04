@@ -598,15 +598,11 @@ enum Inner {
     Ane(Box<crate::transcription::ane::backend::AneTranscriber>),
 }
 
-/// A dictation's text and the engine that actually produced it.
+/// A dictation's text and the model that actually produced it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Served {
     pub(crate) text: String,
-    /// The model that served it: the Neural Engine model, or the GPU model
-    /// that answered in its place.
-    pub(crate) model: crate::transcription::models::TranscriptionModelId,
-    /// That attempt's own time, in milliseconds.
-    pub(crate) inference_ms: u64,
+    pub(crate) by: crate::transcription::engine::ServedBy,
 }
 
 impl LocalTranscriber {
@@ -720,10 +716,7 @@ impl LocalTranscriber {
         // Engine model can hand a dictation to a different one.
         #[cfg(target_os = "linux")]
         if matches!(self.inner, Inner::Ane(_)) {
-            self.served = Some(crate::transcription::engine::ServedBy {
-                model: served.model,
-                inference_ms: served.inference_ms,
-            });
+            self.served = Some(served.by.clone());
         }
         Ok(served)
     }
@@ -735,8 +728,10 @@ impl LocalTranscriber {
                 let text = gguf.transcribe(samples)?;
                 Ok(Served {
                     text,
-                    model: gguf.selection.model,
-                    inference_ms: started.elapsed().as_millis() as u64,
+                    by: crate::transcription::engine::ServedBy {
+                        model: gguf.selection.model,
+                        inference_ms: started.elapsed().as_millis() as u64,
+                    },
                 })
             }
             #[cfg(target_os = "linux")]
