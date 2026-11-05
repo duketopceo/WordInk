@@ -14,8 +14,9 @@ use super::super::general::shortcut_rows;
 use super::super::icons::KEYBOARD;
 use super::super::{Ui, onboarding};
 use super::landing::{arrives, heading};
-use crate::desktop::i18n::{tr, tr_fill};
+use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::desktop::onboarding::{EngineKind, EngineView, Input, Step};
+use crate::hardware::gpu::{GpuStatus, GpuSummary};
 use crate::hardware::{Choice, Probed, Reason, Recommendation};
 use crate::keys::KeySource;
 use crate::transcription::cloud::Provider;
@@ -111,6 +112,7 @@ pub(in crate::rune_ui) fn choose_cloud(ui: &mut Ui) {
     if ui
         .engine_setup
         .probed
+        .as_ref()
         .is_some_and(|probed| probed.has_groq_key)
     {
         use_cloud(ui);
@@ -185,17 +187,11 @@ pub(in crate::rune_ui) fn overlay(ui: &Ui, p: Paint) -> Option<El> {
     )
 }
 
-/// The probe's one-line summary of this computer.
-fn machine_line(probed: &Probed) -> String {
-    use crate::hardware::GpuApi;
+/// The probe's one-line summary of this computer: the GPU by name and
+/// whether it is ready, then the memory.
+pub(crate) fn machine_line(probed: &Probed) -> String {
     let probe = &probed.probe;
-    let gpu = match probe.gpu_api {
-        GpuApi::Vulkan => tr("a Vulkan GPU"),
-        GpuApi::Metal => tr("a Metal GPU"),
-        GpuApi::Software => tr("only a software graphics driver"),
-        GpuApi::None => tr("no GPU"),
-    };
-    let mut line = tr_fill("This computer has {}.", gpu);
+    let mut line = gpu_line(&probe.gpu);
     if probe.ram_gb > 0.0 {
         line.push(' ');
         line.push_str(&tr_fill("Memory: {} GB.", &format!("{:.0}", probe.ram_gb)));
@@ -203,11 +199,53 @@ fn machine_line(probed: &Probed) -> String {
     line
 }
 
+/// The GPU sentence, such as "NVIDIA GeForce RTX 4060 Laptop GPU: GPU
+/// acceleration ready." Only a GPU without a Vulkan driver asks for an
+/// install; an unknown name falls back to a sentence without one.
+pub(crate) fn gpu_line(gpu: &GpuSummary) -> String {
+    let named = |template: &str, fallback: &str| match &gpu.name {
+        Some(name) => tr_named(template, &[("gpu", name)]),
+        None => tr(fallback).to_string(),
+    };
+    match gpu.status {
+        GpuStatus::Ready => named("{gpu}: GPU acceleration ready.", "GPU acceleration ready."),
+        GpuStatus::DriverFound => named(
+            "{gpu}: graphics driver found. WordInk uses the GPU once the model loads.",
+            "Graphics driver found. WordInk uses the GPU once the model loads.",
+        ),
+        GpuStatus::NeedsDriver => {
+            let mut line = named(
+                "{gpu}: its graphics driver has no Vulkan support.",
+                "This GPU's graphics driver has no Vulkan support.",
+            );
+            line.push(' ');
+            line.push_str(&match gpu.vendor.name() {
+                Some(vendor) => tr_fill(
+                    "Install or update the {} graphics driver to transcribe on it.",
+                    vendor,
+                ),
+                None => {
+                    tr("Install or update the graphics driver to transcribe on it.").to_string()
+                }
+            });
+            line
+        }
+        GpuStatus::CpuBuild => tr("This version of WordInk transcribes on the CPU.").to_string(),
+        GpuStatus::Software => {
+            tr("Only a software graphics driver here; transcription runs on the CPU.").to_string()
+        }
+        GpuStatus::None => tr("No GPU found; transcription runs on the CPU.").to_string(),
+    }
+}
+
 pub(crate) fn reason_copy(reason: Reason) -> &'static str {
     match reason {
         Reason::HasKey => tr("A Groq key is already set on this computer."),
         Reason::NoAvx2 => tr("This processor can't run local models fast enough."),
         Reason::NoGpu => tr("There is no GPU here to run a local model on."),
+        Reason::NeedsDriver => {
+            tr("Until the GPU has a Vulkan driver, a local model would run slowly on the CPU.")
+        }
         Reason::SoftwareGpu => {
             tr("Only a software graphics driver is available, which is too slow for a local model.")
         }
@@ -546,4 +584,59 @@ fn hotkey_page(ui: &Ui, p: Paint) -> El {
                     .transition(arrives()),
             ),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gpu_line;
+    use crate::hardware::gpu::{GpuStatus, GpuSummary, Vendor};
+
+    fn summary(status: GpuStatus, name: Option<&str>, vendor: Vendor) -> GpuSummary {
+        GpuSummary {
+            status,
+            name: name.map(str::to_string),
+            vendor,
+        }
+    }
+
+    #[test]
+    fn the_gpu_line_names_the_gpu_and_asks_for_a_driver_only_when_one_is_missing() {
+        let rtx = Some("NVIDIA GeForce RTX 4060 Laptop GPU");
+        assert_eq!(
+            gpu_line(&summary(GpuStatus::Ready, rtx, Vendor::Nvidia)),
+            "NVIDIA GeForce RTX 4060 Laptop GPU: GPU acceleration ready."
+        );
+        assert_eq!(
+            gpu_line(&summary(GpuStatus::Ready, None, Vendor::Other)),
+            "GPU acceleration ready."
+        );
+        let found = gpu_line(&summary(GpuStatus::DriverFound, rtx, Vendor::Nvidia));
+        assert!(found.starts_with("NVIDIA GeForce RTX 4060 Laptop GPU: graphics driver found."));
+        for status in [
+            GpuStatus::Ready,
+            GpuStatus::DriverFound,
+            GpuStatus::CpuBuild,
+            GpuStatus::Software,
+            GpuStatus::None,
+        ] {
+            let line = gpu_line(&summary(status, rtx, Vendor::Nvidia));
+            assert!(!line.contains("Install"), "{status:?}: {line}");
+        }
+        assert_eq!(
+            gpu_line(&summary(
+                GpuStatus::NeedsDriver,
+                Some("AMD GPU"),
+                Vendor::Amd
+            )),
+            "AMD GPU: its graphics driver has no Vulkan support. Install or update the AMD graphics driver to transcribe on it."
+        );
+        assert_eq!(
+            gpu_line(&summary(GpuStatus::NeedsDriver, None, Vendor::Other)),
+            "This GPU's graphics driver has no Vulkan support. Install or update the graphics driver to transcribe on it."
+        );
+        assert_eq!(
+            gpu_line(&summary(GpuStatus::None, None, Vendor::Other)),
+            "No GPU found; transcription runs on the CPU."
+        );
+    }
 }

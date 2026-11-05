@@ -199,6 +199,40 @@ Run setup again (Labs) or `hex onboarding reset` -> the same story from the star
 on every build; settings, models, and permissions stay, so their pages pass
 ```
 
+```ts
+Engine step: "Choose how WordInk transcribes"        // setup.engine-gpu; every OS
+├── Lead line -> the GPU by name and whether it is ready, then the memory
+│   ├── ggml started a hardware GPU -> "<ggml's name>: GPU acceleration ready."
+│   │   (no name reported -> "GPU acceleration ready.")
+│   ├── ggml listed none, but the OS lists a hardware adapter and its Vulkan
+│   │   driver -> "<name>: graphics driver found. WordInk uses the GPU once the
+│   │   model loads."; recommended like a GPU (the load falls back to the CPU)
+│   ├── Hardware adapter, no Vulkan loader (Linux: or no ICD manifest)
+│   │   -> "...has no Vulkan support. Install or update the <vendor> graphics
+│   │   driver..."; Groq recommended. The only line that asks for an install
+│   ├── Windows on ARM -> "This version of WordInk transcribes on the CPU."
+│   └── Only a software renderer / nothing -> runs on the CPU
+├── Loader: Windows -> vulkan-1.dll in GetSystemDirectoryW's folder, else a
+│   System32-only LoadLibraryExW; Linux -> dlopen libvulkan.so.1 plus a
+│   manifest under VK_DRIVER_FILES / VK_ICD_FILENAMES (replace),
+│   VK_ADD_DRIVER_FILES, XDG config and data dirs, /etc/vulkan/icd.d,
+│   /usr/{local/,}share/vulkan/icd.d; macOS -> Metal, no loader
+├── Adapters: Windows -> the display class in the registry (DriverDesc,
+│   MatchingDeviceId vendor; Basic Render/Display skipped); Linux ->
+│   /sys/class/drm/card*/device vendor + driver (simpledrm etc. skipped);
+│   macOS -> the Apple chip's name. Vendors: 0x10de NVIDIA, 0x1002 AMD,
+│   0x8086 Intel
+└── ggml's list comes after `init_backends` (Windows: inside the GPU crash
+    guard), the list and mask a model load uses
+```
+
+The decision is `hardware::gpu::assess`, pure over the observation; checks:
+the `hardware::gpu::tests` (fakes only, no GPU probing), `recommend_table`,
+`the_gpu_line_names_the_gpu_and_asks_for_a_driver_only_when_one_is_missing`,
+and goldens `onboarding-engine{,-cloud,-local}`. Not verified on Windows or
+NVIDIA hardware: the registry read and the System32 check run only in the
+Windows CI build, never against a real driver.
+
 General > Speech model, selected model not downloaded     // settings.model-missing (#676)
 ├── Muted "Hex can't listen until the speech model has downloaded"
 ├── Downloading -> progress bar beside the model

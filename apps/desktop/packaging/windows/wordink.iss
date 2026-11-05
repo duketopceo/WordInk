@@ -94,6 +94,19 @@ Type: files; Name: "{app}\install-receipt.txt"
 Type: dirifempty; Name: "{app}"
 
 [Code]
+#if Arch == "x64"
+// The 64-bit vulkan-1.dll lives in the 64-bit System32 directory. Setup is a
+// 32-bit process, so a check on the sys constant may be redirected by WOW64
+// to SysWOW64, which holds only the 32-bit loader; the sysnative constant
+// names the 64-bit directory from a 32-bit process. Either one found means
+// the graphics driver installed the loader.
+function VulkanLoaderInstalled(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{sys}\vulkan-1.dll')) or
+    FileExists(ExpandConstant('{sysnative}\vulkan-1.dll'));
+end;
+#endif
+
 function InitializeSetup(): Boolean;
 begin
   Result := True;
@@ -103,7 +116,7 @@ begin
   { The x64 build decodes on the GPU through Vulkan. Its loader ships with
     NVIDIA, AMD, and Intel graphics drivers, not with Windows. }
   if (ExpandConstant('{param:SKIPVULKANCHECK|0}') <> '1') and
-     not FileExists(ExpandConstant('{sys}\vulkan-1.dll')) then
+     not VulkanLoaderInstalled() then
   begin
     SuppressibleMsgBox('WordInk needs a graphics driver with Vulkan support, and vulkan-1.dll was not found.' + #13#10#13#10 +
       'Update your NVIDIA, AMD, or Intel graphics driver, then run this installer again.',
