@@ -23,6 +23,7 @@ use rune::{El, TextEdit, Transition, Tx, text};
 
 use super::super::controls::Paint;
 use super::super::found_choice::{self, ChoiceRow};
+use super::super::paste_access::{self, PasteAccess};
 use super::super::platform::Os;
 use super::super::{Request, Ui, onboarding};
 use super::fixture::{Language, Speech};
@@ -39,6 +40,8 @@ use crate::transcription::models::{
 const GRANTED_BEAT: f64 = 0.7;
 /// How often the first run looks at the model on disk and the permissions.
 const CHECK_EVERY: f64 = 0.25;
+/// A download that gained no bytes for this long has stalled.
+const STALL_AFTER: f64 = 30.0;
 
 /// What the real first run reports to the story's pages.
 pub(crate) struct Live {
@@ -48,6 +51,10 @@ pub(crate) struct Live {
     pub(crate) failed: bool,
     /// Why, in one line, such as a proxy or certificate (#894).
     pub(crate) failure: Option<String>,
+    /// The download runs but gained nothing for [`STALL_AFTER`].
+    pub(crate) stalled: bool,
+    /// The download's bytes, and when they last grew.
+    progress: Option<(u64, f64)>,
     /// A model file chosen with Use a model file… is being added.
     pub(crate) using_file: bool,
     pub(crate) microphone: ItemStatus,
@@ -64,6 +71,9 @@ pub(crate) struct Live {
     pub(crate) reopen: bool,
     /// macOS needed a restart and Hex couldn't relaunch itself.
     pub(crate) relaunch_failed: bool,
+    /// The desktop's paste permission on GNOME and KDE Wayland: the
+    /// permissions page explains it and asks before the practice pastes.
+    pub(crate) paste: Option<PasteAccess>,
     /// The model step: the models found on this computer, while it shows.
     pub(crate) models: Vec<ChoiceRow>,
     /// Where the model step stands.
@@ -125,6 +135,12 @@ impl Live {
         self.checked = None;
     }
 
+    /// The model can't be had here: its download failed or stalled, so
+    /// Continue without a model is offered (#894).
+    pub(crate) fn model_blocked(&self) -> bool {
+        self.failed || self.stalled
+    }
+
     pub(crate) fn granted_for(&self, now: f64) -> bool {
         self.granted_at.is_some_and(|at| now - at >= GRANTED_BEAT)
     }
@@ -141,6 +157,15 @@ fn clock(ui: &Ui) -> f64 {
         return ui.first_run.as_ref().map_or(FIXTURE_START, |s| s.now);
     }
     START.get_or_init(Instant::now).elapsed().as_secs_f64() + 1.0
+}
+
+/// Every permission is ready, the desktop's paste permission included
+/// (or passed over), so the story needs no permissions page.
+fn granted(status: SetupStatus, paste: Option<PasteAccess>) -> bool {
+    use crate::desktop::onboarding::PermissionState::Ready;
+    status.microphone == Ready
+        && status.accessibility == Ready
+        && paste.is_none_or(PasteAccess::settled)
 }
 
 fn english(selection: &TranscriptionSelection) -> bool {
@@ -202,8 +227,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     set_other_label(transcription_models::language_name(&other.language));
     let had_model = installed(ui, &choice);
     let status = ui.platform.setup_status(had_model);
-    let granted = status.microphone == crate::desktop::onboarding::PermissionState::Ready
-        && status.accessibility == crate::desktop::onboarding::PermissionState::Ready;
+    let granted = granted(status, ui.platform.paste);
 
     let mut s = Onboard::new(Flow::FirstRun);
     s.speech = Speech::AfterDownload;
@@ -223,6 +247,8 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         listening: false,
         failed: false,
         failure: None,
+        stalled: false,
+        progress: None,
         using_file: false,
         microphone: ItemStatus::Todo,
         accessibility: ItemStatus::Todo,
@@ -231,6 +257,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         accessibility_renamed: ui.platform.accessibility_renamed,
         reopen: false,
         relaunch_failed: false,
+        paste: ui.platform.paste,
         models: Vec::new(),
         model_step: ModelStep::None,
         pick_started: false,
@@ -331,9 +358,14 @@ pub(in crate::rune_ui) fn fixture_resume(ui: &mut Ui, page: Page) {
     if page == Page::Try {
         super::game::step(s, s.now);
     }
-    // Everything that entered has settled; nothing more is due.
+    // Everything that entered has settled; nothing more is due. The
+    // download's progress counts from here, so a scene never shows it
+    // stalled.
     s.now += 10.0;
     s.auto_due_at = None;
+    if let Some(live) = s.live.as_mut() {
+        live.progress = None;
+    }
     poll(ui, &mut tx);
 }
 
@@ -439,6 +471,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     let asks_permissions = ui.platform.caps.permissions;
     let accessibility_renamed = ui.platform.accessibility_renamed;
     let relaunch_failed = ui.platform.relaunch_failed;
+    let paste = ui.platform.paste;
     let live_window = !ui.is_fixture();
     let Some(s) = ui.first_run.as_mut() else {
         return false;
@@ -453,6 +486,8 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         live.microphone = ItemStatus::Ready;
         live.accessibility = ItemStatus::Ready;
     }
+
+    live.paste = paste;
 
     // Permissions, as the tour's setup rows show them.
     if let Some(view) = &view {
@@ -491,8 +526,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         // A model already on this computer needs no download pill.
         s.had_model = tour_model == ItemStatus::Ready;
     }
-    let granted = status.microphone == crate::desktop::onboarding::PermissionState::Ready
-        && status.accessibility == crate::desktop::onboarding::PermissionState::Ready;
+    let granted = granted(status, paste);
     if granted {
         live.granted_at.get_or_insert(now);
     } else {
@@ -502,6 +536,13 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
 
     // The model download.
     live.failed = !choice_installed && !preparing && (errored || failure.is_some());
+    live.progress = (preparing && !choice_installed).then_some(match live.progress {
+        Some((bytes, since)) if bytes == downloaded_bytes => (bytes, since),
+        _ => (downloaded_bytes, now),
+    });
+    live.stalled = live
+        .progress
+        .is_some_and(|(_, since)| now - since >= STALL_AFTER);
     live.failure = failure;
     live.using_file = using_file;
     s.granted = granted;
@@ -609,6 +650,27 @@ pub(in crate::rune_ui) fn finish_later(ui: &mut Ui) {
     onboarding::input(ui, Input::Defer);
 }
 
+/// "Continue without a model", once the download failed or stalled (#894):
+/// onboarding finishes with no model, and Settings says so with Download
+/// and Add model file…. Only offered once every permission is ready.
+pub(in crate::rune_ui) fn continue_without_model(ui: &mut Ui) {
+    let offered = ui
+        .first_run
+        .as_ref()
+        .is_some_and(|s| s.granted && s.live.as_ref().is_some_and(Live::model_blocked));
+    if !offered {
+        return;
+    }
+    if ui.live()
+        && !crate::desktop::onboarding::completion_recorded()
+        && let Err(error) = crate::desktop::onboarding::record_completion()
+    {
+        tracing::warn!(%error, "could not record onboarding completion");
+    }
+    ui.first_run = None;
+    ui.tour = None;
+}
+
 /// "Start using WordInk": closes the first run and the tour under it.
 pub(super) fn finish(ui: &mut Ui) {
     let installed = onboarding::engine_installed(ui);
@@ -645,6 +707,8 @@ pub(super) fn cycle_language(ui: &mut Ui) {
     };
     live.choice = other_selection(&live.choice);
     live.failed = false;
+    live.stalled = false;
+    live.progress = None;
     live.checked = None;
     let choice = live.choice.clone();
     choose(ui, &choice);
@@ -699,6 +763,8 @@ pub(super) fn retry_download(ui: &mut Ui) {
         return;
     };
     live.failed = false;
+    live.stalled = false;
+    live.progress = None;
     let choice = live.choice.clone();
     choose(ui, &choice);
 }
@@ -706,6 +772,20 @@ pub(super) fn retry_download(ui: &mut Ui) {
 /// Allow on a permission row.
 pub(super) fn allow(item: SetupItem) -> impl Fn(&mut Ui) + 'static {
     move |ui: &mut Ui| onboarding::input(ui, Input::Grant(item))
+}
+
+/// Allow on the paste permission: the desktop's dialog opens.
+pub(super) fn allow_paste(ui: &mut Ui) {
+    paste_access::ask(ui);
+}
+
+/// Continue after the desktop's paste permission was refused: the desktop
+/// asks again at the first paste.
+pub(super) fn paste_later(ui: &mut Ui) {
+    paste_access::later(ui);
+    if let Some(s) = ui.first_run.as_mut() {
+        s.move_on();
+    }
 }
 
 /// "Restart Hex" once macOS applies a grant only after a restart.

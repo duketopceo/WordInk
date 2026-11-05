@@ -5,9 +5,9 @@ This directory is a copy of [Hex](https://github.com/anomalyco/hex) by Anomaly, 
 | | |
 |---|---|
 | Source | https://github.com/anomalyco/hex |
-| Tag | v3.2.0 |
-| Commit | `00610c581a0501e02631b7d915d504dec3729b03` |
-| Imported | 2026-11-02 |
+| Tag | v3.3.0 |
+| Commit | `753b078972b2f7912063db182b8b66b7c8d45ffc` |
+| Imported | 2026-11-02 (v3.2.0); synced to v3.3.0 on 2026-11-04 |
 
 ## Not copied
 
@@ -18,6 +18,15 @@ These Hex paths were left out because WordInk does not use them:
 - `prototypes/`, `skills/`, `release-notes/`
 - `flake.nix`, `flake.lock`, `nix/`
 - `.github/`, `.cloudflare/`, `.hivemind.toml` (Hex's CI and hosting; WordInk's CI lives in the repo root `.github/`)
+
+## Where WordInk differs from Hex after the v3.3.0 sync
+
+- Speech model picker: Hex's new compare and full-list views, with WordInk's Cloud group (Groq, OpenRouter, gateway) added to the full list.
+- First run: WordInk's short first run (Skip on the demo, Finish later) stays; Hex's Skip on the practice page and its `onboarding_skip` check are not adopted. Hex's "Continue without a model" is.
+- Terminal paste: WordInk's Auto / Always / Never (`terminal_paste`) stays in place of Hex's `paste_with_shift` bool, which only migrates.
+- Default dictation shortcut: WordInk's `dictation_default_for` stays; Hex's KDE Plasma case (#898) feeds its GNOME branch.
+- Policy locks (`policy.rs`, macOS managed preferences) read the `io.github.duketopceo.wordink` domain.
+- Version stays 1.0.0 (not Hex's 3.3.0); `ModelDefinition.license` and the licence badge stay (GigaAM v3: MIT).
 
 ## Pulling a later Hex change
 
@@ -37,6 +46,7 @@ Every network host the desktop app can contact, audited in U2 (2026-11-02). Host
 | `huggingface.co` | Model downloads (`src/transcription/models.rs`, `src/net/download.rs`): the speech models, the Silero VAD model, imported models | Only when the user installs a model. Kept on purpose. |
 | `127.0.0.1` / `localhost` | The owner-only local API, the control CLI, the MCP server, a local OpenCode server | Loopback only. |
 | `github.com/duketopceo/WordInk` | "Send feedback" link and the "Download" link of the updater (`RELEASES_URL`) | Only when the user clicks. |
+| `opencode.ai/v2/install` | An error message (`src/desktop/opencode_service.rs`) that names where to update OpenCode 2 | Text only; WordInk never contacts it. |
 | `v2.opencode.ai` | A docs link in the OpenCode catalog pane (`src/desktop/opencode_catalog.rs`) | Only when the user clicks. |
 | User-defined hosts | QuickJS mode scripts using `fetch` (`src/personal_commands/fetch.rs`) | Only after the user allows that exact config in the Output pane. |
 | `HEX_RELEASE_BASE_URL` | The updater, when the user sets this HTTPS env var | Off unless set. |

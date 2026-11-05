@@ -731,7 +731,9 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
         }) => trigger.clone(),
         _ => ui.settings.dictation_hotkey.keycaps().join("+"),
     };
+    let no_model = super::general::missing_model(ui).is_some();
     let hint = match (running, ui.settings.shortcut_mode) {
+        _ if no_model => tr("WordInk can't dictate until a speech model is installed").to_string(),
         _ if !ui.records_shortcuts() => {
             tr("Ready anywhere · Use your desktop's shortcuts to dictate").to_string()
         }
@@ -780,7 +782,11 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
         .py(8.0)
         .gap(12.0)
         .center_y()
-        .child(status_dot(if running { p.success() } else { p.muted() }))
+        .child(status_dot(if running && !no_model {
+            p.success()
+        } else {
+            p.muted()
+        }))
         .child(
             col()
                 .key("copy")
@@ -797,7 +803,7 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
                     text(hint)
                         .key("hint")
                         .font(DESCRIPTION)
-                        .color(p.muted())
+                        .color(if no_model { p.danger() } else { p.muted() })
                         .wrap(),
                 )
                 .children(failure.map(|failure| {
@@ -1442,12 +1448,6 @@ pub(super) fn shortcut_caps(binding: &HotkeyBinding, side_picker: bool) -> Vec<S
             _ => cap,
         })
         .collect()
-}
-
-pub(super) fn double_tap_only_applies(settings: &AppSettings) -> bool {
-    settings.shortcut_mode == ShortcutMode::Hold
-        && settings.double_tap_lock
-        && settings.dictation_hotkey.key.is_some()
 }
 
 /// Stable or Dev shows only while this install updates itself: test,

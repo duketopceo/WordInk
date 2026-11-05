@@ -7,7 +7,8 @@
 //! model switching, mouse shortcuts, pausing the browser, restoring Paste
 //! last dictation's default shortcut, keeping the dictation on the
 //! clipboard or only copying it (macOS), a second dictation shortcut
-//! (macOS), Toggle's tap or hold (macOS), and Terminal paste
+//! (macOS), Toggle's tap or hold (macOS), stopping an automatic meeting
+//! recording when its call ends (macOS), and Terminal paste
 //! and shortcut sharing on Windows) is just its toggle.
 //!
 //! Each feature has an audience (`Feature::audience`): `Everyone` ships in
@@ -18,7 +19,7 @@
 //! Gate a feature where its work starts (the worker, thread, or capture
 //! that does it), not only where its UI shows.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use clap::Subcommand;
 use color_eyre::Result;
@@ -87,11 +88,14 @@ pub enum Feature {
     StandaloneSpecialKeys,
     HistoryStats,
     RecentDictations,
+    SkipPauses,
+    StopWhenCallEnds,
+    OutputFixes,
     NeuralEngine,
 }
 
 impl Feature {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 33] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -121,6 +125,9 @@ impl Feature {
         Self::StandaloneSpecialKeys,
         Self::HistoryStats,
         Self::RecentDictations,
+        Self::SkipPauses,
+        Self::StopWhenCallEnds,
+        Self::OutputFixes,
         Self::NeuralEngine,
     ];
 
@@ -174,7 +181,10 @@ impl Feature {
             | Self::StandaloneSpecialKeys
             | Self::HistoryStats
             | Self::NeuralEngine
-            | Self::RecentDictations => Audience::Everyone,
+            | Self::RecentDictations
+            | Self::SkipPauses
+            | Self::StopWhenCallEnds
+            | Self::OutputFixes => Audience::Everyone,
         }
     }
 
@@ -213,10 +223,14 @@ impl Feature {
                 target_os = "linux",
                 target_os = "windows"
             )),
-            Self::LiveChapters | Self::SubtitleExport => cfg!(target_os = "macos"),
+            Self::LiveChapters | Self::SubtitleExport | Self::StopWhenCallEnds => {
+                cfg!(target_os = "macos")
+            }
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
-            Self::StandaloneSpecialKeys => cfg!(any(target_os = "linux", target_os = "windows")),
+            Self::StandaloneSpecialKeys | Self::SkipPauses => {
+                cfg!(any(target_os = "linux", target_os = "windows"))
+            }
             Self::MouseShortcuts
             | Self::PauseBrowser
             | Self::KeepOnClipboard
@@ -238,6 +252,7 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::ParakeetUltra
             | Self::HistoryStats
+            | Self::OutputFixes
             | Self::FillerWords => true,
             Self::NeuralEngine => cfg!(all(target_os = "linux", target_arch = "aarch64")),
         }
@@ -276,6 +291,9 @@ impl Feature {
             Self::HistoryStats => "history-stats",
             Self::RecentDictations => "recent-dictations",
             Self::NeuralEngine => "neural-engine",
+            Self::SkipPauses => "skip-pauses",
+            Self::StopWhenCallEnds => "stop-when-call-ends",
+            Self::OutputFixes => "output-fixes",
         }
     }
 
@@ -312,6 +330,9 @@ impl Feature {
             Self::HistoryStats => "labs.history_stats",
             Self::RecentDictations => "labs.recent_dictations",
             Self::NeuralEngine => "labs.neural_engine",
+            Self::SkipPauses => "labs.skip_pauses",
+            Self::StopWhenCallEnds => "labs.stop_when_call_ends",
+            Self::OutputFixes => "labs.output_fixes",
         }
     }
 
@@ -392,6 +413,15 @@ impl Feature {
             Self::NeuralEngine => {
                 "Offer Parakeet v3 on the Apple Neural Engine (Linux on Apple silicon, with the mlx-omarchy runtime) in the Local transcription picker"
             }
+            Self::SkipPauses => {
+                "Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner"
+            }
+            Self::StopWhenCallEnds => {
+                "Stop a meeting recording WordInk started on its own 30 s after the call app leaves the microphone and goes quiet"
+            }
+            Self::OutputFixes => {
+                "Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"
+            }
         }
     }
 
@@ -434,7 +464,56 @@ impl Feature {
             Self::HistoryStats => settings.labs.history_stats,
             Self::RecentDictations => settings.labs.recent_dictations,
             Self::NeuralEngine => settings.labs.neural_engine,
+            Self::SkipPauses => settings.labs.skip_pauses,
+            Self::StopWhenCallEnds => settings.labs.stop_when_call_ends,
+            Self::OutputFixes => settings.labs.output_fixes,
         }
+    }
+
+    /// Every feature's switch in `settings`, for the Labs lock
+    /// (`crate::policy`). Terminal paste has none: it is a three-way choice
+    /// (`terminal_paste`), only on Windows, and the lock is macOS only.
+    pub fn switches(settings: &mut AppSettings) -> Vec<&mut bool> {
+        let labs = &mut settings.labs;
+        vec![
+            &mut settings.meetings.enabled,
+            &mut settings.experimental.hex_microphone,
+            &mut settings.keyboard_model_switching.enabled,
+            &mut settings.pause_browser_media,
+            &mut settings.share_dictation_shortcut,
+            &mut labs.playground,
+            &mut labs.live_text,
+            &mut labs.live_chapters,
+            &mut labs.vocabulary_biasing,
+            &mut labs.mouse_shortcuts,
+            &mut labs.unload_idle,
+            &mut labs.restore_shortcut_default,
+            &mut labs.keep_on_clipboard,
+            &mut labs.copy_only,
+            &mut labs.spoken_formatting,
+            &mut labs.filler_words,
+            &mut labs.subtitle_export,
+            &mut labs.second_dictation_shortcut,
+            &mut labs.smart_spacing,
+            &mut labs.spoken_symbols,
+            &mut labs.picker_sort_filter,
+            &mut labs.sided_modifier_chords,
+            &mut labs.tap_or_hold,
+            &mut labs.benchmark_details,
+            &mut labs.parakeet_ultra,
+            &mut labs.neural_engine,
+            &mut labs.standalone_special_keys,
+            &mut labs.history_stats,
+            &mut labs.recent_dictations,
+            &mut labs.skip_pauses,
+            &mut labs.stop_when_call_ends,
+            &mut labs.output_fixes,
+        ]
+    }
+
+    /// The managed lock that holds this feature off, if any.
+    pub fn managed(self) -> Option<crate::policy::Lock> {
+        crate::policy::Policy::current().labs_lock(self)
     }
 
     pub fn set(self, settings: &mut AppSettings, on: bool) {
@@ -474,6 +553,9 @@ impl Feature {
             Self::HistoryStats => settings.labs.history_stats = on,
             Self::RecentDictations => settings.labs.recent_dictations = on,
             Self::NeuralEngine => settings.labs.neural_engine = on,
+            Self::SkipPauses => settings.labs.skip_pauses = on,
+            Self::StopWhenCallEnds => settings.labs.stop_when_call_ends = on,
+            Self::OutputFixes => settings.labs.output_fixes = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -484,38 +566,43 @@ impl Feature {
 }
 
 /// Set once this process knows its settings.
-const KNOWN: u32 = 1;
-const LIVE_TEXT: u32 = 1 << 1;
-const LIVE_CHAPTERS: u32 = 1 << 2;
-const PLAYGROUND: u32 = 1 << 3;
-const VOCABULARY_BIASING: u32 = 1 << 4;
-const MOUSE_SHORTCUTS: u32 = 1 << 5;
-const UNLOAD_IDLE: u32 = 1 << 6;
-const KEEP_ON_CLIPBOARD: u32 = 1 << 7;
-const COPY_ONLY: u32 = 1 << 8;
-const SPOKEN_FORMATTING: u32 = 1 << 9;
-const FILLER_WORDS: u32 = 1 << 10;
-const SUBTITLE_EXPORT: u32 = 1 << 11;
-const SMART_SPACING: u32 = 1 << 12;
-const SPOKEN_SYMBOLS: u32 = 1 << 13;
-const SIDED_CHORDS: u32 = 1 << 14;
-const TAP_OR_HOLD: u32 = 1 << 15;
-const NEURAL_ENGINE: u32 = 1 << 16;
-const PARAKEET_ULTRA: u32 = 1 << 17;
-const HISTORY_STATS: u32 = 1 << 18;
-const RECENT_DICTATIONS: u32 = 1 << 19;
+const KNOWN: u64 = 1;
+const LIVE_TEXT: u64 = 1 << 1;
+const LIVE_CHAPTERS: u64 = 1 << 2;
+const PLAYGROUND: u64 = 1 << 3;
+const VOCABULARY_BIASING: u64 = 1 << 4;
+const MOUSE_SHORTCUTS: u64 = 1 << 5;
+const UNLOAD_IDLE: u64 = 1 << 6;
+const KEEP_ON_CLIPBOARD: u64 = 1 << 7;
+const COPY_ONLY: u64 = 1 << 8;
+const SPOKEN_FORMATTING: u64 = 1 << 9;
+const FILLER_WORDS: u64 = 1 << 10;
+const SUBTITLE_EXPORT: u64 = 1 << 11;
+const SMART_SPACING: u64 = 1 << 12;
+const SPOKEN_SYMBOLS: u64 = 1 << 13;
+const SIDED_CHORDS: u64 = 1 << 14;
+const TAP_OR_HOLD: u64 = 1 << 15;
+const SKIP_PAUSES: u64 = 1 << 16;
+const PARAKEET_ULTRA: u64 = 1 << 17;
+const HISTORY_STATS: u64 = 1 << 18;
+const RECENT_DICTATIONS: u64 = 1 << 19;
+const STOP_WHEN_CALL_ENDS: u64 = 1 << 20;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
-const MINUTES_SHIFT: u32 = 20;
+const MINUTES_SHIFT: u64 = 21;
+const MINUTES_MASK: u64 = (1 << 11) - 1;
+/// The Neural Engine model's switch sits above the minutes: the 32 bits below
+/// are full.
+const NEURAL_ENGINE: u64 = 1 << 32;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
-static STATE: AtomicU32 = AtomicU32::new(0);
+static STATE: AtomicU64 = AtomicU64::new(0);
 
-fn on(bit: u32) -> bool {
+fn on(bit: u64) -> bool {
     state() & bit != 0
 }
 
-fn state() -> u32 {
+fn state() -> u64 {
     match STATE.load(Ordering::Acquire) {
         0 => {
             let saved = encode(&AppSettings::saved_labs());
@@ -636,12 +723,27 @@ pub fn recent_dictations() -> bool {
     on(RECENT_DICTATIONS)
 }
 
+/// A whole-clip dictation transcription hears only the head and tail of
+/// each long pause (Linux and Windows; read as each whole-clip run starts).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn skip_pauses() -> bool {
+    on(SKIP_PAUSES) && Feature::SkipPauses.on_this_os()
+}
+
+/// A meeting recording Hex started on its own stops once its call app has
+/// left the microphone and gone quiet for a grace period (macOS; read on
+/// each pass of the meeting controller).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn stop_when_call_ends() -> bool {
+    on(STOP_WHEN_CALL_ENDS) && Feature::StopWhenCallEnds.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
     let state = state();
     (state & UNLOAD_IDLE != 0)
-        .then(|| std::time::Duration::from_secs(u64::from(state >> MINUTES_SHIFT) * 60))
+        .then(|| std::time::Duration::from_secs(((state >> MINUTES_SHIFT) & MINUTES_MASK) * 60))
 }
 
 /// Records the switches the loaded or saved settings hold.
@@ -649,14 +751,17 @@ pub(crate) fn apply(settings: &LabsSettings) {
     STATE.store(encode(settings), Ordering::Release);
 }
 
-fn encode(settings: &LabsSettings) -> u32 {
-    encode_where(settings, Feature::shipped)
+fn encode(settings: &LabsSettings) -> u64 {
+    let policy = crate::policy::Policy::current();
+    encode_where(settings, |feature| {
+        feature.shipped() && policy.labs_lock(feature).is_none()
+    })
 }
 
 /// The switches `settings` hold for the features `reaches` admits; the
 /// rest read off while their saved setting stays as it is.
-fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u32 {
-    let minutes = settings.unload_idle_minutes.clamp(1, 24 * 60) << MINUTES_SHIFT;
+fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u64 {
+    let minutes = u64::from(settings.unload_idle_minutes.clamp(1, 24 * 60)) << MINUTES_SHIFT;
     [
         (Feature::LiveText, settings.live_text, LIVE_TEXT),
         (Feature::LiveChapters, settings.live_chapters, LIVE_CHAPTERS),
@@ -713,6 +818,12 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             RECENT_DICTATIONS,
         ),
         (Feature::NeuralEngine, settings.neural_engine, NEURAL_ENGINE),
+        (Feature::SkipPauses, settings.skip_pauses, SKIP_PAUSES),
+        (
+            Feature::StopWhenCallEnds,
+            settings.stop_when_call_ends,
+            STOP_WHEN_CALL_ENDS,
+        ),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -782,6 +893,9 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
         return Ok(());
     }
     let feature = resolve(name, Feature::shipped)?;
+    if let Some(lock) = feature.managed() {
+        return Err(eyre!(lock.refusal()));
+    }
     if feature == Feature::VoiceFilter
         && !on
         && crate::audio::hex_microphone::driver_bundle_installed()
@@ -853,9 +967,15 @@ fn list(settings: &AppSettings) -> String {
             || (feature == Feature::VoiceFilter
                 && crate::audio::hex_microphone::driver_bundle_installed());
         out.push_str(&format!(
-            "{:<width$}  {:<3}  {:<8}  {} (wordink settings {})\n",
+            "{:<width$}  {:<7}  {:<8}  {} (wordink settings {})\n",
             feature.name(),
-            if on { "on" } else { "off" },
+            if feature.managed().is_some() {
+                "managed"
+            } else if on {
+                "on"
+            } else {
+                "off"
+            },
             feature.audience().name(),
             feature.description(),
             feature.settings_key(),
@@ -894,6 +1014,25 @@ mod tests {
             feature.set(&mut settings, true);
             assert!(feature.on(&settings));
         }
+    }
+
+    #[test]
+    fn switches_hold_every_feature() {
+        let mut settings = AppSettings::default();
+        for switch in Feature::switches(&mut settings) {
+            *switch = true;
+        }
+        let with_switch = Feature::ALL
+            .into_iter()
+            .filter(|feature| *feature != Feature::TerminalPaste);
+        for feature in with_switch.clone() {
+            assert!(feature.on(&settings), "{} has no switch", feature.name());
+        }
+        assert_eq!(
+            Feature::switches(&mut settings).len(),
+            with_switch.count(),
+            "one switch per feature but Terminal paste"
+        );
     }
 
     #[test]
@@ -1076,6 +1215,31 @@ mod tests {
             cfg!(all(target_os = "linux", target_arch = "aarch64"))
         );
         assert_eq!(Feature::NeuralEngine.name(), "neural-engine");
+    }
+
+    #[test]
+    fn skip_pauses_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & SKIP_PAUSES, 0);
+        labs.skip_pauses = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & SKIP_PAUSES, 0);
+        assert_eq!(state & TAP_OR_HOLD, 0);
+        assert_eq!(state & PARAKEET_ULTRA, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn stop_when_call_ends_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & STOP_WHEN_CALL_ENDS, 0);
+        labs.stop_when_call_ends = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & STOP_WHEN_CALL_ENDS, 0);
+        assert_eq!(state & RECENT_DICTATIONS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
     #[test]

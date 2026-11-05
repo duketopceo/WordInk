@@ -10,7 +10,8 @@ use super::controls::{
 };
 use super::icons::{BOOK, GLOBE, HINTS, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
 use super::lists::{Tone, tone_tag};
-use super::{NAV_ROW_GAP, NAV_ROW_HEIGHT, Pane, Ui, VOICE_FILTER_ICON};
+use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
+use super::{Pane, Ui};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::labs::Feature;
 
@@ -155,7 +156,8 @@ struct Row {
     title: &'static str,
     about: &'static str,
     on: bool,
-    /// Shown on and can't be turned off (an installed Hex Microphone driver).
+    /// Can't be switched: on while an installed Hex Microphone driver or
+    /// the dictation model needs it, off under an organization's lock.
     locked: bool,
 }
 
@@ -170,6 +172,16 @@ fn rows(ui: &Ui) -> Vec<Row> {
         on: feature.on(settings),
         locked: false,
     };
+    // An organization's lock shows the row off, disabled, and says why.
+    let row = |feature: Feature, icon, title, about| match feature.managed() {
+        Some(_) => Row {
+            on: false,
+            locked: true,
+            about: super::managed_note(),
+            ..row(feature, icon, title, about)
+        },
+        None => row(feature, icon, title, about),
+    };
     let mut rows = Vec::new();
     if caps.meetings {
         rows.push(row(
@@ -179,7 +191,14 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Record calls and keep transcripts"),
         ));
     }
-    if caps.fun {
+    if caps.fun && Feature::VoiceFilter.managed().is_some() {
+        rows.push(row(
+            Feature::VoiceFilter,
+            &VOICE_FILTER_ICON,
+            tr("Voice Filter"),
+            "",
+        ));
+    } else if caps.fun {
         let locked = super::fun::driver_installed(ui);
         rows.push(Row {
             on: super::fun::running(ui),
@@ -217,6 +236,16 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Subtitle export"),
             tr("Export meeting transcripts as SRT or VTT subtitles with wordink meetings show"),
         ));
+        // macOS's meeting controller reads the call app's audio output, so
+        // Linux renders of macOS scenes leave it out.
+        if cfg!(target_os = "macos") {
+            rows.push(row(
+                Feature::StopWhenCallEnds,
+                &TIMER,
+                tr("Stop when the call ends"),
+                tr("Stop a recording WordInk started on its own 30 s after the call app leaves the microphone and goes quiet"),
+            ));
+        }
     }
     rows.push(row(
         Feature::VocabularyBiasing,
@@ -304,6 +333,15 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Use Menu, Pause, or Scroll Lock as a shortcut without a modifier, such as Caps Lock remapped to Menu"),
         ));
     }
+    // Linux's and Windows' engines transcribe a whole clip on the CPU.
+    if caps.os != super::platform::Os::Macos {
+        rows.push(row(
+            Feature::SkipPauses,
+            &TIMER,
+            tr("Skip long pauses"),
+            tr("Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner"),
+        ));
+    }
     rows.push(row(
         Feature::UnloadIdle,
         &TIMER,
@@ -341,6 +379,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Show a summary of your retained dictations at the top of History, with wordink history stats"),
     ));
     rows.push(row(
+        Feature::OutputFixes,
+        &BOOK,
+        tr("Fix results in Output"),
+        tr("Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"),
+    ));
+    rows.push(row(
         Feature::PickerSortFilter,
         &HINTS,
         tr("Sort and filter models"),
@@ -352,15 +396,22 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Benchmark details"),
         tr("Show each model's raw error rate, benchmark, and source in the Local transcription picker"),
     ));
-    let ultra_locked = Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
-    rows.push(Row {
-        locked: ultra_locked,
-        about: if ultra_locked {
-            tr("On while it is the dictation model. Choose another model to turn it off.")
-        } else {
-            tr("Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker")
-        },
-        ..row(Feature::ParakeetUltra, &HINTS, tr("Parakeet Ultra"), "")
+    let ultra_locked = Feature::ParakeetUltra.managed().is_none()
+        && Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
+    let ultra = row(Feature::ParakeetUltra, &HINTS, tr("Parakeet Ultra"), "");
+    // A managed row already says so.
+    rows.push(if ultra.locked {
+        ultra
+    } else {
+        Row {
+            locked: ultra_locked,
+            about: if ultra_locked {
+                tr("On while it is the dictation model. Choose another model to turn it off.")
+            } else {
+                tr("Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker")
+            },
+            ..ultra
+        }
     });
     // Only on Linux on Apple silicon, where the Neural Engine can exist.
     if Feature::available().any(|feature| feature == Feature::NeuralEngine) {
@@ -431,10 +482,16 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::HistoryStats => "lab-history-stats",
         Feature::RecentDictations => "lab-recent-dictations",
         Feature::NeuralEngine => "lab-neural-engine",
+        Feature::SkipPauses => "lab-skip-pauses",
+        Feature::StopWhenCallEnds => "lab-stop-when-call-ends",
+        Feature::OutputFixes => "lab-output-fixes",
     }
 }
 
 fn flip(ui: &mut Ui, feature: Feature) {
+    if feature.managed().is_some() {
+        return;
+    }
     if feature == Feature::VoiceFilter && super::fun::driver_installed(ui) {
         return;
     }
@@ -505,7 +562,7 @@ pub(super) fn page(ui: &Ui, p: Paint) -> El {
 
 fn feature_row(p: Paint, row: Row, flashing: bool) -> CardRow {
     let switch = if row.locked {
-        rune_kit::Switch::new(true)
+        rune_kit::Switch::new(row.on)
             .disabled(true)
             .build(p.k)
             .key("switch")

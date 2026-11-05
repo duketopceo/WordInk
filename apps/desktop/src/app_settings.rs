@@ -12,11 +12,17 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use serde::{Deserialize, Serialize};
 
+use crate::dictation::vocabulary::{VocabularyEntry, serialize_saved};
 use crate::keyboard_kind::{self, KeyboardKind};
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 
+mod dictation_processing;
 mod persistence;
 mod shortcut_repair;
+
+pub use dictation_processing::{
+    DictationMode, DictationPostProcessing, DictationProcessingSettings,
+};
 
 static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(0.2_f32.to_bits());
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
@@ -87,9 +93,8 @@ pub const LEFT_OPTION_MASK: u64 = 0x0000_0020;
 pub const RIGHT_OPTION_MASK: u64 = 0x0000_0040;
 pub const RIGHT_CONTROL_MASK: u64 = 0x0000_2000;
 
-/// Which of a modifier's keys a shortcut holds. `Either` is one key on
-/// either side (or both, as before chords); `Both` is the left and the
-/// right key together, such as both Options.
+/// Which of a modifier's keys a shortcut holds. `Either` is one key on either side (or both,
+/// as before chords); `Both` is the left and the right key together, such as both Options.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModifierSide {
@@ -227,8 +232,7 @@ impl HotkeyModifiers {
         }
     }
 
-    /// Every key `required` names is among these held ones; others may be
-    /// held too.
+    /// Every key `required` names is among these held ones; others may be held too.
     fn contains(self, required: Self) -> bool {
         side_covers(self.control, required.control)
             && side_covers(self.option, required.option)
@@ -702,7 +706,8 @@ const MAC_SPACE_KEY_CODE: u16 = 49;
 
 impl Default for HotkeyBinding {
     /// Option+Space on macOS, Alt+Space on Windows and Linux, and
-    /// Ctrl+Alt+Space on GNOME, whose window menu takes Alt+Space (#723).
+    /// Ctrl+Alt+Space on GNOME, whose window menu takes Alt+Space (#723),
+    /// and on KDE Plasma, whose KRunner does (#898).
     fn default() -> Self {
         Self::dictation_default_for(DefaultOs::current(), gnome_session())
     }
@@ -731,7 +736,7 @@ impl DefaultOs {
 
 #[cfg(target_os = "linux")]
 fn gnome_session() -> bool {
-    crate::linux::portal::gnome()
+    crate::linux::portal::desktop_takes_alt_space()
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -1393,8 +1398,11 @@ impl Default for MeetingSettings {
 }
 
 impl MeetingSettings {
+    /// Whether meetings may record and process: always in developer builds,
+    /// otherwise once turned on, and never under a managed lock.
     pub fn available(&self) -> bool {
-        crate::DEVELOPER_FEATURES_ENABLED || self.enabled
+        crate::labs::Feature::Meetings.managed().is_none()
+            && (crate::DEVELOPER_FEATURES_ENABLED || self.enabled)
     }
 
     pub fn resolved_output_folder(&self) -> PathBuf {
@@ -1440,7 +1448,8 @@ pub enum TerminalPaste {
     Never,
 }
 
-/// The `labs` switches (`crate::labs`), every one off by default (`history_stats`: issue 790, `recent_dictations`: issue 877, macOS).
+/// The `labs` switches (`crate::labs`), every one off by default (`history_stats`: issue 790, `recent_dictations`: issue 877, macOS,
+/// `skip_pauses`: whole-clip runs skip long pauses, Linux and Windows, issue 899).
 /// Labs features that already had a home keep it: `meetings.enabled`, `terminal_paste`,
 /// `experimental.hex_microphone`, `keyboard_model_switching.enabled`, `pause_browser_media`,
 /// and `share_dictation_shortcut`. An older `labs.enabled` master switch is read and ignored.
@@ -1479,13 +1488,11 @@ pub struct LabsSettings {
     pub smart_spacing: bool,
     /// Spoken symbol words ("comma", "hashtag", "underscore") become characters joined to their words (issue 678).
     pub spoken_symbols: bool,
-    /// The Local transcription picker offers a sort (Recommended, Size,
-    /// Name) and a "Supports the saved language" toggle (issue 645).
+    /// The Local transcription picker offers a sort and a "Supports the saved language" toggle (issue 645).
     pub picker_sort_filter: bool,
     /// The recorder keeps each modifier's side in a modifier-only chord, such as Right ⌘ + Right ⌥ (macOS, issue 710).
     pub sided_modifier_chords: bool,
-    /// In Toggle mode, a press held past the hold threshold dictates until
-    /// it lifts; a short tap still starts and stops (macOS, issue 711).
+    /// In Toggle mode, a press held past the hold threshold dictates until it lifts (macOS, issue 711).
     pub tap_or_hold: bool,
     /// The Local transcription picker shows each model's raw error rate
     /// (WER or CER), its benchmark, source, and conditions (issue 647).
@@ -1499,6 +1506,11 @@ pub struct LabsSettings {
     /// Parakeet v3 on the Apple Neural Engine joins the Local transcription
     /// picker (Linux on Apple silicon).
     pub neural_engine: bool,
+    pub skip_pauses: bool,
+    /// An automatic meeting recording stops after its call ends (macOS, issue 835).
+    pub stop_when_call_ends: bool,
+    /// Output's Try card offers Vocabulary and Fix this beside its result (issue 989).
+    pub output_fixes: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1532,6 +1544,9 @@ impl Default for LabsSettings {
             history_stats: false,
             recent_dictations: false,
             neural_engine: false,
+            skip_pauses: false,
+            stop_when_call_ends: false,
+            output_fixes: false,
         }
     }
 }
@@ -1667,60 +1682,6 @@ pub enum RecordingAudioBehavior {
     PauseMedia,
     #[default]
     DoNothing,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(default)]
-pub struct DictationProcessingSettings {
-    pub default_mode: DictationMode,
-    pub modes: Vec<DictationMode>,
-}
-
-impl Default for DictationProcessingSettings {
-    fn default() -> Self {
-        Self {
-            default_mode: DictationMode {
-                name: "Global".into(),
-                ..Default::default()
-            },
-            modes: Vec::new(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-#[serde(default)]
-pub struct DictationMode {
-    pub name: String,
-    pub applications: Vec<String>,
-    pub browser_hosts: Vec<String>,
-    pub replacements: Vec<TextReplacement>,
-    pub transformations: Vec<String>,
-    pub post_processing: DictationPostProcessing,
-}
-
-/// Persisted OpenCode rewrite settings for one mode.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(default)]
-pub struct DictationPostProcessing {
-    pub enabled: bool,
-    pub prompt: String,
-    /// Optional `provider/model` key from the OpenCode catalog.
-    pub model: Option<String>,
-    pub variant: Option<String>,
-    pub deadline_seconds: u64,
-}
-
-impl Default for DictationPostProcessing {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            prompt: "Rewrite the transcript into clear, natural text while preserving the speaker's intended meaning.".into(),
-            model: None,
-            variant: None,
-            deadline_seconds: 30,
-        }
-    }
 }
 
 /// Annotate: Scrawl's captures inside Hex, on macOS, Linux, and Windows
@@ -2054,8 +2015,11 @@ pub struct AppSettings {
     pub updates: UpdateSettings,
     /// The shared vocabulary (`crate::dictation::vocabulary`). Left out of the file
     /// while empty, so settings without one stay as they were.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub vocabulary: Vec<crate::dictation::vocabulary::VocabularyEntry>,
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "serialize_saved"
+    )]
+    pub vocabulary: Vec<VocabularyEntry>,
     /// How readily transcription swaps heard words for a vocabulary term.
     pub vocabulary_boost: crate::dictation::vocabulary::VocabularyBoost,
     /// Words the person dismissed from the Vocabulary's suggestions, so they
@@ -2455,6 +2419,15 @@ impl AppSettings {
     }
 
     fn apply_runtime(&self) {
+        // Whatever an editor holds, a managed lock keeps its switches off.
+        let policy = crate::policy::Policy::current();
+        if policy.any() {
+            let mut managed = self.clone();
+            policy.enforce(&mut managed);
+            if managed != *self {
+                return managed.apply_runtime();
+            }
+        }
         MICROPHONE_POLICY.store(
             u8::from(self.release_microphone_while_idle),
             Ordering::Release,
@@ -2467,7 +2440,8 @@ impl AppSettings {
             self.debug_logging_transcripts,
         );
         CUSTOM_TRANSFORMATIONS_ENABLED.store(
-            transformations_used(&self.dictation_processing),
+            transformations_used(&self.dictation_processing)
+                && !policy.locks(crate::policy::Lock::Transforms),
             Ordering::Release,
         );
         crate::feedback::set_enabled(self.sound_effects);
@@ -2965,9 +2939,18 @@ pub fn meetings_enabled() -> bool {
     MEETINGS_ENABLED.load(Ordering::Acquire)
 }
 
+/// Why meetings can't record now.
+pub fn meetings_off_reason() -> &'static str {
+    match crate::labs::Feature::Meetings.managed() {
+        Some(lock) => lock.refusal(),
+        None => "Meetings are off; turn them on with `wordink settings set meetings.enabled on`",
+    }
+}
+
 /// [`voice_filter_enabled`] for the running listener.
 pub fn hex_microphone_enabled() -> bool {
     crate::labs::Feature::VoiceFilter.shipped()
+        && crate::labs::Feature::VoiceFilter.managed().is_none()
         && voice_filter_enabled(
             HEX_MICROPHONE_ENABLED.load(Ordering::Acquire),
             crate::audio::hex_microphone::driver_bundle_installed(),
@@ -3215,8 +3198,9 @@ pub fn exists() -> bool {
 mod tests {
     use super::*;
 
-    /// GNOME's window menu takes Alt+Space, so new GNOME setups dictate
-    /// with Ctrl+Alt+Space; it shares no key with Paste last or Annotate.
+    /// GNOME's window menu and KDE's KRunner take Alt+Space, so new setups
+    /// there dictate with Ctrl+Alt+Space; it shares no key with Paste last or
+    /// Annotate.
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn gnome_dictates_with_a_key_gnome_leaves_free() {
@@ -3443,7 +3427,6 @@ mod tests {
 
     #[test]
     fn loading_folds_saved_recognition_hints_into_the_vocabulary_once() {
-        use crate::dictation::vocabulary::VocabularyEntry;
         let dir = TestSettingsDir::new("folded-hints");
         let mut file = serde_json::to_value(AppSettings {
             transcription: TranscriptionSelection {
@@ -3947,7 +3930,6 @@ mod tests {
 
     #[test]
     fn vocabulary_round_trips_and_stays_out_of_files_without_one() {
-        use crate::dictation::vocabulary::VocabularyEntry;
         // A file from before the vocabulary loads with an empty one and is
         // not rewritten to gain the field.
         let dir = TestSettingsDir::new("vocabulary");
@@ -3985,7 +3967,7 @@ mod tests {
             json["vocabulary"],
             serde_json::json!([
                 {"term": "Cappuccino", "sounds_like": ["capuchin", "cap a chino"]},
-                {"term": "Rune"},
+                "Rune",
             ])
         );
         assert_eq!(json["vocabulary_boost"], "normal");

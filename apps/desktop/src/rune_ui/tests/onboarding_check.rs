@@ -15,8 +15,9 @@ pub(super) const SCENES: &[&str] = &[
     // A fresh install: setting up Hex, the recommended model downloading.
     "onboarding",
     "mac-onboarding",
-    // The download stopped.
+    // The download stopped; Continue without a model, then Settings.
     "onboarding-download-failed",
+    "onboarding-no-model",
     // The model step: models on this computer; the recommended one among
     // them; ours picked and downloading; Back to the list from the next page.
     "onboarding-model-found",
@@ -32,6 +33,8 @@ pub(super) const SCENES: &[&str] = &[
     "mac-onboarding-stale",
     "mac-onboarding-restart",
     "windows-onboarding-microphone",
+    // GNOME and KDE on Wayland: the desktop's paste permission, explained.
+    "onboarding-paste",
     // Almost ready: the model still downloads.
     "onboarding-waiting",
     // Your turn: the practice game, and the shortcut that didn't start.
@@ -56,6 +59,56 @@ pub(super) const SCENES: &[&str] = &[
     "onboarding-ready",
     "mac-onboarding-ready",
 ];
+
+/// Continue without a model (#894): only on the download step, only once
+/// the download failed or stalled. It finishes onboarding, and Settings ›
+/// General then says no model is installed, with Download and Add model
+/// file….
+#[test]
+fn onboarding_continue_without_model() {
+    for scene in SCENES {
+        let rt = runtime(scene, true, PANE_SIZE);
+        assert_eq!(
+            rt.find("continue-without-model").is_some(),
+            *scene == "onboarding-download-failed",
+            "{scene}: Continue without a model"
+        );
+    }
+
+    let mut rt = runtime("onboarding-download-failed", true, PANE_SIZE);
+    tap(&mut rt, "continue-without-model");
+    settle(&mut rt);
+    assert!(rt.state.first_run.is_none(), "onboarding closed");
+    assert!(rt.state.tour.is_none(), "and its tour");
+    assert!(
+        texts(&rt).contains(&"No speech model installed: The connection was reset.".to_owned()),
+        "{:?}",
+        texts(&rt)
+    );
+    assert!(rt.find("transcription-download").is_some(), "Download");
+    assert!(
+        rt.find("transcription-add-file").is_some(),
+        "Add model file…"
+    );
+    assert!(
+        texts(&rt).contains(&"WordInk can't dictate until a speech model is installed".to_owned()),
+        "the status says so too"
+    );
+
+    // A download that gains nothing for a while offers it too.
+    let mut rt = runtime("onboarding-waiting", true, PANE_SIZE);
+    assert!(rt.find("continue-without-model").is_none());
+    rt.update(|ui, tx| {
+        if let Some(s) = ui.first_run.as_mut() {
+            s.now += 31.0;
+        }
+        super::super::onboarding_kit::live::poll(ui, tx);
+    });
+    settle(&mut rt);
+    assert!(rt.find("continue-without-model").is_some(), "stalled");
+    tap(&mut rt, "continue-without-model");
+    assert!(rt.state.first_run.is_none(), "onboarding closed");
+}
 
 #[test]
 fn onboarding_goldens() {
