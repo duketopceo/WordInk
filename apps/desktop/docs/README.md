@@ -10,6 +10,7 @@ override shipped behavior.
 - [`linux.md`](linux.md): Linux X11 and native Wayland beta requirements and installation.
 - [`nix.md`](nix.md): Nix packaging, development, and per-user autostart.
 - [`../ios/README.md`](../ios/README.md): build and test the iOS prototype.
+- [`local-api.md`](local-api.md): the running app's local HTTP API (discovery, auth, endpoints, versioning).
 - [`../sdk/typescript/README.md`](../sdk/typescript/README.md): use the public
   TypeScript transcription SDK with an explicitly supplied native helper.
 

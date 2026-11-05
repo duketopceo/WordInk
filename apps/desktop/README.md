@@ -47,7 +47,7 @@ Installs per user (no admin) and starts at login. WordInk for Windows is not cod
 
 To install a specific release instead of the latest, set `WORDINK_INSTALL_BASE=https://github.com/duketopceo/WordInk/releases/download/desktop-vX.Y.Z` before the command.
 
-More docs are in [`docs/`](docs/README.md).
+More docs are in [`docs/`](docs/README.md). To build on the running app, see the [local API](docs/local-api.md).
 
 ## Contributing
 

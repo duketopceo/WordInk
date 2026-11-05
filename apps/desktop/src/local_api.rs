@@ -1478,6 +1478,65 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    /// The public routes `docs/local-api.md` documents. Removing one from the
+    /// router must fail here, and the doc must change with this list.
+    const DOCUMENTED_PUBLIC_ROUTES: &[(&str, &str)] = &[
+        ("GET", "/health"),
+        ("GET", "/capabilities"),
+        ("GET", "/models"),
+        ("POST", "/models/unknown-model/prepare"),
+        ("POST", "/transcriptions"),
+        ("POST", "/dictations"),
+        ("POST", "/dictations/1/finish"),
+        ("POST", "/dictations/1/cancel"),
+        ("GET", "/dictations/1/levels"),
+        ("GET", "/dictations/1/audio"),
+        ("POST", "/dictations/1/heartbeat"),
+        ("POST", "/control"),
+    ];
+
+    #[test]
+    fn documented_public_routes_are_routed() {
+        let directory = temp_directory();
+        let discovery_path = directory.join("local-api.json");
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let api = start_published(discovery_path.clone(), events).unwrap();
+        let document: DiscoveryDocument =
+            serde_json::from_slice(&fs::read(&discovery_path).unwrap()).unwrap();
+        let doc = include_str!("../docs/local-api.md");
+
+        for (method, path) in DOCUMENTED_PUBLIC_ROUTES {
+            let response = raw_request(
+                document.port,
+                &format!(
+                    "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\nX-Hex-Dictation-Token: probe\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    document.token
+                ),
+            );
+            // An unrouted path answers `404 not_found`; a routed one answers
+            // anything else (including a typed 404 such as
+            // `service-capture-unavailable`).
+            assert!(
+                !response.contains("\"not_found\""),
+                "{method} {path} is documented but not routed: {response}"
+            );
+            assert!(
+                !response.starts_with("HTTP/1.1 401"),
+                "{method} {path} rejected a valid token"
+            );
+            let documented_path = path.split('/').take(2).collect::<Vec<_>>().join("/");
+            assert!(
+                doc.contains(&documented_path),
+                "docs/local-api.md does not mention {documented_path}"
+            );
+        }
+
+        let unrouted = request(document.port, Some(&document.token), "/not-a-route");
+        assert!(unrouted.contains("\"not_found\""));
+        drop(api);
+        let _ = fs::remove_dir_all(directory);
+    }
+
     #[test]
     fn authenticated_developer_control_is_bounded_and_typed() {
         let directory = temp_directory();

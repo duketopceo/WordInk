@@ -97,6 +97,11 @@ No telemetry and no WordInk servers. Audio goes only to the engine you choose, w
 
 The web SDK and the gateway are separate products from the desktop app. They share the transcription protocol and a clean-up contract, not code.
 
+## Build on WordInk
+
+- **In a web app:** the npm packages `@wordink/web` (the `<wordink-mic>` button), `@wordink/react`, `@wordink/core` and `@wordink/local` (offline engine). See [Web SDK quickstart](#web-sdk-quickstart).
+- **From a script or another app on the same computer:** the desktop app's [local API](apps/desktop/docs/local-api.md) transcribes audio, starts a dictation and runs the control commands, and [`@wordink/desktop`](packages/desktop) is a small typed Node client for it.
+
 ## Web SDK quickstart
 
 The packages are not on npm yet, so the CDN URL below becomes valid after their first release. Plain HTML, no build step:

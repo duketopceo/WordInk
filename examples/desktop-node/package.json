@@ -1,0 +1,13 @@
+{
+  "name": "@wordink/example-desktop-node",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "start": "node transcribe.mjs"
+  },
+  "dependencies": {
+    "@wordink/desktop": "workspace:*"
+  }
+}
