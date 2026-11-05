@@ -48,6 +48,10 @@ No other tag suffix is accepted.
      tarballs and gathers the three installers. None of these has a secret. The
      macOS build is the unsigned `WordInk.app` from `scripts/build-app.sh`,
      zipped with `ditto` so the zip root is `WordInk.app/`.
+     That macOS leg runs on the self-hosted Mac (label `promax-macos`); to use
+     the GitHub-hosted `macos-26` image instead, set the repository variable
+     `WORDINK_MACOS_RUNNER` to `hosted`. The self-hosted runner only ever sees
+     tag-triggered runs of this workflow, never pull requests.
    - `sign-linux` waits for approval (next step), signs the bare Linux
      executables, writes `stable.json` (final tags only), lists every file in
      `SHA256SUMS`, signs that list, and verifies the result.
