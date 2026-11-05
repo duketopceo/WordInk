@@ -49,6 +49,13 @@ pub fn logs_dir() -> Result<PathBuf> {
     Ok(support_dir()?.join("logs"))
 }
 
+/// The root of this binary's tracing targets. `module_path!()` begins with the
+/// binary's crate name (`wordink`), not the Cargo package name (`hex`), so a
+/// hard-coded `hex` prefix matches no event at all.
+pub fn crate_root() -> &'static str {
+    module_path!().split("::").next().unwrap_or("wordink")
+}
+
 /// Creates the logs directory, appends process diagnostics to `process.log`
 /// alongside stderr, installs the global tracing subscriber, and routes Ctrl-C
 /// to `shutdown`. Returns the logs directory.
@@ -60,7 +67,9 @@ pub fn init_process_logging(shutdown: &'static AtomicBool) -> Result<PathBuf> {
         .append(true)
         .open(log_dir.join("process.log"))?;
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("hex=info"));
+        .unwrap_or_else(|_| {
+            tracing_subscriber::EnvFilter::new(format!("{}=info", crate_root()))
+        });
     // Process diagnostics keep their own filter; the debug log sees Hex's
     // events at its own level, and only while it is on.
     let process = tracing_subscriber::fmt::layer()
