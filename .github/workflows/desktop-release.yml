@@ -334,6 +334,9 @@ jobs:
   # and package names carry no version (releases/latest/download/<name>).
   package-linux:
     needs: [prepare, build]
+    # Explicit results: in a dry run gate is skipped, and the implicit
+    # success() would skip every job downstream of it.
+    if: "!cancelled() && needs.build.result == 'success'"
     runs-on: ubuntu-24.04
     env:
       WORDINK_VERSION: ${{ needs.prepare.outputs.version }}
@@ -429,6 +432,7 @@ jobs:
   check-installers:
     name: Check installers ${{ matrix.label }}
     needs: [prepare, build, package-linux]
+    if: "!cancelled() && needs.build.result == 'success' && needs.package-linux.result == 'success'"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     permissions:
@@ -818,7 +822,10 @@ jobs:
   # artifact. No secrets, no write access, no tag or release.
   dry-run-bundle:
     needs: [prepare, build, sbom, package-linux, check-installers]
-    if: github.event_name == 'workflow_dispatch'
+    if: >-
+      github.event_name == 'workflow_dispatch' && !cancelled() &&
+      needs.build.result == 'success' && needs.sbom.result == 'success' &&
+      needs.package-linux.result == 'success' && needs.check-installers.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
