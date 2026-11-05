@@ -96,8 +96,9 @@ jobs:
       - name: Release scripts (shellcheck and tests)
         if: startsWith(matrix.os, 'ubuntu')
         run: |
-          shellcheck packaging/linux/{sign-linux,make-tarball,write-sums,verify-release,write-manifest}.sh \
-            scripts/{release-gate,release-notes,test-release-scripts}.sh
+          shellcheck packaging/linux/{sign-linux,make-tarball,make-appimage,check-release-files,write-sums,verify-release,write-manifest}.sh \
+            packaging/aur/render-pkgbuild.sh packaging/macos/make-dmg.sh \
+            scripts/{release-gate,release-notes,test-release-scripts,package-linux}.sh
           scripts/test-release-scripts.sh
 
       # The installers (one per OS) against a loopback fixture release. The

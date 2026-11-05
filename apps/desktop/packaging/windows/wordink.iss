@@ -1,18 +1,22 @@
-; Per-user Windows installer for WordInk. It installs exactly the managed layout
-; that .github/release/install-windows.ps1 creates and src/windows_updater.rs updates:
+; Per-user Windows installer for WordInk (WordInk-Setup-windows-x64.exe on a
+; release). No admin rights. It installs the same layout as the one-line
+; installer, packaging/windows/install.ps1, so either can update or remove what
+; the other installed:
 ;
-;   %APPDATA%\wordink\versions\<version>\wordink.exe
-;   %APPDATA%\wordink\current-version
-;   %APPDATA%\wordink\install.json  (the direct-install receipt)
-;   Start Menu\Programs\WordInk.lnk  (description "WordInk managed install")
+;   %LOCALAPPDATA%\Programs\WordInk\wordink.exe (+ LICENSE, THIRD_PARTY_NOTICES.md)
+;   %LOCALAPPDATA%\Programs\WordInk\install-receipt.txt  (the installed version)
+;   Start Menu\Programs\WordInk.lnk
+;   HKCU Run value "WordInk"  (the app's own Launch at login command)
 ;
-; so the app keeps updating itself from the release service afterwards. The
-; uninstaller lives outside versions\ because the updater prunes old version
-; directories. Settings, logs, history, and models stay on uninstall, as with
-; install-windows.ps1 -Uninstall.
+; It writes no install.json receipt, so the app does not try to replace itself
+; (Windows builds are unsigned for now) and only links to newer releases.
+; The uninstaller lives in %LOCALAPPDATA%\WordInk\uninstall, outside the
+; program folder that install.ps1 swaps on update. Uninstalling keeps
+; settings, history and models (%APPDATA%\wordink), as install.ps1 -Uninstall
+; does.
 ;
 ; Compile with scripts/build-windows-installer.ps1, which passes:
-;   /DAppVersion=2.3.0 /DArch=x64|arm64 /DExecutable=<wordink.exe> /DOutputDir=<dir>
+;   /DAppVersion=1.2.3 /DArch=x64|arm64 /DExecutable=<wordink.exe> /DOutputDir=<dir>
 
 #ifndef AppVersion
   #error Pass /DAppVersion=<version>
@@ -36,8 +40,7 @@
 #endif
 
 [Setup]
-; Keep this AppId forever: it names the Apps & Features entry that
-; src/windows_updater.rs keeps current after self-updates.
+; Keep this AppId forever: it names the Apps & Features entry.
 AppId={{DCAC91D8-E7C0-4CEF-A61F-A42EC0FB6BC8}
 AppName=WordInk
 AppVersion={#AppVersion}
@@ -49,15 +52,15 @@ AppUpdatesURL=https://github.com/duketopceo/WordInk/releases
 PrivilegesRequired=lowest
 ArchitecturesAllowed={#AllowedArchitectures}
 ArchitecturesInstallIn64BitMode={#AllowedArchitectures}
-DefaultDirName={userappdata}\wordink
+DefaultDirName={localappdata}\Programs\WordInk
 DisableDirPage=yes
 UsePreviousAppDir=no
 DisableProgramGroupPage=yes
 DisableReadyPage=yes
 DisableWelcomePage=yes
-UninstallFilesDir={app}\uninstall
+UninstallFilesDir={localappdata}\WordInk\uninstall
 UninstallDisplayName=WordInk
-UninstallDisplayIcon={app}\uninstall\wordink.ico
+UninstallDisplayIcon={app}\wordink.exe
 SetupIconFile=..\..\resources\windows\wordink.ico
 WizardStyle=modern
 Compression=lzma2/max
@@ -68,29 +71,34 @@ CloseApplications=yes
 RestartApplications=no
 MinVersion=10.0
 
+[Tasks]
+Name: "startup"; Description: "Start WordInk when I sign in"
+
 [Files]
-Source: "{#Executable}"; DestDir: "{app}\versions\{#AppVersion}"; DestName: "wordink.exe"; Flags: ignoreversion
-Source: "..\..\resources\windows\wordink.ico"; DestDir: "{app}\uninstall"; Flags: ignoreversion
+Source: "{#Executable}"; DestDir: "{app}"; DestName: "wordink.exe"; Flags: ignoreversion
+Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{userprograms}\WordInk"; Filename: "{app}\versions\{#AppVersion}\wordink.exe"; Parameters: "app"; WorkingDir: "{app}\versions\{#AppVersion}"; Comment: "WordInk managed install"
+Name: "{userprograms}\WordInk"; Filename: "{app}\wordink.exe"; Parameters: "app"; WorkingDir: "{app}"; Comment: "WordInk"
+
+[Registry]
+; The same command the app writes for itself (src/windows/login_item.rs).
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "WordInk"; ValueData: """{app}\wordink.exe"" app --hidden"; Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
-Filename: "{app}\versions\{#AppVersion}\wordink.exe"; Parameters: "app"; Description: "Open WordInk"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\wordink.exe"; Parameters: "app"; Description: "Open WordInk"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{app}\versions"
-Type: filesandordirs; Name: "{app}\updates"
-Type: files; Name: "{app}\current-version"
-Type: files; Name: "{app}\current-version.partial"
-Type: files; Name: "{app}\install.json"
+Type: files; Name: "{app}\install-receipt.txt"
+Type: dirifempty; Name: "{app}"
 
 [Code]
 function InitializeSetup(): Boolean;
 begin
   Result := True;
   { Installs this version whatever is installed now: versions are never
-    compared, and the self-updater follows the channel's current release. }
+    compared. }
 #if Arch == "x64"
   { The x64 build decodes on the GPU through Vulkan. Its loader ships with
     NVIDIA, AMD, and Intel graphics drivers, not with Windows. }
@@ -105,56 +113,34 @@ begin
 #endif
 end;
 
-procedure StopManagedWordInk();
+{ Stops a WordInk running from the program folder, which would hold
+  wordink.exe open. }
+procedure StopInstalledWordInk();
 var
   ResultCode: Integer;
-  Versions: String;
+  Folder: String;
 begin
-  Versions := ExpandConstant('{app}\versions\');
-  StringChangeEx(Versions, '''', '''''', True);
+  Folder := ExpandConstant('{app}\');
+  StringChangeEx(Folder, '''', '''''', True);
   Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process wordink -ErrorAction SilentlyContinue | ' +
-    'Where-Object { $_.Path -and $_.Path.StartsWith(''' + Versions + ''', [StringComparison]::OrdinalIgnoreCase) } | ' +
+    'Where-Object { $_.Path -and $_.Path.StartsWith(''' + Folder + ''', [StringComparison]::OrdinalIgnoreCase) } | ' +
     'Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-{ An earlier version left running would hold the instance lock. }
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
-  StopManagedWordInk();
+  StopInstalledWordInk();
   Result := '';
 end;
 
-{ Replaces Path with Contents through a .partial file. }
-procedure WriteAtomically(Path, Contents: String);
-var
-  Partial: String;
-begin
-  Partial := Path + '.partial';
-  DeleteFile(Partial);
-  if not SaveStringToFile(Partial, Contents, False) then
-    RaiseException('Could not write ' + Partial);
-  DeleteFile(Path);
-  if not RenameFile(Partial, Path) then
-    RaiseException('Could not write ' + Path);
-end;
-
-{ Point current-version at this version only once its files are in place,
-  then mark the install as direct so the app updates itself
-  (docs/plans/release-service.md). }
+{ install.ps1 reads the installed version from this file. }
 procedure CurStepChanged(CurStep: TSetupStep);
-var
-  Root: String;
 begin
   if CurStep = ssPostInstall then
-  begin
-    WriteAtomically(ExpandConstant('{app}\current-version'), '{#AppVersion}' + #10);
-    Root := ExpandConstant('{app}');
-    StringChangeEx(Root, '\', '\\', True);
-    WriteAtomically(ExpandConstant('{app}\install.json'),
-      '{"app":"hex","artifact":"desktop","channel":"stable","method":"direct","root":"' + Root + '"}' + #10);
-  end;
+    if not SaveStringToFile(ExpandConstant('{app}\install-receipt.txt'), '{#AppVersion}' + #13#10, False) then
+      RaiseException('Could not write ' + ExpandConstant('{app}\install-receipt.txt'));
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -163,11 +149,11 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
-    { Self-updates run from newer version directories this uninstaller did
-      not create, so stop any WordInk running from the managed layout. }
-    StopManagedWordInk();
+    StopInstalledWordInk();
+    { The app's own Launch at login setting may have written the Run value
+      even when the startup task was not chosen. }
     if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'WordInk', Command) and
-       (Pos(LowerCase(ExpandConstant('{app}\versions\')), LowerCase(Command)) > 0) then
+       (Pos(LowerCase(ExpandConstant('{app}\wordink.exe')), LowerCase(Command)) > 0) then
       RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'WordInk');
   end;
 end;

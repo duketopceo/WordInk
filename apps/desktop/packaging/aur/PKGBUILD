@@ -3,22 +3,23 @@
 # Not related to extra/hex (the hex dump tool): this is the WordInk voice
 # dictation app, so it neither provides nor conflicts with it.
 #
-# Generated from duketopceo/WordInk apps/desktop/packaging/aur by the release workflow, which
-# sets pkgver, the release manifest's linux-x64 and linux-arm64 file URLs, and
-# the checksums for each release.
+# A template: render-pkgbuild.sh fills in the version, the release tag and the
+# tarball checksums from a release's SHA256SUMS. The sources are the release's
+# wordink-<version>-linux-<x64|arm64>.tar.gz, which hold the executable, the
+# desktop entry, the icons, the systemd user unit and the license.
 pkgname=wordink-bin
-pkgver=@VERSION@
+pkgver=@PKGVER@
+_version=@VERSION@
 pkgrel=1
 pkgdesc='WordInk voice dictation, based on Hex by Anomaly: hold a key, speak, and it types (Linux beta)'
 arch=('x86_64' 'aarch64')
 url='https://github.com/duketopceo/WordInk'
 license=('MIT')
-# Linked: alsa-lib, gcc-libs, glibc, vulkan-icd-loader. Loaded at
-# runtime: the X11/Wayland/xkbcommon client libraries and OpenBLAS.
+# Linked: alsa-lib, gcc-libs, glibc, vulkan-icd-loader. Loaded at runtime: the
+# X11/Wayland/xkbcommon client libraries. The release links no system BLAS.
 depends=(
   'alsa-lib' 'curl' 'gcc-libs' 'glibc' 'libx11' 'libxcb' 'libxcursor'
-  'libxi' 'libxkbcommon' 'libxkbcommon-x11' 'openblas' 'vulkan-icd-loader'
-  'wayland'
+  'libxi' 'libxkbcommon' 'libxkbcommon-x11' 'vulkan-icd-loader' 'wayland'
 )
 optdepends=(
   'wl-clipboard: paste on Wayland'
@@ -29,32 +30,25 @@ optdepends=(
 )
 options=('!strip' '!debug')
 install=wordink-bin.install
-source=(
-  'io.github.duketopceo.wordink.desktop'
-  'wordink.service'
-  'LICENSE'
-  'io.github.duketopceo.wordink-16.png' 'io.github.duketopceo.wordink-24.png' 'io.github.duketopceo.wordink-32.png' 'io.github.duketopceo.wordink-48.png'
-  'io.github.duketopceo.wordink-64.png' 'io.github.duketopceo.wordink-128.png' 'io.github.duketopceo.wordink-256.png' 'io.github.duketopceo.wordink-512.png'
-)
-source_x86_64=("wordink-${pkgver}-linux-x64::@URL_X64@")
-source_aarch64=("wordink-${pkgver}-linux-arm64::@URL_ARM64@")
-sha256sums=('@DESKTOP_SHA256@'
-            '@SERVICE_SHA256@'
-            '@LICENSE_SHA256@'
-            @ICON_SHA256S@)
+_release="https://github.com/duketopceo/WordInk/releases/download/desktop-v${_version}"
+source_x86_64=("${_release}/wordink-${_version}-linux-x64.tar.gz")
+source_aarch64=("${_release}/wordink-${_version}-linux-arm64.tar.gz")
 sha256sums_x86_64=('@SHA256_X64@')
 sha256sums_aarch64=('@SHA256_ARM64@')
 
 package() {
   local target=x64
   [ "$CARCH" = aarch64 ] && target=arm64
-  install -Dm755 "wordink-${pkgver}-linux-${target}" "$pkgdir/usr/bin/wordink"
-  install -Dm644 io.github.duketopceo.wordink.desktop "$pkgdir/usr/share/applications/io.github.duketopceo.wordink.desktop"
+  cd "wordink-${_version}-linux-${target}"
+  install -Dm755 wordink "$pkgdir/usr/bin/wordink"
+  sed 's#@HEX_BIN@#/usr/bin/wordink#g' io.github.duketopceo.wordink.desktop > "$srcdir/wordink.desktop"
+  install -Dm644 "$srcdir/wordink.desktop" "$pkgdir/usr/share/applications/io.github.duketopceo.wordink.desktop"
   local size
   for size in 16 24 32 48 64 128 256 512; do
-    install -Dm644 "io.github.duketopceo.wordink-$size.png" \
+    install -Dm644 "icons/hicolor/${size}x${size}/apps/io.github.duketopceo.wordink.png" \
       "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/io.github.duketopceo.wordink.png"
   done
   install -Dm644 wordink.service "$pkgdir/usr/lib/systemd/user/wordink.service"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 THIRD_PARTY_NOTICES.md "$pkgdir/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES.md"
 }

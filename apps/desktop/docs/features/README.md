@@ -51,15 +51,20 @@ The other capabilities stay here until they need their own verification recipe.
 
 ## Get Ready
 
-Install WordInk with the one-line installer for your platform; see [downloads.md](../downloads.md)
-and [releasing.md](../../../../docs/releasing.md).
+Install WordInk with the installer or the one-line installer for your platform; see
+[downloads.md](../downloads.md) and [releasing.md](../../../../docs/releasing.md).
 
 ```ts
 Download WordInk
-├── GitHub Releases (duketopceo/WordInk, desktop-vX.Y.Z tags) -> one-line installers
-│   ├── Linux -> install.sh (ed25519-verified, self-updating)
-│   ├── macOS -> install-macos.sh (unsigned WordInk.app, link-only updates)
-│   └── Windows -> install.ps1 (per user, unsigned, link-only updates)
+├── GitHub Releases (duketopceo/WordInk, desktop-vX.Y.Z tags)
+│   ├── installers (version-less names, releases/latest/download/<name>)
+│   │   ├── Windows -> WordInk-Setup-windows-x64.exe (Inno Setup, per user, unsigned)
+│   │   ├── macOS -> WordInk-macos-arm64.dmg (drag to Applications, unsigned)
+│   │   └── Linux -> AppImage, .deb, .rpm (x86_64, aarch64; package-managed updates)
+│   └── one-line installers
+│       ├── Linux -> install.sh (ed25519-verified, self-updating)
+│       ├── macOS -> install-macos.sh (unsigned WordInk.app, link-only updates)
+│       └── Windows -> install.ps1 (per user, unsigned, link-only updates)
 └── Dev channel -> rolling desktop-dev prerelease (dev.json)
 ```
 
@@ -72,14 +77,17 @@ Headless Chromium renders of the WebGPU, Canvas 2D, reduced-motion and phone pat
 showed no console errors; a deterministic 60 fps capture was reviewed frame by
 frame. These checks do not exercise real speakers or a physical phone.
 
-The Windows installer is silently installed, reinstalled, installed over
-another version, and uninstalled on x64 and ARM64 runners by
-[test-windows-installer.ps1](../../scripts/test-windows-installer.ps1); no
-interactive install, SmartScreen prompt, or first launch on a real PC has been
-observed. The Linux library diagnosis has no automated check. The site's
+The one-line Windows installer is silently installed, reinstalled, installed
+over another version, and uninstalled on x64 and ARM64 runners by
+[test-windows-installer.ps1](../../scripts/test-windows-installer.ps1). The
+release workflow's `check-installers` job installs and uninstalls the Setup
+`.exe` silently on Windows x64, installs the `.deb` and AppImage on Ubuntu and
+the `.rpm` on Fedora (x86_64 and aarch64), and mounts the `.dmg` on macOS, each
+checking `wordink --version`. No interactive install, SmartScreen or Gatekeeper
+prompt, or first launch on a real PC or Mac has been observed. The Linux library diagnosis has no automated check. The site's
 platform states were captured once in headless Chromium with `?platform=`.
 
-Sources: [website](../../site/src/Download.tsx), [installer](../../packaging/windows/hex.iss),
+Sources: [website](../../site/src/Download.tsx), [installer](../../packaging/windows/wordink.iss),
 [release publisher](../../.github/release/release-service.sh),
 [Linux installer](../../.github/release/install-linux.sh), and
 [updater](../../src/updater.rs).

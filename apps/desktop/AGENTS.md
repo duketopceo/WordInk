@@ -1515,26 +1515,21 @@ required reviewer; its deployment policy admits `dev` and `production`. Rerunnin
 after an interruption is safe: the service stores files by hash and accepts
 the same version again.
 
-`wordink-setup-<version>-windows-<x64|arm64>.exe` is a per-user Inno Setup
-installer (`packaging/windows/hex.iss`, built by
-`scripts/build-windows-installer.ps1`) that installs exactly the managed
-layout `install-windows.ps1` creates, so self-updates keep working:
-`%APPDATA%\hex\versions\<version>\hex.exe`, `current-version`, the
-`install.json` direct-install receipt, and a Start Menu shortcut carrying the
-managed mark. Its uninstaller lives in `hex\uninstall` because
-updates prune old version directories; it removes every version, the
-receipt, the shortcut, and Launch at login, and keeps settings. It installs
-its version over whatever is installed (versions are never compared). Keep
-its `AppId` forever: the updater rewrites that Apps & Features entry's
-version. Release and the Windows installer workflow install, reinstall,
-install over another version with, and uninstall
-it silently on x64 and ARM64 runners (`scripts/test-windows-installer.ps1`).
-Release's `sign-windows` job Authenticode-signs both `hex.exe` through Azure
-Artifact Signing (GitHub OIDC, SHA-256, RFC 3161 timestamp), the installers
-are built around the signed bytes, and `sign-windows-installers` signs them
-(`.github/release/verify-authenticode.ps1` checks both). Compile jobs and test
-builds never hold signing credentials; until the Azure values exist in
-`release`, dev and check runs have no Windows targets. See `docs/windows-signing.md`.
+`WordInk-Setup-windows-x64.exe` (built by `scripts/build-windows-installer.ps1`
+as `wordink-setup-<version>-windows-x64.exe` from `packaging/windows/wordink.iss`,
+then renamed by the Desktop release workflow) is an unsigned per-user Inno
+Setup installer, no admin. It installs the same layout as
+`packaging/windows/install.ps1`: `%LOCALAPPDATA%\Programs\WordInk\wordink.exe`,
+its `install-receipt.txt`, the `WordInk` Start Menu shortcut and the HKCU Run
+value (optional task, on by default). It writes no `install.json`, so the app
+links to newer releases and never replaces itself (Authenticode signing is
+deferred). Its uninstaller lives in `%LOCALAPPDATA%\WordInk\uninstall`,
+outside the folder `install.ps1` swaps on update, and keeps settings. Keep its
+`AppId` forever. The release workflow's `check-installers` job installs and
+uninstalls it silently on `windows-latest`. The `.dmg`
+(`packaging/macos/make-dmg.sh`), AppImage (`packaging/linux/make-appimage.sh`)
+and `.deb`/`.rpm` (`scripts/package-linux.sh`, nfpm) are built and checked the
+same way; see `docs/releasing.md` at the repository root.
 
 Run `scripts/build-linux.sh` on x86_64 or aarch64 Linux (then
 `scripts/package-linux.sh` for the `.deb` and `.rpm`) and `scripts/build-windows.sh`

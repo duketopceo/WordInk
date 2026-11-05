@@ -31,14 +31,19 @@ app and **Disabled** when it does nothing.
 
 x86_64 PCs need a 2013 or newer processor with AVX2 (Intel Haswell / AMD Excavator or later); on an older processor WordInk shows a message and quits instead of starting.
 
-Install with the one-line PowerShell installer from the latest release
-(see [downloads.md](downloads.md) and [releasing.md](../../../docs/releasing.md)):
+Download and run
+[WordInk-Setup-windows-x64.exe](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-Setup-windows-x64.exe)
+(from the first release after 1.0.0): a per-user installer with a Start Menu
+shortcut and an uninstaller in Apps & Features. Or install with the one-line
+PowerShell installer from the latest release (see [downloads.md](downloads.md)
+and [releasing.md](../../../docs/releasing.md)); both install the same layout in
+`%LOCALAPPDATA%\Programs\WordInk`:
 
 ```powershell
 irm https://github.com/duketopceo/WordInk/releases/latest/download/install.ps1 | iex
 ```
 
-It installs per user, needs no
+Either way it installs per user, needs no
 administrator rights, and is **unsigned**: SmartScreen may say it protected your
 PC; choose **More info**, then **Run anyway**. WordInk's first run downloads a
 speech model. The app does not update itself on Windows; it links to the newest
