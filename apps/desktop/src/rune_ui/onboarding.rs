@@ -351,7 +351,7 @@ fn probe_hardware(ui: &mut Ui) {
         crate::hardware::start();
         ui.engine_setup.probed = crate::hardware::cached();
     }
-    let Some(probed) = ui.engine_setup.probed else {
+    let Some(probed) = ui.engine_setup.probed.clone() else {
         return;
     };
     let waiting = ui

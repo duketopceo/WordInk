@@ -46,6 +46,8 @@ release.
 
 **x64** decodes on the GPU through Vulkan and needs a current NVIDIA, AMD, or
 Intel graphics driver (it supplies `vulkan-1.dll`). **ARM64** decodes on the CPU.
+Onboarding names the GPU it found and asks for a driver update only when
+`vulkan-1.dll` is missing from the System32 directory.
 Uninstalling keeps settings, logs, history, and models in `%APPDATA%\wordink`.
 
 ## Known Issues

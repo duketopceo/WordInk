@@ -829,10 +829,24 @@ enum FirstRun {
 
 /// What a computer with (or without) a GPU probes as, for the engine step.
 fn engine_probe(gpu: bool) -> crate::hardware::Probed {
+    use crate::hardware::gpu::{GpuStatus, GpuSummary, Vendor};
     use crate::hardware::{CpuFeatures, GpuApi, Probe, Probed};
     Probed {
         probe: Probe {
             gpu_api: if gpu { GpuApi::Vulkan } else { GpuApi::None },
+            gpu: if gpu {
+                GpuSummary {
+                    status: GpuStatus::Ready,
+                    name: Some("NVIDIA GeForce RTX 4060 Laptop GPU".into()),
+                    vendor: Vendor::Nvidia,
+                }
+            } else {
+                GpuSummary {
+                    status: GpuStatus::None,
+                    name: None,
+                    vendor: Vendor::Other,
+                }
+            },
             vram_or_unified_gb: if gpu { 48.0 } else { 0.0 },
             ram_gb: if gpu { 64.0 } else { 16.0 },
             cpu_features: CpuFeatures {

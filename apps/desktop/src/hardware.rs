@@ -2,10 +2,13 @@
 //!
 //! [`probe`] reads the GPU devices ggml reports (the same list Hex's Auto
 //! device logic uses, minus any GPU that hung before: `gpu_health`), the
-//! memory, and the CPU features. [`recommend`] is a pure function from that
-//! to one primary choice and one alternative, for onboarding to show.
+//! operating system's own view of the GPU and its Vulkan loader ([`gpu`]),
+//! the memory, and the CPU features. [`recommend`] is a pure function from
+//! that to one primary choice and one alternative, for onboarding to show.
 
 use std::sync::Mutex;
+
+pub mod gpu;
 
 use crate::transcription::cloud::Provider;
 
@@ -33,9 +36,11 @@ pub struct CpuFeatures {
     pub avx2: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Probe {
     pub gpu_api: GpuApi,
+    /// The GPU's name and whether it is ready, for onboarding's line.
+    pub gpu: gpu::GpuSummary,
     /// The best GPU's memory: VRAM, or the unified pool on Apple silicon.
     /// 0 when unreported.
     pub vram_or_unified_gb: f64,
@@ -68,6 +73,8 @@ pub enum Reason {
     HasKey,
     NoAvx2,
     NoGpu,
+    /// A hardware GPU without a Vulkan driver (`gpu::GpuStatus::NeedsDriver`).
+    NeedsDriver,
     SoftwareGpu,
     LowMemory,
     FitsLocal,
@@ -153,6 +160,9 @@ pub fn recommend(probe: &Probe, has_groq_key: bool) -> Recommendation {
     if probe.cpu_features.x86 && !probe.cpu_features.avx2 {
         return cloud(Reason::NoAvx2);
     }
+    if probe.gpu.status == gpu::GpuStatus::NeedsDriver {
+        return cloud(Reason::NeedsDriver);
+    }
     match probe.gpu_api {
         GpuApi::None => return cloud(Reason::NoGpu),
         GpuApi::Software => return cloud(Reason::SoftwareGpu),
@@ -169,7 +179,7 @@ pub fn recommend(probe: &Probe, has_groq_key: bool) -> Recommendation {
 }
 
 /// What the probe found, with whether a Groq key is already set.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Probed {
     pub probe: Probe,
     pub has_groq_key: bool,
@@ -186,29 +196,63 @@ impl Probed {
 /// thread, never the UI's.
 pub fn probe() -> Probe {
     // ggml's own device list, the one Auto uses, minus a GPU that hung or
-    // ran slower than the CPU under this driver (`gpu_health`).
+    // ran slower than the CPU under this driver (`gpu_health`). The backends
+    // start the way a model load starts them (on Windows inside the GPU
+    // crash guard), so the probe never sees a different list than the load.
     #[cfg(any(target_os = "linux", target_os = "windows"))]
-    let devices = crate::transcription::gpu_health::gpus()
-        .into_iter()
-        .filter(|device| !crate::transcription::gpu_health::failed(device))
-        .map(|device| RawDevice {
-            description: device.description.clone(),
-            kind: device.kind.clone(),
-            gpu: true,
-            memory_bytes: device.memory_total,
-        })
-        .collect::<Vec<_>>();
+    let devices = match crate::transcription::local_transcriber::init_backends() {
+        Ok(_) => crate::transcription::gpu_health::gpus()
+            .into_iter()
+            .filter(|device| !crate::transcription::gpu_health::failed(device))
+            .map(|device| RawDevice {
+                description: device.description.clone(),
+                kind: device.kind.clone(),
+                gpu: true,
+                memory_bytes: device.memory_total,
+            })
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "could not start the GPU backends for the hardware probe"
+            );
+            Vec::new()
+        }
+    };
     // macOS runs on Apple silicon only: Metal with unified memory.
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     let devices = vec![RawDevice {
-        description: "Apple GPU".into(),
+        description: String::new(),
         kind: "metal".into(),
         gpu: true,
         memory_bytes: 0,
     }];
-    let (gpu_api, vram_or_unified_gb) = classify(&devices);
+    let observed = gpu::Observed {
+        os: gpu::Os::current(),
+        gpu_build: cfg!(any(
+            target_os = "macos",
+            target_os = "linux",
+            all(target_os = "windows", target_arch = "x86_64")
+        )),
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        loader: gpu::loader_present(),
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        loader: false,
+        #[cfg(target_os = "linux")]
+        icds: gpu::icds_installed(),
+        #[cfg(not(target_os = "linux"))]
+        icds: true,
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        adapters: gpu::adapters(),
+        #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+        adapters: Vec::new(),
+        ggml: devices,
+    };
+    tracing::info!(?observed, "GPU observation");
+    let (gpu, gpu_api, vram_or_unified_gb) = gpu::assess(&observed);
     Probe {
         gpu_api,
+        gpu,
         vram_or_unified_gb,
         ram_gb: system_ram_gb().unwrap_or(0.0),
         cpu_features: CpuFeatures {
@@ -274,9 +318,10 @@ pub fn start() {
 
 /// The probe's answer, once [`start`]'s thread has it.
 pub fn cached() -> Option<Probed> {
-    *PROBED
+    PROBED
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
 }
 
 #[cfg(test)]
@@ -287,8 +332,18 @@ mod tests {
     const LOCAL: Choice = Choice::Local(PARAKEET_V3);
 
     fn probe(gpu_api: GpuApi, vram: f64, ram: f64, x86: bool, avx2: bool) -> Probe {
+        let status = match gpu_api {
+            GpuApi::Vulkan | GpuApi::Metal => gpu::GpuStatus::Ready,
+            GpuApi::Software => gpu::GpuStatus::Software,
+            GpuApi::None => gpu::GpuStatus::None,
+        };
         Probe {
             gpu_api,
+            gpu: gpu::GpuSummary {
+                status,
+                name: None,
+                vendor: gpu::Vendor::Other,
+            },
             vram_or_unified_gb: vram,
             ram_gb: ram,
             cpu_features: CpuFeatures { x86, avx2 },
@@ -389,6 +444,28 @@ mod tests {
                 Reason::FitsLocal,
             ),
         ];
+        let mut needs_driver = probe(NoGpu, 0.0, 32.0, true, true);
+        needs_driver.gpu.status = gpu::GpuStatus::NeedsDriver;
+        let mut driver_found = probe(Vulkan, 0.0, 16.0, true, true);
+        driver_found.gpu.status = gpu::GpuStatus::DriverFound;
+        let cases = cases.into_iter().chain([
+            (
+                "a GPU without a Vulkan driver",
+                needs_driver,
+                false,
+                GROQ,
+                LOCAL,
+                Reason::NeedsDriver,
+            ),
+            (
+                "a GPU whose driver is installed but ggml did not list",
+                driver_found,
+                false,
+                LOCAL,
+                GROQ,
+                Reason::FitsLocal,
+            ),
+        ]);
         for (name, probe, key, primary, alternative, reason) in cases {
             let got = recommend(&probe, key);
             assert_eq!(
