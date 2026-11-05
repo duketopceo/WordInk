@@ -404,6 +404,11 @@ const KEYS: &[Key] = &[
         "Labs: a summary of retained dictations at the top of History, and wordink history stats",
     ),
     key(
+        "labs.neural_engine",
+        Kind::Bool,
+        "Labs: Parakeet v3 on the Apple Neural Engine in the Local transcription picker (Linux on Apple silicon, with the mlx-omarchy runtime); stays on while it is the dictation model",
+    ),
+    key(
         "labs.recent_dictations",
         Kind::Bool,
         "Labs: a Copy Recent Dictation submenu in the menu bar that copies one of the last five dictations (macOS)",
@@ -558,6 +563,11 @@ const KEYS: &[Key] = &[
             "gateway",
         ]),
         "Which engine dictation uses: auto (Groq when a key is set, else the local model), local, or a cloud provider. Keys are set with `wordink keys set <provider>`",
+    ),
+    key(
+        "local_cloud_fallback",
+        Kind::Choice(&["none", "groq", "openrouter"]),
+        "If a local dictation fails, retry that clip once on this cloud provider: none (default, audio stays on this computer), groq or openrouter. Needs the provider's key (`wordink keys set <provider>`); meetings never fall back",
     ),
     optional(
         "engine_model",
@@ -1025,6 +1035,11 @@ pub fn apply(
         "labs.standalone_special_keys" => candidate.repair_special_keys(),
         "labs.parakeet_ultra" if !candidate.labs.parakeet_ultra => {
             if let Some(why) = crate::labs::Feature::ParakeetUltra.off_refusal(settings) {
+                return Err(invalid(name, why));
+            }
+        }
+        "labs.neural_engine" if !candidate.labs.neural_engine => {
+            if let Some(why) = crate::labs::Feature::NeuralEngine.off_refusal(settings) {
                 return Err(invalid(name, why));
             }
         }
@@ -2030,6 +2045,24 @@ mod tests {
         base.cancel_hotkey = Some(base.capture.hotkey.clone());
         let refused = apply(&base, "capture.enabled", "true", &rules()).unwrap_err();
         assert_eq!(refused.code, "shortcut-in-use");
+    }
+
+    #[test]
+    fn the_local_cloud_fallback_is_off_by_default_and_set_from_the_cli() {
+        use crate::transcription::cloud::LocalFallback;
+        let defaults = AppSettings::default();
+        assert_eq!(defaults.local_cloud_fallback, LocalFallback::None);
+        let set = |settings: &AppSettings, value: &str| {
+            apply(settings, "local_cloud_fallback", value, &rules())
+        };
+        let on = set(&defaults, "groq").unwrap().settings;
+        assert_eq!(on.local_cloud_fallback, LocalFallback::Groq);
+        let off = set(&on, "none").unwrap().settings;
+        assert_eq!(off.local_cloud_fallback, LocalFallback::None);
+        assert_eq!(
+            set(&on, "openai").unwrap_err().code,
+            "invalid-value"
+        );
     }
 
     #[test]

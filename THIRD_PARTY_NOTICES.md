@@ -52,6 +52,15 @@ re-laying-out tensors, and quantized variants also store them at reduced
 numeric precision. The weights are not retrained or fine-tuned. The weights are
 provided as-is, without warranties, as the license states.
 
+### Parakeet v3 on the Apple Neural Engine (optional, Linux on Apple silicon)
+
+The same Parakeet TDT 0.6B v3 weights as above, run unmodified by a separately
+installed `mlx-omarchy` runtime (MIT License) on the Apple Neural Engine, whose
+kernel driver and userspace are `GPL-2.0-only OR MIT`. WordInk executes the
+runtime as its own process and does not bundle, link, or redistribute the
+runtime, the driver, or the weights; the user downloads the reference model
+with the runtime's own `download` command.
+
 ### Whisper large-v3-turbo
 
 By OpenAI. Its model card lists the MIT license (the Whisper code is MIT; some

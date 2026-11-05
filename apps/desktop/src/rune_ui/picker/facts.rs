@@ -239,6 +239,7 @@ pub(super) fn blurb(def: &ModelDefinition) -> &'static str {
         M::ParakeetV2 => tr("The English model before Parakeet Unified"),
         M::ParakeetV3 => tr("25 European languages, and it hears which one you speak"),
         M::ParakeetUltra => tr("Parakeet v3, retrained for fewer wrong words"),
+        M::ParakeetV3Ane => tr("25 European languages, and it hears which one you speak"),
         M::Qwen3Asr06B => tr("Chinese and 29 more, and it reads your vocabulary"),
         M::QwenCleoAsr17B => tr("Egyptian Arabic, mixed with English"),
         M::IvritWhisperLargeV3Turbo => tr("Whisper, tuned for Hebrew"),

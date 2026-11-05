@@ -19,7 +19,7 @@
 //! Gate a feature where its work starts (the worker, thread, or capture
 //! that does it), not only where its UI shows.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use clap::Subcommand;
 use color_eyre::Result;
@@ -91,10 +91,11 @@ pub enum Feature {
     SkipPauses,
     StopWhenCallEnds,
     OutputFixes,
+    NeuralEngine,
 }
 
 impl Feature {
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -127,6 +128,7 @@ impl Feature {
         Self::SkipPauses,
         Self::StopWhenCallEnds,
         Self::OutputFixes,
+        Self::NeuralEngine,
     ];
 
     /// The features this OS and build have.
@@ -178,6 +180,7 @@ impl Feature {
             | Self::ParakeetUltra
             | Self::StandaloneSpecialKeys
             | Self::HistoryStats
+            | Self::NeuralEngine
             | Self::RecentDictations
             | Self::SkipPauses
             | Self::StopWhenCallEnds
@@ -185,15 +188,20 @@ impl Feature {
         }
     }
 
-    /// Why turning this feature off is refused now: Parakeet Ultra stays on
-    /// while it is the dictation model, until a switch to another succeeds.
+    /// Why turning this feature off is refused now: Parakeet Ultra and the
+    /// Neural Engine model stay on while they are the dictation model, until
+    /// a switch to another succeeds.
     pub fn off_refusal(self, settings: &AppSettings) -> Option<&'static str> {
-        (self == Self::ParakeetUltra
-            && settings.transcription.model
-                == crate::transcription::models::TranscriptionModelId::ParakeetUltra)
-            .then_some(
+        use crate::transcription::models::TranscriptionModelId;
+        let model = settings.transcription.model;
+        if self == Self::ParakeetUltra && model == TranscriptionModelId::ParakeetUltra {
+            return Some(
                 "Parakeet Ultra is the dictation model; choose another model before turning it off",
-            )
+            );
+        }
+        (self == Self::NeuralEngine && model == TranscriptionModelId::ParakeetV3Ane).then_some(
+            "Parakeet v3 (Neural Engine) is the dictation model; choose another model before turning it off",
+        )
     }
 
     /// The feature `hex settings` key `key` switches (its toggle, or
@@ -246,6 +254,7 @@ impl Feature {
             | Self::HistoryStats
             | Self::OutputFixes
             | Self::FillerWords => true,
+            Self::NeuralEngine => cfg!(all(target_os = "linux", target_arch = "aarch64")),
         }
     }
 
@@ -281,6 +290,7 @@ impl Feature {
             Self::StandaloneSpecialKeys => "special-keys",
             Self::HistoryStats => "history-stats",
             Self::RecentDictations => "recent-dictations",
+            Self::NeuralEngine => "neural-engine",
             Self::SkipPauses => "skip-pauses",
             Self::StopWhenCallEnds => "stop-when-call-ends",
             Self::OutputFixes => "output-fixes",
@@ -319,6 +329,7 @@ impl Feature {
             Self::StandaloneSpecialKeys => "labs.standalone_special_keys",
             Self::HistoryStats => "labs.history_stats",
             Self::RecentDictations => "labs.recent_dictations",
+            Self::NeuralEngine => "labs.neural_engine",
             Self::SkipPauses => "labs.skip_pauses",
             Self::StopWhenCallEnds => "labs.stop_when_call_ends",
             Self::OutputFixes => "labs.output_fixes",
@@ -399,6 +410,9 @@ impl Feature {
             Self::RecentDictations => {
                 "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"
             }
+            Self::NeuralEngine => {
+                "Offer Parakeet v3 on the Apple Neural Engine (Linux on Apple silicon, with the mlx-omarchy runtime) in the Local transcription picker"
+            }
             Self::SkipPauses => {
                 "Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner"
             }
@@ -449,6 +463,7 @@ impl Feature {
             Self::StandaloneSpecialKeys => settings.labs.standalone_special_keys,
             Self::HistoryStats => settings.labs.history_stats,
             Self::RecentDictations => settings.labs.recent_dictations,
+            Self::NeuralEngine => settings.labs.neural_engine,
             Self::SkipPauses => settings.labs.skip_pauses,
             Self::StopWhenCallEnds => settings.labs.stop_when_call_ends,
             Self::OutputFixes => settings.labs.output_fixes,
@@ -486,6 +501,7 @@ impl Feature {
             &mut labs.tap_or_hold,
             &mut labs.benchmark_details,
             &mut labs.parakeet_ultra,
+            &mut labs.neural_engine,
             &mut labs.standalone_special_keys,
             &mut labs.history_stats,
             &mut labs.recent_dictations,
@@ -536,6 +552,7 @@ impl Feature {
             Self::ParakeetUltra => settings.labs.parakeet_ultra = on,
             Self::HistoryStats => settings.labs.history_stats = on,
             Self::RecentDictations => settings.labs.recent_dictations = on,
+            Self::NeuralEngine => settings.labs.neural_engine = on,
             Self::SkipPauses => settings.labs.skip_pauses = on,
             Self::StopWhenCallEnds => settings.labs.stop_when_call_ends = on,
             Self::OutputFixes => settings.labs.output_fixes = on,
@@ -549,39 +566,43 @@ impl Feature {
 }
 
 /// Set once this process knows its settings.
-const KNOWN: u32 = 1;
-const LIVE_TEXT: u32 = 1 << 1;
-const LIVE_CHAPTERS: u32 = 1 << 2;
-const PLAYGROUND: u32 = 1 << 3;
-const VOCABULARY_BIASING: u32 = 1 << 4;
-const MOUSE_SHORTCUTS: u32 = 1 << 5;
-const UNLOAD_IDLE: u32 = 1 << 6;
-const KEEP_ON_CLIPBOARD: u32 = 1 << 7;
-const COPY_ONLY: u32 = 1 << 8;
-const SPOKEN_FORMATTING: u32 = 1 << 9;
-const FILLER_WORDS: u32 = 1 << 10;
-const SUBTITLE_EXPORT: u32 = 1 << 11;
-const SMART_SPACING: u32 = 1 << 12;
-const SPOKEN_SYMBOLS: u32 = 1 << 13;
-const SIDED_CHORDS: u32 = 1 << 14;
-const TAP_OR_HOLD: u32 = 1 << 15;
-const SKIP_PAUSES: u32 = 1 << 16;
-const PARAKEET_ULTRA: u32 = 1 << 17;
-const HISTORY_STATS: u32 = 1 << 18;
-const RECENT_DICTATIONS: u32 = 1 << 19;
-const STOP_WHEN_CALL_ENDS: u32 = 1 << 20;
+const KNOWN: u64 = 1;
+const LIVE_TEXT: u64 = 1 << 1;
+const LIVE_CHAPTERS: u64 = 1 << 2;
+const PLAYGROUND: u64 = 1 << 3;
+const VOCABULARY_BIASING: u64 = 1 << 4;
+const MOUSE_SHORTCUTS: u64 = 1 << 5;
+const UNLOAD_IDLE: u64 = 1 << 6;
+const KEEP_ON_CLIPBOARD: u64 = 1 << 7;
+const COPY_ONLY: u64 = 1 << 8;
+const SPOKEN_FORMATTING: u64 = 1 << 9;
+const FILLER_WORDS: u64 = 1 << 10;
+const SUBTITLE_EXPORT: u64 = 1 << 11;
+const SMART_SPACING: u64 = 1 << 12;
+const SPOKEN_SYMBOLS: u64 = 1 << 13;
+const SIDED_CHORDS: u64 = 1 << 14;
+const TAP_OR_HOLD: u64 = 1 << 15;
+const SKIP_PAUSES: u64 = 1 << 16;
+const PARAKEET_ULTRA: u64 = 1 << 17;
+const HISTORY_STATS: u64 = 1 << 18;
+const RECENT_DICTATIONS: u64 = 1 << 19;
+const STOP_WHEN_CALL_ENDS: u64 = 1 << 20;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
-const MINUTES_SHIFT: u32 = 21;
+const MINUTES_SHIFT: u64 = 21;
+const MINUTES_MASK: u64 = (1 << 11) - 1;
+/// The Neural Engine model's switch sits above the minutes: the 32 bits below
+/// are full.
+const NEURAL_ENGINE: u64 = 1 << 32;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
-static STATE: AtomicU32 = AtomicU32::new(0);
+static STATE: AtomicU64 = AtomicU64::new(0);
 
-fn on(bit: u32) -> bool {
+fn on(bit: u64) -> bool {
     state() & bit != 0
 }
 
-fn state() -> u32 {
+fn state() -> u64 {
     match STATE.load(Ordering::Acquire) {
         0 => {
             let saved = encode(&AppSettings::saved_labs());
@@ -683,6 +704,12 @@ pub fn parakeet_ultra() -> bool {
     on(PARAKEET_ULTRA)
 }
 
+/// The Neural Engine Parakeet model may be offered (read wherever a model is
+/// listed, chosen, or run).
+pub fn neural_engine() -> bool {
+    on(NEURAL_ENGINE)
+}
+
 /// History's summary of retained dictations and `hex history stats` (read
 /// when the History pane reloads and when the command starts).
 pub fn history_stats() -> bool {
@@ -716,7 +743,7 @@ pub fn stop_when_call_ends() -> bool {
 pub fn unload_idle() -> Option<std::time::Duration> {
     let state = state();
     (state & UNLOAD_IDLE != 0)
-        .then(|| std::time::Duration::from_secs(u64::from(state >> MINUTES_SHIFT) * 60))
+        .then(|| std::time::Duration::from_secs(((state >> MINUTES_SHIFT) & MINUTES_MASK) * 60))
 }
 
 /// Records the switches the loaded or saved settings hold.
@@ -724,7 +751,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     STATE.store(encode(settings), Ordering::Release);
 }
 
-fn encode(settings: &LabsSettings) -> u32 {
+fn encode(settings: &LabsSettings) -> u64 {
     let policy = crate::policy::Policy::current();
     encode_where(settings, |feature| {
         feature.shipped() && policy.labs_lock(feature).is_none()
@@ -733,8 +760,8 @@ fn encode(settings: &LabsSettings) -> u32 {
 
 /// The switches `settings` hold for the features `reaches` admits; the
 /// rest read off while their saved setting stays as it is.
-fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u32 {
-    let minutes = settings.unload_idle_minutes.clamp(1, 24 * 60) << MINUTES_SHIFT;
+fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u64 {
+    let minutes = u64::from(settings.unload_idle_minutes.clamp(1, 24 * 60)) << MINUTES_SHIFT;
     [
         (Feature::LiveText, settings.live_text, LIVE_TEXT),
         (Feature::LiveChapters, settings.live_chapters, LIVE_CHAPTERS),
@@ -790,6 +817,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             settings.recent_dictations,
             RECENT_DICTATIONS,
         ),
+        (Feature::NeuralEngine, settings.neural_engine, NEURAL_ENGINE),
         (Feature::SkipPauses, settings.skip_pauses, SKIP_PAUSES),
         (
             Feature::StopWhenCallEnds,
@@ -1172,6 +1200,21 @@ mod tests {
         assert_ne!(state & RECENT_DICTATIONS, 0);
         assert_eq!(state & HISTORY_STATS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn neural_engine_is_its_own_bit_off_by_default_and_listed_only_on_linux_arm() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & NEURAL_ENGINE, 0);
+        labs.neural_engine = true;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & NEURAL_ENGINE, 0);
+        assert_eq!(state & PARAKEET_ULTRA, 0);
+        assert_eq!(
+            Feature::NeuralEngine.on_this_os(),
+            cfg!(all(target_os = "linux", target_arch = "aarch64"))
+        );
+        assert_eq!(Feature::NeuralEngine.name(), "neural-engine");
     }
 
     #[test]

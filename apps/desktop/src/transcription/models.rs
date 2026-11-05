@@ -44,6 +44,8 @@ pub enum TranscriptionModelId {
     UnderdogBark3Pro,
     UnderdogBark3Clean,
     ParakeetUltra,
+    /// Parakeet v3 on the Apple Neural Engine (Linux on Apple silicon).
+    ParakeetV3Ane,
     Nemotron35Asr,
     GigaAmV3,
     AppleSpeech,
@@ -78,6 +80,7 @@ impl TranscriptionModelId {
             Self::UnderdogBark3Pro => "underdog_bark_3_pro",
             Self::UnderdogBark3Clean => "underdog_bark_3_clean",
             Self::ParakeetUltra => "parakeet_ultra",
+            Self::ParakeetV3Ane => "parakeet_v3_ane",
             Self::Nemotron35Asr => "nemotron_3_5_asr",
             Self::GigaAmV3 => "gigaam_v3",
             Self::AppleSpeech => "apple_speech",
@@ -89,11 +92,14 @@ impl TranscriptionModelId {
         matches!(self, Self::Custom(_))
     }
 
-    /// A model behind its own Labs toggle: an import, or Parakeet Ultra. A
-    /// saved choice of one stays saved while it can't run, and the listener
-    /// runs a fallback (`custom_models::runnable`).
+    /// A model behind its own Labs toggle: an import, Parakeet Ultra, or the
+    /// Neural Engine model. A saved choice of one stays saved while it can't
+    /// run, and the listener runs a fallback (`custom_models::runnable`).
     pub const fn is_labs_gated(self) -> bool {
-        matches!(self, Self::Custom(_) | Self::ParakeetUltra)
+        matches!(
+            self,
+            Self::Custom(_) | Self::ParakeetUltra | Self::ParakeetV3Ane
+        )
     }
 }
 
@@ -114,6 +120,7 @@ impl FromStr for TranscriptionModelId {
             "underdog_bark_3_pro" => Ok(Self::UnderdogBark3Pro),
             "underdog_bark_3_clean" => Ok(Self::UnderdogBark3Clean),
             "parakeet_ultra" => Ok(Self::ParakeetUltra),
+            "parakeet_v3_ane" => Ok(Self::ParakeetV3Ane),
             "nemotron_3_5_asr" => Ok(Self::Nemotron35Asr),
             "gigaam_v3" => Ok(Self::GigaAmV3),
             "apple_speech" => Ok(Self::AppleSpeech),
@@ -250,8 +257,21 @@ impl ModelDefinition {
             (ModelRuntime::Gguf(_), TranscriptionModelId::ParakeetUltra) => {
                 crate::labs::parakeet_ultra()
             }
+            (ModelRuntime::Gguf(_), TranscriptionModelId::ParakeetV3Ane) => {
+                crate::transcription::ane::offer() == crate::transcription::ane::Offer::Ready
+            }
             (ModelRuntime::Gguf(_), _) => true,
         }
+    }
+
+    /// Whether the picker lists this model: every available one, and the
+    /// Neural Engine model while its reference model still needs downloading
+    /// (its card says so and offers no Use).
+    pub fn listed(&self) -> bool {
+        self.available()
+            || (self.id == TranscriptionModelId::ParakeetV3Ane
+                && crate::transcription::ane::offer()
+                    == crate::transcription::ane::Offer::NotPrepared)
     }
 
     pub fn supports_language(&self, language: &str) -> bool {
@@ -331,6 +351,10 @@ impl ModelDefinition {
     /// checks the model itself before it adds the list to a run). Rewriting
     /// and search use the vocabulary with every model.
     pub fn vocabulary_use(&self) -> VocabularyUse {
+        // The Neural Engine runtime has no biasing input.
+        if self.id == TranscriptionModelId::ParakeetV3Ane {
+            return VocabularyUse::None;
+        }
         match self.runtime {
             ModelRuntime::Gguf(artifact) if artifact.architecture == "parakeet" => {
                 VocabularyUse::Bias
@@ -531,6 +555,24 @@ pub const MODELS: &[ModelDefinition] = &[
         license: "CC-BY-4.0",
     },
     ModelDefinition {
+        id: TranscriptionModelId::ParakeetV3Ane,
+        name: "Parakeet v3 (Neural Engine)",
+        // Warm, on a 127 s clip on an Apple M1 Max: the Neural Engine ran it
+        // 43x against the GPU's ~34x on a 40 s clip. On a 3 s dictation the
+        // GPU is faster, so it keeps v3's figure for the label.
+        realtime: "~43x",
+        // The same model and weights as Parakeet v3.
+        word_error_rate: Some(1.94),
+        streams: false,
+        // Shares Parakeet v3's artifact: it is the GPU fallback's model, and
+        // the Neural Engine runtime brings its own reference model.
+        runtime: ModelRuntime::Gguf(&PARAKEET_V3_ARTIFACT),
+        languages: PARAKEET_V3_LANGUAGES,
+        accepts_language_hint: false,
+        supports_language_detection: false,
+        license: "CC-BY-4.0",
+    },
+    ModelDefinition {
         id: TranscriptionModelId::Nemotron35Asr,
         name: "Nemotron 3.5 ASR",
         // On apollo's Vulkan GPU it ran 0.55 to 0.97 times as fast as
@@ -685,7 +727,7 @@ pub(crate) fn picker_models(
     let recommended = choices_for_runtime(language);
     let others = MODELS
         .iter()
-        .filter(|model| model.available())
+        .filter(|model| model.listed())
         .filter(|model| recommended.iter().all(|choice| choice.model.id != model.id));
     let (supporting, switching): (Vec<_>, Vec<_>) =
         others.partition(|model| model.supports_language(language));
@@ -1411,6 +1453,58 @@ mod tests {
     }
 
     #[test]
+    fn the_neural_engine_model_is_offered_only_with_its_lab_and_a_ready_runtime() {
+        use crate::transcription::ane::{Offer, offer};
+        let ane = definition(TranscriptionModelId::ParakeetV3Ane);
+        assert_eq!(ane.available(), offer() == Offer::Ready);
+        assert_eq!(ane.listed(), offer() != Offer::Hidden);
+        assert!(!ane.streams && !ane.accepts_language_hint);
+        assert_eq!(ane.languages, PARAKEET_V3_LANGUAGES);
+        assert!(TranscriptionModelId::ParakeetV3Ane.is_labs_gated());
+        for language in [AUTO_LANGUAGE, "en", "de"] {
+            assert!(
+                choices_for_runtime(language)
+                    .iter()
+                    .all(|choice| choice.model.id != ane.id),
+                "the Neural Engine model is never recommended ({language})"
+            );
+        }
+        // Off, or without a runtime, it is not in the picker at all; a saved
+        // choice of it survives and the listener runs the fallback.
+        let saved = TranscriptionSelection {
+            model: ane.id,
+            language: "de".into(),
+        };
+        assert!(validate_saved(&saved).is_ok());
+        if !ane.available() {
+            assert!(validate(&saved).is_err());
+            assert_eq!(
+                super::super::custom_models::runnable(&saved),
+                super::super::custom_models::fallback()
+            );
+        }
+        if offer() == Offer::Hidden {
+            assert!(
+                picker_models("en")
+                    .iter()
+                    .all(|(model, _)| model.id != ane.id)
+            );
+        }
+        let mut settings = crate::app_settings::AppSettings::default();
+        assert!(
+            crate::labs::Feature::NeuralEngine
+                .off_refusal(&settings)
+                .is_none()
+        );
+        settings.transcription = saved;
+        assert!(
+            crate::labs::Feature::NeuralEngine
+                .off_refusal(&settings)
+                .is_some()
+        );
+    }
+
+    #[test]
     fn hebrew_recommends_the_ivrit_fine_tune_with_its_hint() {
         use Recommendation::{Recommended, Vocabulary};
         use TranscriptionModelId::{IvritWhisperLargeV3Turbo, WhisperLargeV3Turbo};
@@ -1705,6 +1799,7 @@ mod tests {
                 "underdog_bark_3_clean",
             ),
             (TranscriptionModelId::ParakeetUltra, "parakeet_ultra"),
+            (TranscriptionModelId::ParakeetV3Ane, "parakeet_v3_ane"),
             (TranscriptionModelId::Nemotron35Asr, "nemotron_3_5_asr"),
             (TranscriptionModelId::GigaAmV3, "gigaam_v3"),
             (TranscriptionModelId::AppleSpeech, "apple_speech"),

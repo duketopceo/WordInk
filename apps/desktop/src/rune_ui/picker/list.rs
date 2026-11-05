@@ -201,7 +201,10 @@ fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
         );
     }
     // A catalog model behind its own Labs toggle says so.
-    if def.id == TranscriptionModelId::ParakeetUltra {
+    if matches!(
+        def.id,
+        TranscriptionModelId::ParakeetUltra | TranscriptionModelId::ParakeetV3Ane
+    ) {
         title = title.child(Badge::new(tr("Labs")).build(p.k));
     }
     // The licence the weights are published under, as its source names it.
@@ -219,6 +222,12 @@ fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
         copy = copy.child(line("blurb", blurb.to_owned(), p.muted()));
     }
     copy = copy.child(line("facts", facts_line(entry, language), p.faint()));
+    // Why the Neural Engine model cannot be used yet, or is warming.
+    if def.id == TranscriptionModelId::ParakeetV3Ane
+        && let Some(note) = crate::transcription::ane::card_note()
+    {
+        copy = copy.child(line("ane-note", tr(note).to_owned(), p.faint()));
+    }
     if !entry.supports && !def.id.is_custom() {
         copy = copy.child(line(
             "language-switch",
@@ -231,7 +240,9 @@ fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
     }
     if matches!(
         def.id,
-        TranscriptionModelId::ParakeetV3 | TranscriptionModelId::ParakeetUltra
+        TranscriptionModelId::ParakeetV3
+            | TranscriptionModelId::ParakeetUltra
+            | TranscriptionModelId::ParakeetV3Ane
     ) && language != AUTO_LANGUAGE
     {
         copy = copy.child(line(
@@ -300,8 +311,13 @@ fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
 /// used in place; the first press arms it.
 fn delete_button(ui: &Ui, p: Paint, entry: &Entry, free: bool) -> Option<El> {
     let def = entry.def;
-    let deletable =
-        entry.state == State::Downloaded && free && matches!(def.runtime, ModelRuntime::Gguf(_));
+    let deletable = entry.state == State::Downloaded
+        && free
+        && matches!(def.runtime, ModelRuntime::Gguf(_))
+        // Parakeet v3's file is also the Neural Engine model's GPU fallback.
+        && !(def.id == TranscriptionModelId::ParakeetV3
+            && ui.settings.transcription.model == TranscriptionModelId::ParakeetV3Ane)
+        && def.id != TranscriptionModelId::ParakeetV3Ane;
     if !deletable {
         return None;
     }

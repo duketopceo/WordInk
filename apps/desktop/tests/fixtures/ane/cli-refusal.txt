@@ -1,0 +1,1 @@
+error: the reference cache does not verify against the lock; run `mlx-omarchy-parakeet download` first (12 mismatched/missing files in the reference cache)

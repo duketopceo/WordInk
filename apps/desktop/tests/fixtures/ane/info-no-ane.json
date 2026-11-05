@@ -1,0 +1,14 @@
+{
+  "tool": "mlx-omarchy-info",
+  "device_name": "Apple M1 Max (G13C C0)",
+  "driver_name": "Honeykrisp",
+  "unified_memory": 1,
+  "ane": {
+    "fdt_node": 1,
+    "fdt_compatible": ["apple,t6000-ane"],
+    "accel0": 0,
+    "accel0_character_device": 0,
+    "module_present": 0,
+    "available": 0
+  }
+}

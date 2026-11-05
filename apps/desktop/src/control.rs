@@ -889,6 +889,14 @@ pub fn model_selection(
             ),
         ));
     }
+    if parsed == Some(TranscriptionModelId::ParakeetV3Ane) && !crate::labs::neural_engine() {
+        return Err(ControlError::new(
+            "model-unavailable",
+            format!(
+                "`{model}` can't be used: turn on Labs › Neural Engine: wordink labs on neural-engine"
+            ),
+        ));
+    }
     let id = parsed
         .filter(|id| crate::transcription::models::definition(*id).available())
         .ok_or_else(|| {

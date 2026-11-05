@@ -1503,6 +1503,9 @@ pub struct LabsSettings {
     pub standalone_special_keys: bool,
     pub history_stats: bool,
     pub recent_dictations: bool,
+    /// Parakeet v3 on the Apple Neural Engine joins the Local transcription
+    /// picker (Linux on Apple silicon).
+    pub neural_engine: bool,
     pub skip_pauses: bool,
     /// An automatic meeting recording stops after its call ends (macOS, issue 835).
     pub stop_when_call_ends: bool,
@@ -1540,6 +1543,7 @@ impl Default for LabsSettings {
             standalone_special_keys: false,
             history_stats: false,
             recent_dictations: false,
+            neural_engine: false,
             skip_pauses: false,
             stop_when_call_ends: false,
             output_fixes: false,
@@ -1942,6 +1946,10 @@ pub struct AppSettings {
     /// Which engine dictation uses: Groq when a key resolves, else local
     /// (`auto`), or one of them always. Keys are never stored here.
     pub engine: crate::transcription::cloud::EngineChoice,
+    /// Retry a local dictation once on this cloud provider when the local
+    /// path fails (`none`, `groq`, `openrouter`). Off by default; audio never
+    /// leaves the computer unless this is set and the provider's key resolves.
+    pub local_cloud_fallback: crate::transcription::cloud::LocalFallback,
     /// The model the named cloud engine is sent (an OpenRouter id,
     /// `whisper-1`, ...). Unset, or not one the provider takes: its default.
     pub engine_model: Option<String>,
@@ -2105,6 +2113,7 @@ impl Default for AppSettings {
             transcription: default_transcription(),
             transcription_device: TranscriptionDevice::Auto,
             engine: crate::transcription::cloud::EngineChoice::default(),
+            local_cloud_fallback: crate::transcription::cloud::LocalFallback::None,
             engine_model: None,
             meeting_engine: None,
             meeting_engine_model: None,
@@ -2448,6 +2457,7 @@ impl AppSettings {
             self.engine_model.as_deref(),
             self.gateway_url.as_deref(),
         );
+        crate::transcription::cloud::set_local_fallback(self.local_cloud_fallback);
         crate::transcription::cloud::set_meeting_engine(
             self.meeting_engine,
             self.meeting_engine_model.as_deref(),

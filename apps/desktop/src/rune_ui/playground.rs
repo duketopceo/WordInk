@@ -26,6 +26,7 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-settings", "Window/General/Settings"),
     ("mac-settings-sides", "Window/General/Left Option shortcut"),
     ("mac-settings-advanced", "Window/General/Advanced"),
+    ("general-advanced", "Window/General/If local fails"),
     ("mac-settings-mic-level", "Window/General/Microphone level"),
     (
         "mac-settings-mic-released",

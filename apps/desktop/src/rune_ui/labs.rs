@@ -413,6 +413,24 @@ fn rows(ui: &Ui) -> Vec<Row> {
             ..ultra
         }
     });
+    // Only on Linux on Apple silicon, where the Neural Engine can exist.
+    if Feature::available().any(|feature| feature == Feature::NeuralEngine) {
+        let engine_locked = Feature::NeuralEngine.off_refusal(&ui.settings).is_some();
+        rows.push(Row {
+            locked: engine_locked,
+            about: if engine_locked {
+                tr("On while it is the dictation model. Choose another model to turn it off.")
+            } else {
+                tr("Offer Parakeet v3 on the Apple Neural Engine in the Local transcription picker; needs the mlx-omarchy runtime")
+            },
+            ..row(
+                Feature::NeuralEngine,
+                &HINTS,
+                tr("Parakeet v3 (Neural Engine)"),
+                "",
+            )
+        });
+    }
     if caps.share_shortcut {
         rows.push(row(
             Feature::ShareShortcut,
@@ -463,6 +481,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::StandaloneSpecialKeys => "lab-special-keys",
         Feature::HistoryStats => "lab-history-stats",
         Feature::RecentDictations => "lab-recent-dictations",
+        Feature::NeuralEngine => "lab-neural-engine",
         Feature::SkipPauses => "lab-skip-pauses",
         Feature::StopWhenCallEnds => "lab-stop-when-call-ends",
         Feature::OutputFixes => "lab-output-fixes",

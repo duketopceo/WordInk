@@ -181,6 +181,7 @@ export type ModelId =
   | "underdog_bark_3_pro"
   | "underdog_bark_3_clean"
   | "parakeet_ultra"
+  | "parakeet_v3_ane"
   | "nemotron_3_5_asr"
   | "gigaam_v3"
   | "apple_speech"

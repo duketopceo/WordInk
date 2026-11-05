@@ -188,6 +188,78 @@ impl EngineChoice {
     }
 }
 
+/// The cloud provider a failed local dictation is retried on, once. Off by
+/// default: local audio stays local unless the person opts in.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalFallback {
+    #[default]
+    None,
+    Groq,
+    Openrouter,
+}
+
+impl LocalFallback {
+    pub const ALL: [Self; 3] = [Self::None, Self::Groq, Self::Openrouter];
+
+    pub const fn provider(self) -> Option<Provider> {
+        match self {
+            Self::None => None,
+            Self::Groq => Some(Provider::Groq),
+            Self::Openrouter => Some(Provider::OpenRouter),
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Groq => "Groq",
+            Self::Openrouter => "OpenRouter",
+        }
+    }
+}
+
+static LOCAL_FALLBACK: AtomicU8 = AtomicU8::new(0);
+
+/// Applies the `local_cloud_fallback` setting.
+pub fn set_local_fallback(choice: LocalFallback) {
+    LOCAL_FALLBACK.store(choice as u8, Ordering::Release);
+    refresh_key_in_background();
+}
+
+fn local_fallback() -> LocalFallback {
+    LocalFallback::ALL
+        .get(usize::from(LOCAL_FALLBACK.load(Ordering::Acquire)))
+        .copied()
+        .unwrap_or_default()
+}
+
+/// The provider to retry a failed local dictation on: the opted-in one, and
+/// only when its key resolves. Reads only the in-memory key. `None` means the
+/// audio must stay on this computer.
+pub fn fallback_provider() -> Option<Provider> {
+    #[cfg(test)]
+    if let Some(forced) = FALLBACK_OVERRIDE.with(std::cell::Cell::get) {
+        return forced.filter(|provider| has_key(*provider));
+    }
+    local_fallback()
+        .provider()
+        .filter(|provider| has_key(*provider))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The fallback this test thread's dictations use, in place of the setting.
+    static FALLBACK_OVERRIDE: std::cell::Cell<Option<Option<Provider>>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Forces the configured fallback provider on this thread, for tests.
+#[cfg(test)]
+pub(crate) fn force_fallback(provider: Option<Provider>) {
+    FALLBACK_OVERRIDE.with(|forced| forced.set(Some(provider)));
+}
+
 /// The cloud provider `choice` runs, given whether a Groq key resolves.
 pub fn route_for(choice: EngineChoice, groq_key_resolves: bool) -> Option<Provider> {
     match choice {
@@ -550,7 +622,11 @@ fn resolve_key(provider: Provider) -> Resolution {
 fn warm_providers() -> Vec<Provider> {
     let mut providers = vec![Provider::Groq];
     let meeting = meeting_chosen().choice.and_then(EngineChoice::provider);
-    for chosen in [engine_choice().provider(), meeting].into_iter().flatten() {
+    let fallback = local_fallback().provider();
+    for chosen in [engine_choice().provider(), meeting, fallback]
+        .into_iter()
+        .flatten()
+    {
         if !providers.contains(&chosen) {
             providers.push(chosen);
         }
