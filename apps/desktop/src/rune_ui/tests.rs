@@ -2770,3 +2770,34 @@ fn output_fixes_show_only_with_their_lab_and_fix_this_copies_for_the_sentence() 
     tap(&mut on, "output-vocabulary");
     assert!(on.state.vocabulary.open);
 }
+
+#[test]
+fn the_first_runs_microphone_is_the_real_input_and_picks_the_same_setting() {
+    let mut rt = runtime("onboarding-test-dictation", false, PANE_SIZE);
+    settle(&mut rt);
+    let capsule = |rt: &Runtime<Ui>| element(rt, "mic-capsule").label;
+    // System default, named by the input it resolves to: no demo name.
+    assert_eq!(
+        capsule(&rt).as_deref(),
+        Some("Microphone, Built-in Audio Analog Stereo")
+    );
+
+    // Its menu lists the inputs; choosing one saves General's setting.
+    tap(&mut rt, "mic-capsule");
+    assert!(rt.find("mic-menu-item0").is_some(), "the menu opens");
+    tap(&mut rt, "mic-menu-item2");
+    assert_eq!(rt.state.settings.microphone.as_deref(), Some("Shure MV7"));
+    assert_eq!(capsule(&rt).as_deref(), Some("Microphone, Shure MV7"));
+    assert!(rt.find("mic-menu-item0").is_none(), "the menu closes");
+
+    // No input at all: the capsule says so and offers nothing to pick.
+    rt.state.settings.microphone = None;
+    rt.state.microphones = Ok(Default::default());
+    settle(&mut rt);
+    assert_eq!(
+        capsule(&rt).as_deref(),
+        Some("Microphone, No microphone found")
+    );
+    assert_ne!(element(&rt, "mic-capsule").role, "button");
+    assert!(rt.find("mic-capsule/chevron").is_none());
+}

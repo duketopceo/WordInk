@@ -360,6 +360,23 @@ pub(super) const SCENES: &[Scene] = &[
         onboarding::input(ui, crate::desktop::onboarding::Input::Continue);
         onboarding_kit::live::fixture_resume(ui, Page::Try);
     }),
+    // The test dictation with no input at all: the capsule says so.
+    ("onboarding-test-dictation-no-microphone", |ui| {
+        short_first_run(ui, false);
+        ui.microphones = Ok(Default::default());
+        onboarding_kit::live::begin_demo(ui);
+        onboarding_kit::live::skip_demo(ui);
+        onboarding::input(
+            ui,
+            crate::desktop::onboarding::Input::ChooseEngine(
+                crate::desktop::onboarding::EngineKind::Cloud,
+            ),
+        );
+        onboarding::input(ui, crate::desktop::onboarding::Input::KeyStored);
+        onboarding::input(ui, crate::desktop::onboarding::Input::Continue);
+        onboarding::input(ui, crate::desktop::onboarding::Input::Continue);
+        onboarding_kit::live::fixture_resume(ui, Page::Try);
+    }),
     ("onboarding-set-up-dictation", |ui| {
         short_first_run(ui, false);
         onboarding_kit::live::begin_demo(ui);
@@ -872,6 +889,7 @@ fn short_first_run(ui: &mut Ui, mac: bool) {
     };
     if !mac {
         ui.platform.caps = platform::Capabilities::LINUX;
+        ui.microphones = Ok(linux_microphones());
     }
     ui.picker.installed = Some(Vec::new());
     ui.tour = Some(onboarding::Tour::replay(
@@ -884,6 +902,7 @@ fn short_first_run(ui: &mut Ui, mac: bool) {
 
 fn first_run(ui: &mut Ui, state: FirstRun, page: Page) {
     *ui = portal_fixture();
+    ui.microphones = Ok(linux_microphones());
     onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, true);
     match state {
         FirstRun::Fresh => onboarding::set_downloaded(ui, 8),
@@ -959,6 +978,15 @@ pub(super) fn mac_fixture() -> Ui {
     });
     ui.meetings = meetings::MeetingsPane::fixture();
     ui
+}
+
+/// A Linux laptop's microphone, the default, and a USB one.
+fn linux_microphones() -> crate::audio::InputDevices {
+    crate::audio::InputDevices {
+        names: vec!["Built-in Audio Analog Stereo".into(), "Shure MV7".into()],
+        system_default: Some("Built-in Audio Analog Stereo".into()),
+        ..Default::default()
+    }
 }
 
 const BLUETOOTH_FIXTURE_ID: &str = "bluez_input.00:11:22:33:44:55";

@@ -180,6 +180,14 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   Hex's own dictation (macOS listener, Linux and Windows event log) holds
 │   │   the keys, flies the live words, and lightning burns the answered card
 │   ├── A short, silent, or failed try -> a hint under the field
+│   ├── Microphone capsule (the short first run's test dictation) // setup.microphone
+│   │   ├── Names the input Hex records from: the saved `microphone`, else
+│   │   │   what System default resolves to (never Hex Microphone), from
+│   │   │   Settings › General's listing, listed again on input changes
+│   │   ├── Press -> menu: System default + the listed inputs -> saves
+│   │   │   `microphone`, the same setting General's picker saves
+│   │   └── No input -> "No microphone found"; a failed listing -> "Couldn't
+│   │       list microphones"; neither is a button
 │   └── Done at any time -> Hex is ready  // practice is never required
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused
 │   ├── First time -> Hex records a marker, reopens itself, resumes at the practice
@@ -423,7 +431,11 @@ first run (`a_new_install_opens_the_first_run`,
 `a_refused_microphone_points_to_system_settings`,
 `a_grant_waiting_for_a_restart_makes_setup_restart_hex`,
 `onboarding_downloads_the_model_through_the_service`,
-`a_found_model_moves_on_without_a_download_and_back_returns_to_it`), and every
+`a_found_model_moves_on_without_a_download_and_back_returns_to_it`,
+`the_first_runs_microphone_is_the_real_input_and_picks_the_same_setting`;
+the capsule's choice is the pure `onboarding_kit::mic_line::pick`, unit-tested
+for no input, a missing saved input, a Hex Microphone default, and a failed
+listing; scene `onboarding-test-dictation-no-microphone`), and every
 page is a scene whose goldens `scripts/check-onboarding.sh` checks (its
 `SCENES` list in `rune_ui/tests/onboarding_check.rs`). Scenes are fixtures
 played on the story's own clock to one settled moment, not native proof.

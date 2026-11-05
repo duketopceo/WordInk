@@ -10,10 +10,10 @@
 //! - Auditionable typing key-sound candidates and `#292` `feedback` tones (`sfx`).
 
 use rune::{Anim, El, TextStyle, Transition, col, el, row, text};
-use rune_kit::{Badge, Button, ButtonVariant, RadioItem, TextArea, glyphs};
+use rune_kit::{Badge, Button, ButtonVariant, Placement, RadioItem, TextArea, glyphs};
 
 use super::super::controls::{
-    CardRow, DESCRIPTION, KeySize, METRICS, Paint, PushSize, card, keycap,
+    CardRow, DESCRIPTION, DEVICE_SELECT_WIDTH, KeySize, METRICS, Paint, PushSize, card, keycap,
 };
 use super::super::found_choice::ChoiceRow;
 use super::super::lists::allowed;
@@ -26,7 +26,7 @@ use super::hex_meter::hex_meter;
 use super::hud_stage::{flow_box, frame_slot, voice_or_idle_slot};
 use super::landing::{LEAD, arrives, keys, ready, title_font};
 use super::live::{Live, ModelStep};
-use super::mic_line::mic_capsule;
+use super::mic_line::{DEMO_NAME, mic_capsule};
 use super::pill::{CAPSULE, FLY, PILL, language_capsule, pill, slot};
 use super::sparks::impacts;
 use super::stories::{Onboard, Step, is_live_window};
@@ -700,8 +700,37 @@ fn instrument_bar(p: Paint, s: &Onboard) -> El {
         .key("instrument-bar")
         .gap(8.0)
         .center_y()
-        .child(mic_capsule(p, s.listening_peak()))
+        .child(microphone(p, s))
         .child(shortcut_capsule(p, &s.caps, down, s.live.is_none()))
+}
+
+/// The microphone capsule: on the real first run, the input Hex records
+/// from, opening a menu of the inputs to pick from; on a story, the demo's.
+fn microphone(p: Paint, s: &Onboard) -> El {
+    let peak = s.listening_peak();
+    let Some(live) = s.live.as_ref() else {
+        return mic_capsule(p, peak, DEMO_NAME, true);
+    };
+    let shown = &live.mic.shown;
+    if !shown.picks() {
+        return mic_capsule(p, None, &shown.text(), false);
+    }
+    let trigger = mic_capsule(p, peak, &shown.text(), true).on_press(live::toggle_microphones);
+    let mut menu = rune_kit::Menu::new("mic-menu")
+        .trigger(trigger)
+        .placement(Placement::TopStart)
+        .gutter(4.0)
+        .min_width(DEVICE_SELECT_WIDTH)
+        .open(live.mic_open)
+        .on_close(live::close_microphones);
+    for choice in &live.mic.choices {
+        let mut item = rune_kit::MenuItem::new(choice.label.clone()).checked(choice.selected);
+        if let Some(detail) = &choice.detail {
+            item = item.shortcut(detail.clone());
+        }
+        menu = menu.item(item.on_select(live::choose_microphone(choice.id.clone())));
+    }
+    menu.build(p.k, &mut s.popups.borrow_mut())
 }
 
 /// The real first run shows the saved shortcut, which Settings changes.

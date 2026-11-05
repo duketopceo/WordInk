@@ -310,6 +310,10 @@ const PATHS: &[(&str, &str)] = &[
         "Linux & Windows/Onboarding · test dictation",
     ),
     (
+        "onboarding-test-dictation-no-microphone",
+        "Linux & Windows/Onboarding · test dictation, no microphone",
+    ),
+    (
         "onboarding-set-up-dictation",
         "Linux & Windows/Onboarding · set up dictation",
     ),
