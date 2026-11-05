@@ -1,11 +1,13 @@
 #!/bin/sh
-# Wraps a Linux release executable in the hex .deb and .rpm
+# Wraps a Linux release executable in the wordink .deb and .rpm
 # (packaging/linux/nfpm.yaml):
 #
 #   package-linux.sh <executable> <version> <x64|arm64> <dist>
 #
-# writes <dist>/hex-<version>-linux-<arch>.deb and .rpm, which the Release
-# workflow publishes as the linux-<arch>-deb and linux-<arch>-rpm targets.
+# writes <dist>/wordink_<amd64|arm64>.deb and <dist>/wordink-<x86_64|aarch64>.rpm
+# and prints their paths. The names carry no version, so
+# `releases/latest/download/<name>` always fetches the newest one; the package
+# metadata carries the version. The Desktop release workflow publishes both.
 # Requires nfpm (NFPM names another binary).
 set -eu
 
@@ -21,33 +23,40 @@ command -v "$nfpm" >/dev/null 2>&1 || {
   exit 1
 }
 case "$label" in
-  x64) arch=amd64 ;;
-  arm64) arch=arm64 ;;
+  x64) deb_arch=amd64 rpm_arch=x86_64 ;;
+  arm64) deb_arch=arm64 rpm_arch=aarch64 ;;
   *)
     echo "The architecture must be x64 or arm64, not $label." >&2
     exit 1
     ;;
 esac
-test "$(head -c 4 "$executable" | od -An -tx1 | tr -d ' ')" = 7f454c46
+test "$(head -c 4 "$executable" | od -An -tx1 | tr -d ' ')" = 7f454c46 || {
+  echo "$executable is not an ELF executable." >&2
+  exit 1
+}
 
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
-install -m755 "$executable" "$temporary/hex"
+install -m755 "$executable" "$temporary/wordink"
 sed 's#@HEX_BIN@#/usr/bin/wordink#g' "$root/packaging/io.github.duketopceo.wordink.desktop" > "$temporary/io.github.duketopceo.wordink.desktop"
 cp "$root/packaging/wordink.service" "$root/LICENSE" "$root/packaging/linux/refresh-desktop.sh" "$temporary/"
 cp -R "$root/packaging/linux/icons" "$temporary/icons"
 
 # Debian and RPM order a tilde before a release, and neither allows a hyphen
-# in the upstream version: 0.0.0-dev-42 is 0.0.0~dev.42, 2.5.0-beta.1 is
-# 2.5.0~beta.1.
+# in the upstream version: 1.2.0-rc.1 is 1.2.0~rc.1.
 package_version=$(printf '%s' "$version" | sed -e 's/-/~/' -e 's/-/./g')
 
 for format in deb rpm; do
+  case "$format" in
+    deb) arch=$deb_arch target="$dist/wordink_$deb_arch.deb" ;;
+    rpm) arch=$deb_arch target="$dist/wordink-$rpm_arch.rpm" ;;
+  esac
   (
     cd "$temporary"
+    # nfpm takes Go's architecture names and maps them to dpkg's and rpm's.
     HEX_PACKAGE_ARCH=$arch HEX_PACKAGE_VERSION=$package_version \
       "$nfpm" package --config "$root/packaging/linux/nfpm.yaml" --packager "$format" \
-      --target "$dist/hex-$version-linux-$label.$format" >&2
+      --target "$target" >&2
   )
-  echo "$dist/hex-$version-linux-$label.$format"
+  echo "$target"
 done

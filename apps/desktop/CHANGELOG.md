@@ -6,6 +6,20 @@ section whose heading is its version (`## X.Y.Z`); a release candidate
 `## X.Y.Z` section it is a candidate for. The release workflow refuses to start
 when the section is missing. See [`docs/releasing.md`](../../docs/releasing.md).
 
+## Unreleased
+
+- **Installers on every release.** Alongside the one-line installers, each
+  release now carries a per-user Windows installer
+  (`WordInk-Setup-windows-x64.exe`, no admin, Start Menu shortcut and
+  uninstaller), a macOS disk image (`WordInk-macos-arm64.dmg`, drag to
+  Applications), and for Linux x86_64 and aarch64 an AppImage, a `.deb` and an
+  `.rpm`. Their names carry no version, so
+  `https://github.com/duketopceo/WordInk/releases/latest/download/<name>`
+  always fetches the newest. All are listed in the signed `SHA256SUMS`. The
+  Windows and macOS builds are still unsigned: on Windows choose **More info >
+  Run anyway**, on macOS **System Settings > Privacy & Security > Open
+  Anyway**.
+
 ## 1.0.0
 
 WordInk is local voice dictation for your desktop. Hold the shortcut, speak,

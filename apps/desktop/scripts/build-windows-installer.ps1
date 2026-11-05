@@ -1,10 +1,11 @@
 # Builds wordink-setup-<version>-windows-<x64|arm64>.exe, the per-user Windows
-# installer, around an already-built (and signed) release wordink.exe. Installs
-# Inno Setup 6 when ISCC is missing. The installer embeds the executable byte
-# for byte.
+# installer (packaging/windows/wordink.iss), around an already-built release
+# wordink.exe, and prints its path. Installs Inno Setup 6 when ISCC is missing.
+# The installer embeds the executable byte for byte. The Desktop release
+# workflow publishes it as WordInk-Setup-windows-x64.exe.
 #
-#   scripts/build-windows-installer.ps1 -Executable dist\hex-2.4.0-windows-x64.exe `
-#     -Version 2.3.0 -Arch x86_64 -OutDir dist
+#   scripts/build-windows-installer.ps1 -Executable target\release\wordink.exe `
+#     -Version 1.2.3 -Arch x86_64 -OutDir dist
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string]$Executable,
@@ -14,7 +15,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-if ($Version -notmatch '^(\d+\.\d+\.\d+(-beta\.\d+)?|0\.0\.0-dev-\d+)$') { throw "Expected a release version, not $Version." }
+# A release (1.2.3), a release candidate (1.2.3-rc.1) or a workflow dry run
+# (0.0.0-dryrun.42).
+if ($Version -notmatch '^\d+\.\d+\.\d+(-(rc|dryrun)\.\d+)?$') { throw "Expected a release version, not $Version." }
 $Executable = (Resolve-Path $Executable).Path
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path

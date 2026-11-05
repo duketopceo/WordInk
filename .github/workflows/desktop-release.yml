@@ -1,23 +1,42 @@
 # Desktop release: a `desktop-v<version>` tag builds the app on the four
-# platforms, signs the Linux executables and the checksum list, and publishes
-# one GitHub Release with SHA256SUMS(.sig), an SBOM, build-provenance
-# attestations and the update manifests (dev.json, plus stable.json on a final)
-# the in-app updater reads.
+# platforms, packs the installers (Windows Setup .exe, macOS .dmg, Linux
+# AppImage, .deb, .rpm and tarball), signs the Linux executables and the
+# checksum list, and publishes one GitHub Release with SHA256SUMS(.sig), an
+# SBOM, build-provenance attestations and the update manifests (dev.json, plus
+# stable.json on a final) the in-app updater reads.
 # Tags are `desktop-vX.Y.Z` (final, channel stable, marked latest) and
 # `desktop-vX.Y.Z-rc.N` (release candidate, channel dev, prerelease, never
 # latest). See docs/releasing.md for the runbook.
 #
+# Dry run: a manual dispatch (workflow_dispatch, dry_run=true; anyone who can
+# dispatch has write access) builds and packs everything as version
+# 0.0.0-dryrun.<run number> and uploads the files as workflow artifacts only.
+# gate, sign-linux, draft, fetch-draft, smoke and publish each run only for a
+# `push` of a `desktop-v*` tag, so a dispatched run never sees the signing key,
+# never creates a tag or a release, and has no job with contents: write.
+# dry_run=false is refused: releasing is always a tag push.
+#
 # Job graph:
-#   prepare -> gate -> build (x4), sbom -> package-linux -> sign-linux
-#           -> draft -> fetch-draft -> smoke (x4) -> publish
+#   prepare -> gate -> build (x4), sbom -> package-linux -> check-installers (x4)
+#           -> sign-linux -> draft -> fetch-draft -> smoke (x4) -> publish
+#   dry run: prepare -> build (x4), sbom -> package-linux -> check-installers
+#           -> dry-run-bundle
 #
 # Trust boundaries:
 #   prepare, gate   read-only; no secrets. gate only calls the GitHub API.
 #   build           runs repository code (cargo, build.rs); no secrets, read-only.
-#   package-linux   assembles the Linux tarballs from the build output and
+#                   The Windows and macOS legs also pack the Setup .exe (Inno
+#                   Setup) and the .dmg (hdiutil).
+#   package-linux   assembles the Linux tarballs, AppImages, .deb and .rpm from
+#                   the build output with pinned, checksummed tools, and
 #                   gathers the three one-line installers (install.sh,
 #                   install-macos.sh, install.ps1); no secrets. It runs before
 #                   signing so the signed SHA256SUMS covers all of them.
+#   check-installers read-only, no secrets, no checkout: installs the packed
+#                   .exe, .dmg, AppImage, .deb and .rpm on each OS and checks
+#                   `wordink --version`. A failure stops the run before signing.
+#   dry-run-bundle  dispatch only: lists the files in an unsigned SHA256SUMS and
+#                   uploads them as one workflow artifact; no secrets.
 #   sign-linux      the only job that can read WORDINK_LINUX_SIGNING_KEY. It
 #                   sits in the protected `release` environment, so the owner
 #                   approves it. Only its two `sign-linux.sh` steps hold the
@@ -31,11 +50,18 @@
 #                   keeps the release a draft.
 #   publish         un-drafts the release and refreshes dev.json on the rolling
 #                   desktop-dev prerelease; checks out and runs nothing.
-# macOS and Windows ship unsigned; their updater only links to the release.
+# macOS and Windows ship unsigned (no Authenticode, no notarization); their
+# updater only links to the release.
 name: Desktop release
 on:
   push:
     tags: ["desktop-v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and pack the installers as workflow artifacts only (no signing, tag or release). Must stay true."
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -51,6 +77,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
       channel: ${{ steps.version.outputs.channel }}
+      dry_run: ${{ steps.version.outputs.dry_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -62,7 +89,26 @@ jobs:
       - id: version
         env:
           TAG: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            # A dispatched run is only ever a dry run; releasing is a tag push.
+            [ "$DRY_RUN" = true ] || { echo "::error::A dispatched run is always a dry run; push a desktop-v* tag to release."; exit 1; }
+            {
+              echo "version=0.0.0-dryrun.$RUN_NUMBER"
+              echo "prerelease=true"
+              echo "channel=dev"
+              echo "dry_run=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$GITHUB_REF" in
+            refs/tags/desktop-v*) ;;
+            *) echo "::error::$GITHUB_REF is not a desktop-v* tag"; exit 1 ;;
+          esac
+          echo "dry_run=false" >> "$GITHUB_OUTPUT"
           version=${TAG#desktop-v}
           # The version names a directory and is compared by the updater, so
           # it is X.Y.Z (final) or X.Y.Z-rc.N (release candidate), nothing else.
@@ -78,9 +124,14 @@ jobs:
       - name: Extract the release notes
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          DRY_RUN: ${{ steps.version.outputs.dry_run }}
         run: |
           mkdir -p "$RUNNER_TEMP/notes"
-          apps/desktop/scripts/release-notes.sh "$VERSION" > "$RUNNER_TEMP/notes/release-notes.md"
+          if [ "$DRY_RUN" = true ]; then
+            echo "Dry run $VERSION: not a release." > "$RUNNER_TEMP/notes/release-notes.md"
+          else
+            apps/desktop/scripts/release-notes.sh "$VERSION" > "$RUNNER_TEMP/notes/release-notes.md"
+          fi
           cat "$RUNNER_TEMP/notes/release-notes.md"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -94,6 +145,7 @@ jobs:
   # a final tag, a published release candidate exists on the same commit.
   gate:
     needs: prepare
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
     runs-on: ubuntu-24.04
     timeout-minutes: 130
     permissions:
@@ -117,8 +169,14 @@ jobs:
   build:
     name: Build ${{ matrix.label }}
     needs: [prepare, gate]
-    # The macos-arm64 leg runs on Luke's own Mac (runner label `promax-macos`,
-    # registered on this repo only, started by tag push, never by pull_request).
+    # After a passing gate, or in a dry run, where gate is skipped.
+    if: >-
+      !cancelled() && needs.prepare.result == 'success' &&
+      (needs.gate.result == 'success' ||
+       (github.event_name == 'workflow_dispatch' && needs.gate.result == 'skipped'))
+    # The macos-arm64 leg runs on the owner's own Mac (runner label `promax-macos`,
+    # registered on this repo only, started by a tag push or an owner-dispatched
+    # dry run, never by pull_request).
     # Hosted fallback: set the repo variable WORDINK_MACOS_RUNNER=hosted and the
     # leg goes back to the GitHub-hosted `macos-26` image, no file change needed.
     # The self-hosted Mac needs Xcode + Metal toolchain, rustup and cmake.
@@ -221,12 +279,21 @@ jobs:
               reported=$("$bundle/Contents/MacOS/wordink" --version | awk 'NF { value=$NF } END { print value }')
               [ "$reported" = "$HEX_VERSION" ] || { echo "::error::the app reports $reported, not $HEX_VERSION"; exit 1; }
               ditto -c -k --keepParent "$bundle" "$dist/$name.zip"
+              # The drag-to-Applications disk image (unsigned, not notarized).
+              packaging/macos/make-dmg.sh "$bundle" "$dist/WordInk-macos-arm64.dmg"
               ;;
             Windows)
               stage=$(mktemp -d)/wordink
               mkdir -p "$stage"
               cp "$exe" LICENSE THIRD_PARTY_NOTICES.md "$stage/"
               powershell -NoProfile -Command "Compress-Archive -Path '$(cygpath -w "$stage")' -DestinationPath '$(cygpath -w "$dist/$name.zip")'"
+              # The per-user Setup .exe (Inno Setup, packaging/windows/wordink.iss),
+              # unsigned. Its name carries no version, so README links can
+              # use releases/latest/download/WordInk-Setup-windows-x64.exe.
+              setup="$temp/setup"
+              pwsh -NoProfile -File scripts/build-windows-installer.ps1 -Executable "$(cygpath -w "$exe")" \
+                -Version "$HEX_VERSION" -Arch x86_64 -OutDir "$(cygpath -w "$setup")"
+              mv "$setup/wordink-setup-$HEX_VERSION-windows-x64.exe" "$dist/WordInk-Setup-windows-x64.exe"
               ;;
           esac
           ls -l "$dist"
@@ -239,6 +306,10 @@ jobs:
 
   sbom:
     needs: [prepare, gate]
+    if: >-
+      !cancelled() && needs.prepare.result == 'success' &&
+      (needs.gate.result == 'success' ||
+       (github.event_name == 'workflow_dispatch' && needs.gate.result == 'skipped'))
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -258,13 +329,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Linux tarballs, assembled before signing and without secrets so that the
-  # signed SHA256SUMS can cover them.
+  # Linux tarballs, AppImages, .deb and .rpm, assembled before signing and
+  # without secrets so that the signed SHA256SUMS can cover them. The AppImage
+  # and package names carry no version (releases/latest/download/<name>).
   package-linux:
     needs: [prepare, build]
     runs-on: ubuntu-24.04
     env:
       WORDINK_VERSION: ${{ needs.prepare.outputs.version }}
+      # Pinned packaging tools, checked against these SHA-256 sums before use.
+      NFPM_URL: https://github.com/goreleaser/nfpm/releases/download/v2.48.0/nfpm_2.48.0_Linux_x86_64.tar.gz
+      NFPM_SHA256: 6d7f9a28b2f397934403950fcbba83f598b08d02edbe79a0815b3b4897341750
+      APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+      APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+      RUNTIME_URL: https://github.com/AppImage/type2-runtime/releases/download/20251108
+      RUNTIME_X86_64_SHA256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+      RUNTIME_AARCH64_SHA256: 00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -280,6 +360,40 @@ jobs:
           for arch in x64 arm64; do
             apps/desktop/packaging/linux/make-tarball.sh "$RUNNER_TEMP/in" "$arch"
           done
+      - name: Fetch the packaging tools
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/tools"
+          mkdir -p "$tools/runtime"
+          curl -fsSL -o "$tools/nfpm.tar.gz" "$NFPM_URL"
+          curl -fsSL -o "$tools/appimagetool" "$APPIMAGETOOL_URL"
+          curl -fsSL -o "$tools/runtime/runtime-x86_64" "$RUNTIME_URL/runtime-x86_64"
+          curl -fsSL -o "$tools/runtime/runtime-aarch64" "$RUNTIME_URL/runtime-aarch64"
+          sha256sum --check --strict <<SUMS
+          $NFPM_SHA256  $tools/nfpm.tar.gz
+          $APPIMAGETOOL_SHA256  $tools/appimagetool
+          $RUNTIME_X86_64_SHA256  $tools/runtime/runtime-x86_64
+          $RUNTIME_AARCH64_SHA256  $tools/runtime/runtime-aarch64
+          SUMS
+          tar -xzf "$tools/nfpm.tar.gz" -C "$tools" nfpm
+          chmod 755 "$tools/nfpm" "$tools/appimagetool"
+      - name: Make the AppImages, .deb and .rpm
+        env:
+          # appimagetool is itself an AppImage; the runner has no FUSE.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/tools"
+          out="$RUNNER_TEMP/packages"
+          mkdir -p "$out"
+          for arch in x64 arm64; do
+            executable="$RUNNER_TEMP/in/wordink-$WORDINK_VERSION-linux-$arch"
+            NFPM="$tools/nfpm" apps/desktop/scripts/package-linux.sh "$executable" "$WORDINK_VERSION" "$arch" "$out"
+            APPIMAGETOOL="$tools/appimagetool" APPIMAGE_RUNTIME_DIR="$tools/runtime" \
+              apps/desktop/packaging/linux/make-appimage.sh "$executable" "$arch" "$out"
+          done
+          dpkg-deb --info "$out/wordink_amd64.deb"
+          ls -l "$out"
       # The one-line installers are release assets under these exact names
       # (`.../releases/latest/download/<name>` is the URL users run).
       - name: Collect the installers
@@ -301,6 +415,119 @@ jobs:
           path: ${{ runner.temp }}/in/*.tar.gz
           if-no-files-found: error
           retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: linux-packages
+          path: ${{ runner.temp }}/packages/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # Installs each packed installer the way a user would, on a clean runner, and
+  # checks the installed program reports this run's version. Read-only, no
+  # secrets, no checkout: only the built files run. These are the exact bytes
+  # sign-linux lists in SHA256SUMS, so a broken installer is never signed.
+  check-installers:
+    name: Check installers ${{ matrix.label }}
+    needs: [prepare, build, package-linux]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: linux-x64, os: ubuntu-24.04, artifact: linux-packages, deb: wordink_amd64.deb, rpm: wordink-x86_64.rpm, appimage: WordInk-linux-x86_64.AppImage }
+          - { label: linux-arm64, os: ubuntu-24.04-arm, artifact: linux-packages, deb: wordink_arm64.deb, rpm: wordink-aarch64.rpm, appimage: WordInk-linux-aarch64.AppImage }
+          - { label: windows-x64, os: windows-latest, artifact: build-windows-x64 }
+          - { label: macos-arm64, os: macos-26, artifact: build-macos-arm64 }
+    env:
+      WORDINK_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ runner.temp }}/files
+      - name: .deb, .rpm and AppImage (Linux)
+        if: runner.os == 'Linux'
+        env:
+          DEB: ${{ matrix.deb }}
+          RPM: ${{ matrix.rpm }}
+          APPIMAGE: ${{ matrix.appimage }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/files"
+          check() { # <label> <command...>
+            local label=$1 reported
+            shift
+            reported=$("$@" --version | awk 'NF { value=$NF } END { print value }')
+            [ "$reported" = "$WORDINK_VERSION" ] || { echo "::error::$label reports $reported, not $WORDINK_VERSION"; exit 1; }
+            echo "$label reports $reported"
+          }
+          echo "::group::.deb"
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends "./$DEB"
+          echo "::endgroup::"
+          check .deb /usr/bin/wordink
+          [ -f /usr/share/applications/io.github.duketopceo.wordink.desktop ] || { echo "::error::the .deb installed no desktop entry"; exit 1; }
+          # The AppImage, unpacked (the runner has no FUSE), on the libraries
+          # the .deb pulled in.
+          chmod 755 "$APPIMAGE"
+          (cd "$RUNNER_TEMP" && "$RUNNER_TEMP/files/$APPIMAGE" --appimage-extract > /dev/null)
+          check AppImage "$RUNNER_TEMP/squashfs-root/AppRun"
+          sudo apt-get remove -y wordink
+          [ ! -e /usr/bin/wordink ] || { echo "::error::removing the .deb left /usr/bin/wordink"; exit 1; }
+          echo "::group::.rpm on Fedora"
+          docker run --rm -v "$PWD:/files:ro" -e WORDINK_VERSION fedora:42 sh -euc '
+            dnf install -y -q "/files/$0"
+            reported=$(wordink --version | awk "NF { value=\$NF } END { print value }")
+            [ "$reported" = "$WORDINK_VERSION" ] || { echo "::error::.rpm reports $reported, not $WORDINK_VERSION"; exit 1; }
+            echo ".rpm reports $reported"
+            dnf remove -y -q wordink
+            [ ! -e /usr/bin/wordink ]' "$RPM"
+          echo "::endgroup::"
+      - name: Setup .exe (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Join-Path $env:RUNNER_TEMP 'files\WordInk-Setup-windows-x64.exe'
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\WordInk'
+          $exe = Join-Path $dir 'wordink.exe'
+          $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\WordInk.lnk'
+          $uninstaller = Join-Path $env:LOCALAPPDATA 'WordInk\uninstall\unins000.exe'
+          # The runner has no GPU driver, so skip the installer's Vulkan check.
+          $p = Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SKIPVULKANCHECK=1', '/TASKS=startup' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Setup exited with $($p.ExitCode)" }
+          if (-not (Test-Path $exe)) { throw "$exe is not installed" }
+          $reported = (((& $exe --version) | Out-String).Trim() -split '\s+')[-1]
+          if ($reported -ne $env:WORDINK_VERSION) { throw "wordink reports $reported, not $env:WORDINK_VERSION" }
+          Write-Host "Setup installed wordink $reported"
+          if ((Get-Content (Join-Path $dir 'install-receipt.txt') -TotalCount 1).Trim() -ne $env:WORDINK_VERSION) { throw 'install-receipt.txt does not hold the version' }
+          if (-not (Test-Path $shortcut)) { throw 'no Start Menu shortcut' }
+          $run = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name WordInk -ErrorAction SilentlyContinue).WordInk
+          if ($run -ne ('"{0}" app --hidden' -f $exe)) { throw "unexpected Run value: $run" }
+          if (Test-Path (Join-Path $env:APPDATA 'wordink\install.json')) { throw 'Setup wrote an install.json receipt' }
+          $p = Start-Process $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "the uninstaller exited with $($p.ExitCode)" }
+          # The uninstaller hands off to a copy of itself; give it a moment.
+          for ($i = 0; $i -lt 60 -and ((Test-Path $exe) -or (Test-Path $shortcut)); $i++) { Start-Sleep -Milliseconds 500 }
+          if (Test-Path $exe) { throw "uninstall left $exe" }
+          if (Test-Path $shortcut) { throw 'uninstall left the Start Menu shortcut' }
+          if ((Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name WordInk -ErrorAction SilentlyContinue)) { throw 'uninstall left the Run value' }
+          Write-Host 'Setup installs and uninstalls cleanly.'
+      - name: .dmg (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          mnt="$RUNNER_TEMP/mnt"
+          mkdir -p "$mnt"
+          hdiutil attach -quiet -nobrowse -readonly -mountpoint "$mnt" "$RUNNER_TEMP/files/WordInk-macos-arm64.dmg"
+          trap 'hdiutil detach -quiet "$mnt" || true' EXIT
+          [ "$(readlink "$mnt/Applications")" = /Applications ] || { echo "::error::the .dmg has no Applications link"; exit 1; }
+          reported=$("$mnt/WordInk.app/Contents/MacOS/wordink" --version | awk 'NF { value=$NF } END { print value }')
+          [ "$reported" = "$WORDINK_VERSION" ] || { echo "::error::the .dmg's WordInk.app reports $reported, not $WORDINK_VERSION"; exit 1; }
+          echo "the .dmg's WordInk.app reports $reported"
 
   # The only job with the signing key. The `release` environment requires the
   # owner's approval before it starts. Order matters: the binaries are signed,
@@ -308,7 +535,9 @@ jobs:
   # (signatures included), then SHA256SUMS is signed. Only the two
   # sign-linux.sh steps are given the key.
   sign-linux:
-    needs: [prepare, build, sbom, package-linux]
+    needs: [prepare, build, sbom, package-linux, check-installers]
+    # Never in a dry run: only a pushed desktop-v* tag reaches the key.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
     runs-on: ubuntu-24.04
     environment: release
     env:
@@ -322,22 +551,11 @@ jobs:
           sparse-checkout-cone-mode: true
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          pattern: "{build-*,sbom,tarballs,installers}"
+          pattern: "{build-*,sbom,tarballs,installers,linux-packages}"
           path: ${{ runner.temp }}/release
           merge-multiple: true
       - name: Check the files this release defines
-        run: |
-          set -euo pipefail
-          v=$WORDINK_VERSION
-          cd "$RUNNER_TEMP/release"
-          expected=$(printf '%s\n' \
-            "wordink-$v-linux-x64" "wordink-$v-linux-x64.tar.gz" \
-            "wordink-$v-linux-arm64" "wordink-$v-linux-arm64.tar.gz" \
-            "wordink-$v-windows-x64.zip" "wordink-$v-macos-arm64.zip" \
-            "wordink-$v.sbom.cdx.json" \
-            install.sh install-macos.sh install.ps1 | LC_ALL=C sort)
-          found=$(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
-          [ "$expected" = "$found" ] || { echo "::error::unexpected release files"; diff <(echo "$expected") <(echo "$found") || true; exit 1; }
+        run: apps/desktop/packaging/linux/check-release-files.sh "$RUNNER_TEMP/release"
       - name: Sign the Linux executables
         env:
           WORDINK_LINUX_SIGNING_KEY: ${{ secrets.WORDINK_LINUX_SIGNING_KEY }}
@@ -375,6 +593,7 @@ jobs:
   # files in SHA256SUMS, and stops there. Nothing is public until `publish`.
   draft:
     needs: [prepare, sign-linux]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -422,6 +641,7 @@ jobs:
   # and runs nothing, and the smoke jobs that execute the assets get no token.
   fetch-draft:
     needs: [prepare, draft]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -455,6 +675,7 @@ jobs:
   smoke:
     name: Smoke ${{ matrix.label }}
     needs: [prepare, fetch-draft]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     permissions:
@@ -558,6 +779,7 @@ jobs:
   # The only job that makes the release public. It checks out and runs nothing.
   publish:
     needs: [prepare, draft, smoke]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -590,3 +812,46 @@ jobs:
           # Only the dev.json that SHA256SUMS (signed in sign-linux) lists may reach the feed.
           (cd "$RUNNER_TEMP/feed" && grep -E '^[0-9a-f]{64}  dev\.json$' SHA256SUMS | sha256sum --check --strict)
           gh release upload desktop-dev -R "$WORDINK_REPO" --clobber "$RUNNER_TEMP/feed/dev.json"
+
+  # Dry run only: gathers every file a release would carry, checks the set,
+  # lists them in an unsigned SHA256SUMS and uploads them as one workflow
+  # artifact. No secrets, no write access, no tag or release.
+  dry-run-bundle:
+    needs: [prepare, build, sbom, package-linux, check-installers]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      WORDINK_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: apps/desktop/packaging/linux
+          sparse-checkout-cone-mode: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: "{build-*,sbom,tarballs,installers,linux-packages}"
+          path: ${{ runner.temp }}/release
+          merge-multiple: true
+      - name: Check and list the files
+        run: |
+          set -euo pipefail
+          apps/desktop/packaging/linux/check-release-files.sh "$RUNNER_TEMP/release"
+          apps/desktop/packaging/linux/write-sums.sh "$RUNNER_TEMP/release"
+          {
+            echo "### Dry run $WORDINK_VERSION"
+            echo
+            echo "Unsigned; not a release. Files (artifact \`dry-run-release\`):"
+            echo
+            echo '```'
+            (cd "$RUNNER_TEMP/release" && ls -l)
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: dry-run-release
+          path: ${{ runner.temp }}/release/*
+          if-no-files-found: error
+          retention-days: 7

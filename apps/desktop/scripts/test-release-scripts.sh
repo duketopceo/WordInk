@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Tests the release workflow's scripts without GitHub or the real signing key:
 # release-notes.sh, write-sums.sh, sign-linux.sh (binaries and --sums),
-# write-manifest.sh, verify-release.sh and release-gate.sh (against a fake `gh`). Needs OpenSSL 3
+# write-manifest.sh, verify-release.sh, check-release-files.sh, the AUR
+# render-pkgbuild.sh and release-gate.sh (against a fake `gh`). Needs OpenSSL 3
 # and jq.
 set -euo pipefail
 
@@ -91,6 +92,31 @@ expect_fail "manifest: unknown channel" "$linux/write-manifest.sh" "$manifests" 
 rm "$manifests/wordink-$v-linux-arm64.sig"
 expect_fail "manifest: stable refuses a Linux target without its signature" "$linux/write-manifest.sh" "$manifests"
 expect_fail "manifest: dev refuses a Linux target without its signature" "$linux/write-manifest.sh" "$manifests" dev
+
+# --- check-release-files.sh ---------------------------------------------------
+files="$work/files"
+mkdir "$files"
+for f in "wordink-$v-linux-x64" "wordink-$v-linux-x64.tar.gz" "wordink-$v-linux-arm64" "wordink-$v-linux-arm64.tar.gz" \
+  "wordink-$v-windows-x64.zip" "wordink-$v-macos-arm64.zip" "wordink-$v.sbom.cdx.json" install.sh install-macos.sh install.ps1 \
+  WordInk-Setup-windows-x64.exe WordInk-macos-arm64.dmg WordInk-linux-x86_64.AppImage WordInk-linux-aarch64.AppImage \
+  wordink_amd64.deb wordink_arm64.deb wordink-x86_64.rpm wordink-aarch64.rpm; do
+  : > "$files/$f"
+done
+expect_ok "files: the complete set" "$linux/check-release-files.sh" "$files"
+: > "$files/extra.txt"
+expect_fail "files: an extra file" "$linux/check-release-files.sh" "$files"
+rm "$files/extra.txt" "$files/wordink_arm64.deb"
+expect_fail "files: a missing package" "$linux/check-release-files.sh" "$files"
+
+# --- AUR render-pkgbuild.sh -----------------------------------------------
+aur="$here/../packaging/aur"
+printf '%064d  wordink-1.2.0-rc.1-linux-x64.tar.gz\n%064d  wordink-1.2.0-rc.1-linux-arm64.tar.gz\n' 1 2 > "$work/aur-sums"
+if "$aur/render-pkgbuild.sh" 1.2.0-rc.1 "$work/aur-sums" > "$work/PKGBUILD" 2> "$work/out"; then ok "aur: renders"; else bad "aur: renders"; cat "$work/out"; fi
+if grep -q '^pkgver=1.2.0rc1$' "$work/PKGBUILD" && grep -q '^_version=1.2.0-rc.1$' "$work/PKGBUILD"; then ok "aur: pacman version"; else bad "aur: pacman version"; fi
+if grep -q "^sha256sums_aarch64=('0\{63\}2')$" "$work/PKGBUILD"; then ok "aur: arm64 checksum"; else bad "aur: arm64 checksum"; fi
+if grep -v HEX_BIN "$work/PKGBUILD" | grep -q '@[A-Z0-9_]*@'; then bad "aur: placeholders left"; else ok "aur: no placeholders left"; fi
+expect_fail "aur: a tarball missing from SHA256SUMS" "$aur/render-pkgbuild.sh" 1.2.0 "$work/aur-sums"
+expect_fail "aur: not a release version" "$aur/render-pkgbuild.sh" 1.2 "$work/aur-sums"
 
 # --- release-gate.sh against a fake gh -------------------------------------
 mkdir "$work/bin"

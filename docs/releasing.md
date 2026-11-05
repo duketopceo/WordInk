@@ -32,8 +32,8 @@ No other tag suffix is accepted.
    (`.github/workflows/desktop-release.yml`) runs these jobs in order:
 
    ```text
-   prepare -> gate -> build (x4), sbom -> package-linux -> sign-linux
-           -> draft -> fetch-draft -> smoke (x4) -> publish
+   prepare -> gate -> build (x4), sbom -> package-linux -> check-installers (x4)
+           -> sign-linux -> draft -> fetch-draft -> smoke (x4) -> publish
    ```
 
    - `prepare` checks the tag name and extracts the release notes.
@@ -45,13 +45,26 @@ No other tag suffix is accepted.
      same commit.
    - `build` builds Linux x86_64 and aarch64, Windows x64 and macOS arm64;
      `sbom` writes the CycloneDX SBOM; `package-linux` packs the two Linux
-     tarballs and gathers the three installers. None of these has a secret. The
-     macOS build is the unsigned `WordInk.app` from `scripts/build-app.sh`,
-     zipped with `ditto` so the zip root is `WordInk.app/`.
+     tarballs, AppImages, `.deb` and `.rpm` packages and gathers the three
+     one-line installers. None of these has a secret. The macOS build is the
+     unsigned `WordInk.app` from `scripts/build-app.sh`, zipped with `ditto` so
+     the zip root is `WordInk.app/`, and packed into `WordInk-macos-arm64.dmg`
+     (`packaging/macos/make-dmg.sh`). The Windows leg also compiles the Inno
+     Setup installer (`packaging/windows/wordink.iss`) into
+     `WordInk-Setup-windows-x64.exe`. `package-linux` downloads nfpm,
+     appimagetool and the AppImage runtimes at pinned versions and checks
+     their SHA-256 before running them.
+   - `check-installers` installs what was packed on clean runners, with no
+     secrets and no checkout: the `.deb` (and the AppImage, unpacked) on Ubuntu
+     x86_64 and aarch64, the `.rpm` in a Fedora container, the Setup `.exe`
+     silently (then its uninstaller) on Windows, and the `.dmg` mounted on
+     macOS. Each checks `wordink --version` against the release version. A
+     failure stops the run before anything is signed.
      That macOS leg runs on the self-hosted Mac (label `promax-macos`); to use
      the GitHub-hosted `macos-26` image instead, set the repository variable
      `WORDINK_MACOS_RUNNER` to `hosted`. The self-hosted runner only ever sees
-     tag-triggered runs of this workflow, never pull requests.
+     tag-triggered runs and dispatched dry runs of this workflow (dispatching
+     needs write access), never pull requests.
    - `sign-linux` waits for approval (next step), signs the bare Linux
      executables, writes `stable.json` (final tags only), lists every file in
      `SHA256SUMS`, signs that list, and verifies the result.
@@ -98,8 +111,13 @@ For version `V` (`stable.json` only on final releases):
 | `wordink-V-linux-x64`, `wordink-V-linux-arm64` | bare executables, what the in-app updater installs |
 | `wordink-V-linux-x64.sig`, `wordink-V-linux-arm64.sig` | raw 64-byte ed25519 signature of each executable |
 | `wordink-V-linux-x64.tar.gz`, `wordink-V-linux-arm64.tar.gz` | tarball with the installer, desktop files and icons (made before signing, so it holds no `.sig`) |
-| `wordink-V-macos-arm64.zip` | unsigned `WordInk.app` (zip root `WordInk.app/`) |
-| `wordink-V-windows-x64.zip` | unsigned build with `wordink.exe` |
+| `wordink-V-macos-arm64.zip` | unsigned `WordInk.app` (zip root `WordInk.app/`); what `install-macos.sh` and the macOS updater link use |
+| `wordink-V-windows-x64.zip` | unsigned build with `wordink.exe`; what `install.ps1` and the Windows updater link use |
+| `WordInk-Setup-windows-x64.exe` | per-user Inno Setup installer (no admin, Start Menu shortcut, uninstaller), unsigned |
+| `WordInk-macos-arm64.dmg` | disk image with `WordInk.app` and an Applications link, unsigned, not notarized |
+| `WordInk-linux-x86_64.AppImage`, `WordInk-linux-aarch64.AppImage` | AppImage of the same executable (no bundled libraries, no self-update) |
+| `wordink_amd64.deb`, `wordink_arm64.deb` | Debian/Ubuntu package (nfpm): `/usr/bin/wordink`, launcher entry, icons, systemd user unit |
+| `wordink-x86_64.rpm`, `wordink-aarch64.rpm` | Fedora/openSUSE package with the same contents |
 | `install.sh`, `install-macos.sh`, `install.ps1` | the one-line installers (Linux, macOS, Windows); users run them from `releases/latest/download/` |
 | `wordink-V.sbom.cdx.json` | CycloneDX SBOM |
 | `stable.json` | update manifest the stable-channel updater reads (final releases only) |
@@ -108,7 +126,21 @@ For version `V` (`stable.json` only on final releases):
 | `SHA256SUMS.sig` | raw 64-byte ed25519 signature of `SHA256SUMS` |
 
 `SHA256SUMS` lists every published file except itself and `SHA256SUMS.sig`;
-the workflow fails if the release has any other file or lacks one.
+the workflow fails if the release has any other file or lacks one
+(`apps/desktop/packaging/linux/check-release-files.sh` holds the list).
+
+The installers and packages have no version in their names, so
+`https://github.com/duketopceo/WordInk/releases/latest/download/<name>` (the
+README's Download links) always fetches the newest one. GitHub resolves
+`latest` to the newest **final** release only: a release candidate is a
+prerelease and never `latest`, so its installers are only reachable from its
+own release page (`releases/download/desktop-vX.Y.Z-rc.N/<name>`). The
+versioned zips, tarballs and bare executables keep their names, which the
+updater manifests and the one-line installers rely on; do not rename them.
+
+The AUR template in `apps/desktop/packaging/aur` is filled from a release with
+`render-pkgbuild.sh <version> SHA256SUMS` (it uses the two Linux tarballs).
+Nothing publishes it to the AUR yet.
 
 Check a download with `sha256sum -c SHA256SUMS` (after verifying
 `SHA256SUMS.sig`, below) or `gh attestation verify <file> -R duketopceo/WordInk`.
@@ -137,6 +169,25 @@ The installers use the same message, so do not change the domain strings
 without changing every verifier. `apps/desktop/packaging/linux/verify-release.sh`
 runs this check (and every other) on a release directory, and
 `apps/desktop/scripts/test-release-scripts.sh` tests the scripts.
+
+## Dry run (no release)
+
+To check the build and packaging without a tag, dispatch the workflow on any
+branch:
+
+```sh
+gh workflow run desktop-release.yml -R duketopceo/WordInk --ref <branch> -f dry_run=true
+```
+
+It builds as version `0.0.0-dryrun.<run number>` (channel dev), runs `build`,
+`sbom`, `package-linux` and `check-installers`, then `dry-run-bundle` checks
+the file set, writes an unsigned `SHA256SUMS` and uploads everything as the
+`dry-run-release` workflow artifact. `gate`, `sign-linux`, `draft`,
+`fetch-draft`, `smoke` and `publish` only run for a pushed `desktop-v*` tag,
+so a dispatched run never asks for the `release` environment, never sees the
+signing key, and creates no tag or release. `dry_run=false` fails in `prepare`.
+The macOS leg runs on the self-hosted Mac here too (dispatching needs write
+access to the repository).
 
 ## The Dev channel
 
@@ -211,8 +262,10 @@ next check unless the bad release has been pulled back to a draft.
 | Platform | Download | Updates |
 | --- | --- | --- |
 | Linux x86_64, aarch64 | tarball with `install.sh`; the signed executable | The app downloads the newest release, verifies its ed25519 signature against the key compiled into it, and restarts into it. |
-| macOS (Apple silicon) | zip with `WordInk.app`, **unsigned**; `install-macos.sh` | The app only links to the newest release. It never installs one. |
-| Windows x64 | zip with `wordink.exe`, **unsigned**; `install.ps1` | The app only links to the newest release. It never installs one. |
+| Linux x86_64, aarch64 | `.deb`, `.rpm` | The package manager; the app never replaces a package-managed executable. |
+| Linux x86_64, aarch64 | AppImage | None: download the new AppImage. |
+| macOS (Apple silicon) | `.dmg` or zip with `WordInk.app`, **unsigned**; `install-macos.sh` | The app only links to the newest release. It never installs one. |
+| Windows x64 | Setup `.exe` or zip with `wordink.exe`, **unsigned**; `install.ps1` | The app only links to the newest release. It never installs one. The Setup `.exe` and `install.ps1` install the same layout (`%LOCALAPPDATA%\Programs\WordInk`), so either updates the other's install. |
 
 The tarball is assembled before signing and no longer contains `wordink.sig`,
 which the unpacked `install.sh` still looks for. Until the bootstrap installer
@@ -223,7 +276,10 @@ as `wordink.sig`.
 
 macOS Gatekeeper and Windows SmartScreen will warn about the unsigned builds.
 Signing and notarization are deferred until there are paid developer accounts;
-until then, say so wherever a macOS or Windows download is offered.
+until then, say so wherever a macOS or Windows download is offered, with the
+first-launch steps: Windows SmartScreen **More info > Run anyway**; macOS
+**System Settings > Privacy & Security > Open Anyway** after a first blocked
+open (right-click > **Open** no longer skips Gatekeeper on macOS 15 and later).
 
 ## One-time setup (owner)
 

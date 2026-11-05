@@ -11,9 +11,21 @@ it pastes into whatever app you're in. It is built on
 - with a local model, nothing leaves your machine
 - experimental features live in Labs, at the bottom of the sidebar
 
+## Download
+
+- **Windows 10/11 (x64):** [WordInk-Setup-windows-x64.exe](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-Setup-windows-x64.exe), a per-user installer (no admin)
+- **macOS 15+ (Apple silicon):** [WordInk-macos-arm64.dmg](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-macos-arm64.dmg), drag WordInk to Applications
+- **Linux x86_64:** [AppImage](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-linux-x86_64.AppImage) · [.deb](https://github.com/duketopceo/WordInk/releases/latest/download/wordink_amd64.deb) · [.rpm](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-x86_64.rpm)
+- **Linux aarch64:** [AppImage](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-linux-aarch64.AppImage) · [.deb](https://github.com/duketopceo/WordInk/releases/latest/download/wordink_arm64.deb) · [.rpm](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-aarch64.rpm)
+
+These start with the first release after 1.0.0. The Windows and macOS builds are unsigned, so the first launch warns once:
+
+- Windows SmartScreen: **More info**, then **Run anyway**.
+- macOS: open WordInk once, then **System Settings > Privacy & Security > Open Anyway**. (Right-click > **Open** no longer skips the warning on macOS 15 and later.)
+
 ## Install
 
-WordInk runs on Linux (x86_64 or aarch64), macOS 15+ on Apple silicon, and 64-bit Windows.
+WordInk runs on Linux (x86_64 or aarch64), macOS 15+ on Apple silicon, and 64-bit Windows. The one-line installers below also set up autostart, verify the download and, on Linux, keep WordInk updated from signed releases.
 
 **Linux**
 
