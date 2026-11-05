@@ -635,9 +635,19 @@ pub fn path() -> Option<PathBuf> {
 /// Feeds `tracing` events from Hex's own modules into the debug log.
 pub struct BridgeLayer;
 
+/// A tracing target without its crate prefix.
+fn module_of(target: &str) -> &str {
+    let root = crate::app_paths::crate_root();
+    target
+        .strip_prefix(root)
+        .or_else(|| target.strip_prefix("hex"))
+        .map(|rest| rest.trim_start_matches("::"))
+        .unwrap_or(target)
+}
+
 /// The subsystem a module's events are filed under.
 fn subsystem_of(target: &str) -> &'static str {
-    let module = target.trim_start_matches("hex::");
+    let module = module_of(target);
     let has = |parts: &[&str]| parts.iter().any(|part| module.contains(part));
     if has(&["headset", "bluetooth"]) {
         "bluetooth"
@@ -682,7 +692,7 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for BridgeLayer {
         );
         let mut fields: Vec<(&str, Value)> = vec![(
             "module",
-            Value::String(meta.target().trim_start_matches("hex::").to_owned()),
+            Value::String(module_of(meta.target()).to_owned()),
         )];
         fields.extend(
             visitor
@@ -714,7 +724,7 @@ impl tracing::field::Visit for FieldVisitor {
 /// Whether the [`BridgeLayer`] takes an event: Hex's own, and trace ones
 /// only at the trace level.
 pub fn bridge_wants(meta: &tracing::Metadata<'_>) -> bool {
-    meta.target().starts_with("hex")
+    meta.target().starts_with(crate::app_paths::crate_root())
         && (*meta.level() != tracing::Level::TRACE || TRACE_ON.load(Ordering::Relaxed))
 }
 

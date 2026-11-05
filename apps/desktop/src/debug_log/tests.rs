@@ -392,3 +392,16 @@ fn the_levels_parse_and_order() {
     assert_eq!(DebugLevel::parse("loud"), None);
     assert!(DebugLevel::Info < DebugLevel::Debug && DebugLevel::Debug < DebugLevel::Trace);
 }
+
+#[test]
+fn the_bridge_wants_this_binarys_own_events() {
+    // Targets begin with the binary's crate name, not the package name "hex".
+    assert_eq!(crate::app_paths::crate_root(), "wordink");
+    assert!(module_path!().starts_with(crate::app_paths::crate_root()));
+    assert_eq!(
+        module_of(module_path!()).split("::").next(),
+        Some("debug_log")
+    );
+    assert_eq!(module_of("wordink::windows::dictation"), "windows::dictation");
+    assert_eq!(module_of("hex::linux::paste"), "linux::paste");
+}
