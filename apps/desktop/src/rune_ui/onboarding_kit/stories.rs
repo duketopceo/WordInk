@@ -3,7 +3,7 @@
 //! and in a live desktop window pauses on `"Your turn"` with a focused
 //! [`rune::TextEdit`] so you can hold `⌥` and test real voice dictation live.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -133,6 +133,9 @@ pub(crate) struct Onboard {
     pub(crate) practice_field: bool,
     /// Where Hex lives once onboarding closes, under `"WordInk is ready"`.
     pub(crate) home: super::landing::Home,
+    /// Popups the page built this frame (the microphone menu), drawn above
+    /// it by the window ([`super::live::popups`]).
+    pub(crate) popups: RefCell<Vec<El>>,
 }
 
 /// A story's dictation of [`ANSWER_TRY`] on the interactive `"Your turn"`,
@@ -244,6 +247,7 @@ impl Onboard {
             game: None,
             practice_field: false,
             home: super::landing::Home::MenuBar,
+            popups: RefCell::new(Vec::new()),
         }
     }
 

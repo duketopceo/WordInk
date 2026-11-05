@@ -416,6 +416,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("System default", "Padrão do sistema"),
     ("Hex Microphone is the system default, so WordInk listens to {}", "O Hex Microphone é o padrão do sistema, então o WordInk ouve {}"),
     ("not connected", "não conectado"),
+    ("No microphone found", "Nenhum microfone encontrado"),
+    ("Couldn't list microphones", "Não foi possível listar os microfones"),
     ("{built_in} is off while the lid is closed, so WordInk listens to {input}", "{built_in} fica desligado com a tampa fechada, então o WordInk ouve {input}"),
     ("{} is off while the lid is closed", "{} fica desligado com a tampa fechada"),
     ("off while the lid is closed", "desligado com a tampa fechada"),

@@ -49,11 +49,13 @@ pub(super) const SCENES: &[&str] = &[
     "onboarding-hotkey",
     // The short first run: welcome, the one demo (with Skip), Setup with
     // Finish later (macOS), the test dictation in a plain field, and the
-    // main window's "Set up dictation" row after Finish later.
+    // main window's "Set up dictation" row after Finish later, and the test
+    // dictation with no microphone at all.
     "onboarding-welcome",
     "onboarding-first-demo",
     "mac-onboarding-setup",
     "onboarding-test-dictation",
+    "onboarding-test-dictation-no-microphone",
     "onboarding-set-up-dictation",
     // WordInk is ready.
     "onboarding-ready",

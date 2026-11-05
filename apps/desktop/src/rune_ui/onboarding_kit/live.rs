@@ -27,6 +27,7 @@ use super::super::paste_access::{self, PasteAccess};
 use super::super::platform::Os;
 use super::super::{Request, Ui, onboarding};
 use super::fixture::{Language, Speech};
+use super::mic_line::{Listing, MicPick};
 use super::pill::set_other_label;
 use super::stories::{FRAME, Flow, Onboard, Step, advance_to};
 use crate::desktop::onboarding::{
@@ -91,6 +92,11 @@ pub(crate) struct Live {
     choice: TranscriptionSelection,
     granted_at: Option<f64>,
     checked: Option<Checked>,
+    /// The input Hex records from and the inputs to pick from, from the
+    /// same listing and `microphone` setting as Settings › General.
+    pub(crate) mic: MicPick,
+    /// The microphone capsule's menu is open.
+    pub(crate) mic_open: bool,
     /// Dictation streams send their live words to the practice field.
     _live_words: crate::dictation::live_text::Demand,
 }
@@ -267,6 +273,8 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         choice,
         granted_at: None,
         checked: None,
+        mic: microphone(ui),
+        mic_open: false,
         _live_words: crate::dictation::live_text::demand(),
     });
     let now = clock(ui);
@@ -473,6 +481,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     let relaunch_failed = ui.platform.relaunch_failed;
     let paste = ui.platform.paste;
     let live_window = !ui.is_fixture();
+    let mic = microphone(ui);
     let Some(s) = ui.first_run.as_mut() else {
         return false;
     };
@@ -480,6 +489,10 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         return false;
     };
     live.checked = Some(checked);
+    live.mic = mic;
+    if !live.mic.shown.picks() {
+        live.mic_open = false;
+    }
     s.engine_hold = engine_hold;
     // Linux and Windows ask for no permissions: both rows are ready.
     if !asks_permissions {
@@ -571,6 +584,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
 pub(in crate::rune_ui) fn overlay(ui: &Ui, p: Paint, reduced: bool) -> Option<El> {
     let s = ui.first_run.as_ref()?;
     s.reduced.set(reduced);
+    s.popups.take();
     // The engine and hotkey steps cover the story, which waits underneath.
     if let Some(page) = super::engine_setup::overlay(ui, p) {
         return Some(page);
@@ -582,6 +596,70 @@ pub(in crate::rune_ui) fn overlay(ui: &Ui, p: Paint, reduced: bool) -> Option<El
             .absolute(0.0, 0.0)
             .on_press(|_: &mut Ui| {}),
     )
+}
+
+/// The microphone the first run shows: the listing Settings › General
+/// keeps (`settings::refresh_microphones`), with the saved `microphone`.
+fn microphone(ui: &Ui) -> MicPick {
+    // A scene's listing is set by hand; a live one counts once it ran.
+    let listed = ui.is_fixture() || ui.microphones_route.is_some();
+    let listing = match &ui.microphones {
+        Err(_) => Listing::Failed,
+        Ok(devices)
+            if listed && (ui.microphones_listing.is_none() || !devices.names.is_empty()) =>
+        {
+            Listing::Listed(devices)
+        }
+        Ok(_) => Listing::Pending,
+    };
+    super::mic_line::pick(
+        listing,
+        ui.settings.microphone.as_deref(),
+        &ui.settings.device_names,
+    )
+}
+
+/// The microphone capsule: opens its menu, listing the inputs again, or
+/// closes it.
+pub(super) fn toggle_microphones(ui: &mut Ui) {
+    let Some(live) = ui.first_run.as_mut().and_then(|s| s.live.as_mut()) else {
+        return;
+    };
+    live.mic_open = !live.mic_open && live.mic.shown.picks();
+    if live.mic_open {
+        super::super::settings::refresh_microphones(ui);
+    }
+}
+
+pub(super) fn close_microphones(ui: &mut Ui) {
+    if let Some(live) = ui.first_run.as_mut().and_then(|s| s.live.as_mut()) {
+        live.mic_open = false;
+    }
+}
+
+/// Saves the input chosen in the capsule's menu as `microphone`, the
+/// setting Settings › General picks: `None` is System default.
+pub(super) fn choose_microphone(id: Option<String>) -> impl Fn(&mut Ui) + 'static {
+    move |ui: &mut Ui| {
+        close_microphones(ui);
+        if ui.settings.microphone != id {
+            let id = id.clone();
+            ui.update(|settings| settings.microphone = id);
+        }
+        let mic = microphone(ui);
+        if let Some(live) = ui.first_run.as_mut().and_then(|s| s.live.as_mut()) {
+            live.mic = mic;
+        }
+    }
+}
+
+/// The capsule menu's popups, built with the first run's page, to draw above
+/// it.
+pub(in crate::rune_ui) fn popups(ui: &Ui) -> Vec<El> {
+    ui.first_run
+        .as_ref()
+        .map(|s| s.popups.take())
+        .unwrap_or_default()
 }
 
 /// A story handler run on the window's first run.

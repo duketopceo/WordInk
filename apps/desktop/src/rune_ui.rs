@@ -1305,10 +1305,11 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= found::poll(ui);
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);
-    // General names the input in use; list again when the OS reports an
-    // input change. Windows reports a default change only to an open
-    // default stream, so there the list is also refreshed every few seconds.
-    if ui.pane == Pane::General
+    // General and the first run's microphone capsule name the input in use;
+    // list again when the OS reports an input change. Windows reports a
+    // default change only to an open default stream, so there the list is
+    // also refreshed every few seconds.
+    if (ui.pane == Pane::General || ui.first_run.is_some())
         && ui.live()
         && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible)
         && (ui.microphones_route != Some(crate::audio::input_route_generation())
@@ -1476,6 +1477,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     }
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);
+        layer.extend(onboarding_kit::live::popups(ui));
     }
     rune_kit::root(window, layer).on_window_focus(window_focused)
 }
