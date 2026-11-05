@@ -381,7 +381,7 @@ impl Pump {
         if !crate::app_settings::meetings_enabled() {
             return Some(ControlReply::error(
                 "feature-off",
-                "Meetings are off; turn them on with `wordink settings set meetings.enabled on`",
+                crate::app_settings::meetings_off_reason(),
             ));
         }
         let request = match (&self.meeting_state, stop) {

@@ -8,13 +8,18 @@
 use color_eyre::eyre::Result;
 
 use crate::app_settings::{AppSettings, HotkeyBinding};
+use crate::desktop::host::DesktopShortcuts;
 use crate::linux::gsettings::{gsettings, string_list, string_list_text, string_text};
 
 const LIST_SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys";
 const ENTRY_SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding";
 const BASE: &str = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/";
 /// Every entry Hex may write, by path name.
-const ENTRIES: [&str; 3] = ["wordink-dictation", "wordink-paste-last", "wordink-annotate"];
+const ENTRIES: [&str; 3] = [
+    "wordink-dictation",
+    "wordink-paste-last",
+    "wordink-annotate",
+];
 
 /// One custom shortcut: its path name, its name in GNOME Settings, the `hex`
 /// arguments it runs, and its GTK accelerator.
@@ -24,6 +29,20 @@ struct Entry {
     name: &'static str,
     arguments: &'static str,
     accelerator: String,
+}
+
+/// Whether Hex's entries should exist, or `None` while a starting listener
+/// hasn't said how it gets its shortcuts. They stand in for a missing
+/// shortcuts portal only: once the portal (or X11) binds the shortcuts, an
+/// entry on the same key would also run `hex dictation toggle` on every press
+/// and repeat, stopping the hold the portal just started (#931).
+pub(crate) fn wanted(requested: bool, shortcuts: Option<DesktopShortcuts>) -> Option<bool> {
+    match shortcuts {
+        _ if !requested => Some(false),
+        Some(DesktopShortcuts::Commands) => Some(true),
+        Some(DesktopShortcuts::Portal(_) | DesktopShortcuts::Registered) => Some(false),
+        Some(DesktopShortcuts::Unregistered) | None => None,
+    }
 }
 
 /// Writes Hex's entries for `settings`' shortcuts, starting `hex`, and
@@ -221,6 +240,25 @@ mod tests {
             key: None,
         };
         assert_eq!(accelerator(&modifiers_only), None);
+    }
+
+    /// #931: the entries only stand in for a missing portal; with the portal
+    /// bound they'd toggle on every press and repeat.
+    #[test]
+    fn entries_exist_only_without_the_portal() {
+        assert_eq!(wanted(true, Some(DesktopShortcuts::Commands)), Some(true));
+        assert_eq!(
+            wanted(true, Some(DesktopShortcuts::Portal(Vec::new()))),
+            Some(false)
+        );
+        assert_eq!(
+            wanted(true, Some(DesktopShortcuts::Registered)),
+            Some(false)
+        );
+        assert_eq!(wanted(true, Some(DesktopShortcuts::Unregistered)), None);
+        assert_eq!(wanted(true, None), None);
+        assert_eq!(wanted(false, Some(DesktopShortcuts::Commands)), Some(false));
+        assert_eq!(wanted(false, None), Some(false));
     }
 
     #[test]

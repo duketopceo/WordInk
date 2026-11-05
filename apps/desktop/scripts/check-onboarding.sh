@@ -5,9 +5,11 @@
 # fixtures, so they render here too.
 #
 #   1. Renders every onboarding scene (Setting up WordInk with nothing found,
-#      a stopped download, the model step with found models, with the
+#      a stopped download, Settings after Continue without a model, the model
+#      step with found models, with the
 #      recommended model already present, ours downloading, Back to it, the
-#      demo, permissions, Windows' microphone switch, Almost ready, the
+#      demo, permissions, Windows' microphone switch, the paste permission on
+#      GNOME and KDE Wayland, Almost ready, the
 #      practice game, the short first run's welcome, demo with Skip,
 #      permissions with Finish later, test dictation and "Set up dictation",
 #      WordInk is ready) in both
@@ -17,7 +19,10 @@
 #      (HEX_UPDATE_GOLDENS=1 cargo test --bin wordink onboarding_goldens). A GPU
 #      adapter is required (Mesa's lavapipe will do), so the check never
 #      passes by skipping.
-#   2. Walks a first run through the real onboarding in a clean temporary
+#   2. Checks Continue without a model: it shows only on the download step
+#      once the download failed or stalled, finishes onboarding, and Settings
+#      says no model is installed.
+#   3. Walks a first run through the real onboarding in a clean temporary
 #      data folder (fresh settings, no models, an empty Hugging Face cache, an
 #      English locale): welcome, the demo (skipped), the local engine, which
 #      downloads and verifies the model, the shortcut, the test dictation
@@ -56,7 +61,7 @@ run_one() {
 scenes=$(awk '/^pub\(super\) const SCENES/,/^\];/' src/rune_ui/tests/onboarding_check.rs | grep -c '^    "')
 # Every scene in both appearances, plus the 823 px tiling-desktop try page.
 expected=$((scenes * 2 + 2))
-status=0 goldens=pass walkthrough=pass
+status=0 goldens=pass without_model=pass walkthrough=pass
 
 echo "== Onboarding scenes against their goldens"
 if ! run_one "$work/goldens.log" rune_ui::tests::onboarding_check::onboarding_goldens \
@@ -69,6 +74,12 @@ if [ "$rendered" != "$expected" ]; then
   goldens=fail status=1
 fi
 changed=$(grep -oE '^[a-z0-9-]+: [0-9]+ pixels differ|rune-[a-z0-9-]+\.png is missing' "$work/goldens.log" || true)
+
+echo "== Continue without a model"
+if ! run_one "$work/without-model.log" \
+  rune_ui::tests::onboarding_check::onboarding_continue_without_model; then
+  without_model=fail status=1
+fi
 
 echo "== First run in a clean data folder"
 if ! run_one "$work/walkthrough.log" rune_ui::tests::onboarding_check::onboarding_walkthrough \
@@ -86,6 +97,7 @@ fi
     echo "- Changed scenes:"
     printf '%s\n' "$changed" | sed 's/^/  - /'
   fi
+  echo "- Continue without a model, only after a failed or stalled download: $without_model"
   echo "- First run in a clean data folder: $walkthrough"
   grep -h '^onboarding walkthrough:' "$work/walkthrough.log" | sed 's/^/  - /' || true
 } > "$out/summary.md"

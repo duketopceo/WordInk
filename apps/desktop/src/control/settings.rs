@@ -409,6 +409,21 @@ const KEYS: &[Key] = &[
         "Labs: a Copy Recent Dictation submenu in the menu bar that copies one of the last five dictations (macOS)",
     ),
     key(
+        "labs.skip_pauses",
+        Kind::Bool,
+        "Labs: a dictation transcribed as a whole clip hears only the start and end of each long pause, so slow computers paste sooner (Linux and Windows)",
+    ),
+    key(
+        "labs.stop_when_call_ends",
+        Kind::Bool,
+        "Labs: a meeting recording WordInk started on its own stops 30 s after its call app leaves the microphone and goes quiet, unless you keep recording (macOS)",
+    ),
+    key(
+        "labs.output_fixes",
+        Kind::Bool,
+        "Labs: Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
@@ -521,7 +536,9 @@ const KEYS: &[Key] = &[
     ),
     optional(
         "ui_language",
-        Kind::Choice(&["en", "pl", "zh", "ja", "de", "es", "uk", "pt", "fr"]),
+        Kind::Choice(&[
+            "en", "pl", "zh", "zh-Hant", "ja", "de", "es", "uk", "pt", "fr",
+        ]),
         "Interface language; none follows the system",
     ),
     key(
@@ -650,6 +667,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("meetings.", "meetings"),
     ("labs.live_chapters", "meetings"),
     ("labs.subtitle_export", "meetings"),
+    ("labs.stop_when_call_ends", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),
     ("keyboard_model_switching.", "keyboard_model_switching"),
@@ -667,6 +685,13 @@ fn needs(key: &str) -> Option<&'static str> {
 
 /// Why `hex settings set` refuses `name` on this OS, if it does.
 pub fn unavailable(name: &str) -> Option<ControlError> {
+    unavailable_under(name, crate::policy::Policy::current())
+}
+
+fn unavailable_under(name: &str, policy: crate::policy::Policy) -> Option<ControlError> {
+    if let Some(lock) = policy.setting_lock(name) {
+        return Some(managed(name, lock));
+    }
     if let Some(feature) = crate::labs::Feature::for_settings_key(name)
         && !feature.shipped()
     {
@@ -682,6 +707,13 @@ pub fn unavailable(name: &str) -> Option<ControlError> {
             "`{name}` does nothing on this OS: it needs {capability}, which WordInk has only elsewhere"
         ),
     ))
+}
+
+fn managed(name: &str, lock: crate::policy::Lock) -> ControlError {
+    ControlError::new(
+        "managed",
+        format!("`{name}` can't be changed: {}", lock.refusal()),
+    )
 }
 
 /// Every key, in registry order.
@@ -812,7 +844,10 @@ fn value_of(key: &Key, json: &Value) -> SettingValue {
             Kind::Choice(choices) => choices.iter().map(|&choice| choice.into()).collect(),
             _ => Vec::new(),
         },
-        writable: key.read_only.is_none(),
+        writable: key.read_only.is_none()
+            && crate::policy::Policy::current()
+                .setting_lock(key.key)
+                .is_none(),
         about: key.about.into(),
         available: needs(key.key).is_none_or(crate::rune_ui::capability),
     }
@@ -1254,7 +1289,7 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
             let normalized = trimmed.to_ascii_lowercase().replace('-', "_");
             let choice = choices
                 .iter()
-                .find(|choice| **choice == normalized)
+                .find(|choice| choice.to_ascii_lowercase().replace('-', "_") == normalized)
                 .ok_or_else(|| invalid(name, &format!("expected one of {}", choices.join(", "))))?;
             Ok(if name == "meetings.calendar.lead_minutes" {
                 let minutes: u8 = choice.parse().expect("lead choices are numbers");
@@ -1510,6 +1545,32 @@ mod tests {
         assert!(!older.developer_mode && !older.debug_logging_transcripts);
     }
 
+    #[test]
+    fn a_managed_setting_is_refused() {
+        use crate::policy::{Lock, Policy};
+        let policy = Policy::default()
+            .with(Lock::Meetings)
+            .with(Lock::Annotate)
+            .with(Lock::OpenCodeProcessing);
+        for name in [
+            "meetings.enabled",
+            "capture.enabled",
+            "meetings.summarize_with_opencode",
+        ] {
+            let error = unavailable_under(name, policy).expect(name);
+            assert_eq!(error.code, "managed");
+            assert!(error.message.contains("managed by your organization"));
+        }
+        assert!(unavailable_under("sound_effects", policy).is_none());
+        assert!(unavailable_under("labs.live_text", policy).is_none());
+        let labs = Policy::default().with(Lock::Labs);
+        assert_eq!(
+            unavailable_under("labs.live_text", labs).map(|error| error.code),
+            Some("managed")
+        );
+        assert!(unavailable_under("labs.live_text", Policy::default()).is_none());
+    }
+
     fn rules() -> ShortcutRules {
         ShortcutRules {
             key_named: |name| match name.to_ascii_lowercase().as_str() {
@@ -1598,6 +1659,18 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), keys().count(), "a key is listed twice");
+    }
+
+    #[test]
+    fn ui_language_accepts_traditional_chinese_in_any_case() {
+        for raw in ["zh-Hant", "zh-hant", "ZH_HANT"] {
+            let change = apply(&AppSettings::default(), "ui_language", raw, &rules()).unwrap();
+            let shown = get(&change.settings, "ui_language").unwrap();
+            assert_eq!(shown[0].value, Value::String("zh-Hant".into()), "{raw}");
+        }
+        let change = apply(&AppSettings::default(), "ui_language", "zh", &rules()).unwrap();
+        let shown = get(&change.settings, "ui_language").unwrap();
+        assert_eq!(shown[0].value, Value::String("zh".into()));
     }
 
     #[test]
@@ -1963,18 +2036,28 @@ mod tests {
     fn the_meeting_engine_is_its_own_setting_that_leaves_dictation_alone() {
         use crate::transcription::cloud::EngineChoice;
         let defaults = AppSettings::default();
-        assert_eq!(defaults.meeting_engine, None, "meetings stay local by default");
+        assert_eq!(
+            defaults.meeting_engine, None,
+            "meetings stay local by default"
+        );
         assert_eq!(defaults.meeting_engine_model, None);
-        let set = |settings: &AppSettings, key: &str, value: &str| {
-            apply(settings, key, value, &rules())
-        };
+        let set =
+            |settings: &AppSettings, key: &str, value: &str| apply(settings, key, value, &rules());
         let groq = set(&defaults, "engine", "groq").unwrap().settings;
         let meeting = set(&groq, "meeting_engine", "openrouter").unwrap().settings;
         assert_eq!(meeting.meeting_engine, Some(EngineChoice::Openrouter));
-        assert_eq!(meeting.engine, EngineChoice::Groq, "dictation keeps its engine");
-        let meeting = set(&meeting, "meeting_engine_model", "microsoft/mai-transcribe-2")
-            .unwrap()
-            .settings;
+        assert_eq!(
+            meeting.engine,
+            EngineChoice::Groq,
+            "dictation keeps its engine"
+        );
+        let meeting = set(
+            &meeting,
+            "meeting_engine_model",
+            "microsoft/mai-transcribe-2",
+        )
+        .unwrap()
+        .settings;
         assert_eq!(
             meeting.meeting_engine_model.as_deref(),
             Some("microsoft/mai-transcribe-2")
@@ -1982,26 +2065,38 @@ mod tests {
         assert_eq!(meeting.engine_model, None, "dictation keeps its model");
         // The model is checked against the meeting engine, not the dictation one.
         assert_eq!(
-            set(&meeting, "meeting_engine_model", "not-an-id").unwrap_err().code,
+            set(&meeting, "meeting_engine_model", "not-an-id")
+                .unwrap_err()
+                .code,
             "invalid-value"
         );
         let on_groq = set(&meeting, "meeting_engine", "groq").unwrap().settings;
         assert!(set(&on_groq, "meeting_engine_model", "whisper-large-v3").is_ok());
         assert_eq!(
-            set(&on_groq, "meeting_engine_model", "microsoft/mai-transcribe-2")
-                .unwrap_err()
-                .code,
+            set(
+                &on_groq,
+                "meeting_engine_model",
+                "microsoft/mai-transcribe-2"
+            )
+            .unwrap_err()
+            .code,
             "invalid-value"
         );
         // Both can be cleared, and a bad engine is refused.
         let cleared = set(&meeting, "meeting_engine", "none").unwrap().settings;
         assert_eq!(cleared.meeting_engine, None);
-        assert_eq!(set(&meeting, "meeting_engine", "bogus").unwrap_err().code, "invalid-value");
+        assert_eq!(
+            set(&meeting, "meeting_engine", "bogus").unwrap_err().code,
+            "invalid-value"
+        );
         // Saved settings written before the setting existed still read.
         let json = serde_json::to_string(&defaults).unwrap();
         let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
         value.as_object_mut().unwrap().remove("meeting_engine");
-        value.as_object_mut().unwrap().remove("meeting_engine_model");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("meeting_engine_model");
         let old: AppSettings = serde_json::from_value(value).unwrap();
         assert_eq!(old.meeting_engine, None);
     }

@@ -84,7 +84,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
         .children(reopen(p, s));
     // The real window has no title bar: the top of the page moves it.
     let top = if s.live.is_some() {
-        super::super::title_bar(top)
+        super::super::sidebar::title_bar(top)
     } else {
         top
     };
@@ -541,6 +541,41 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         .child(head)
         .child(progress_capsule)
         .children(retry)
+        .children(without_model(p, s))
+}
+
+/// The one way past a model that can't be had (#894): once its download
+/// failed or stalled, and every permission is ready, onboarding can finish
+/// without one.
+fn without_model(p: Paint, s: &Onboard) -> Option<El> {
+    s.live
+        .as_ref()
+        .filter(|live| s.granted && live.model_blocked())
+        .map(|_| {
+            col()
+                .key("without-model")
+                .gap(6.0)
+                .items_center()
+                .transition(arrives())
+                .child(
+                    Button::new(tr("Continue without a model"))
+                        .variant(ButtonVariant::Ghost)
+                        .on_press(live::continue_without_model)
+                        .build_push(p.k)
+                        .key("continue-without-model"),
+                )
+                .child(
+                    text(tr(
+                        "Dictation won't work until you add a model with Add model file… in Settings.",
+                    ))
+                    .key("without-model-why")
+                    .font(DESCRIPTION)
+                    .color(p.muted())
+                    .align(rune::Align::Center)
+                    .wrap()
+                    .w(TRY_W),
+                )
+        })
 }
 
 fn demo_page(p: Paint, s: &Onboard) -> El {
