@@ -10,7 +10,8 @@ hicolor=$root/packaging/linux/icons/hicolor
 status=0
 fail() { echo "icon check: $1" >&2; status=1; }
 
-for size in $(sed -n 's/^hicolor //p' "$root/scripts/icons/manifest.txt"); do
+sizes=$(sed -n "s/^hicolor //p" "$root/scripts/icons/manifest.txt")
+for size in $sizes; do
   file=$hicolor/${size}x${size}/apps/$name.png
   [ -f "$file" ] || { fail "missing $file"; continue; }
   [ "$(magick identify -format '%wx%h' "$file")" = "${size}x${size}" ] \
