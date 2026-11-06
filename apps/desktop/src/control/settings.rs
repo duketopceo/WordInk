@@ -236,7 +236,7 @@ const KEYS: &[Key] = &[
         "cancel_hotkey",
         Kind::Shortcut(HotkeySlot::Cancel),
         "Cancel a recording: discards it and inserts nothing; none (the default) leaves \
-         only pressing Esc twice (Linux; Windows and macOS don't act on it yet)",
+         only pressing Esc twice (on every platform)",
     ),
     optional(
         "second_dictation_hotkey",

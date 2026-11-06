@@ -23,7 +23,7 @@ Status: **covered** (works today), **filled** (a small gap closed by U6),
 | `pause_media_ignored_players`, `duck_media_fade_ms` | none; all playing players pause, the ramp is fixed | gap, S |
 | `[audio.feedback]` sounds and themes | `sound_effects`, `sound_effect_volume`, `sound_theme` (7 sets: Signature, Classic, Click, Soft, Wood, Analog, Thock) | covered |
 | Custom feedback sound directory | none | gap, S |
-| Cancel a recording (`record cancel`, cancel key) | `cancel_hotkey` setting (rebindable, `wordink settings set cancel_hotkey ...`) and pressing Esc twice within 600 ms while recording; pressing the dictation hotkey again stops and inserts. `wordink dictation cancel` is removed by design (#786) | covered on Linux; Windows and macOS do not act on Esc-twice yet (U4 follow-up, M) |
+| Cancel a recording (`record cancel`, cancel key) | `cancel_hotkey` setting (rebindable, `wordink settings set cancel_hotkey ...`) and pressing Esc twice within 600 ms while recording; pressing the dictation hotkey again stops and inserts. `wordink dictation cancel` is removed by design (#786) | covered on Linux; Windows (keyboard hook) and macOS (event tap) wired to the same Esc-twice state machine, pending a real-hardware check |
 | `output.auto_submit`, `smart_auto_submit` ("submit" presses Enter), `append_text`, `shift_enter_newlines` | none in WordInk | gap, M (needs an Enter inject on three OSes; not in the U6 take-list) |
 | Meeting mode, engines, OSD, per-phase notifications, hooks | outside U6 (other units) | not assessed here |
 

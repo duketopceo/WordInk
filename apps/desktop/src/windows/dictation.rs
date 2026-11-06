@@ -66,6 +66,8 @@ pub struct WindowsDictationConfig {
     pub paste_last_hotkey: Option<WindowsHotkey>,
     /// Dictate without processing, while it is bound.
     pub raw_dictation_hotkey: Option<WindowsHotkey>,
+    /// Cancels a recording, while it is bound (Escape twice always does).
+    pub cancel_hotkey: Option<WindowsHotkey>,
     /// The Annotate key, while Annotate is on.
     pub annotate_hotkey: Option<WindowsHotkey>,
     pub double_tap_lock: bool,
@@ -116,6 +118,7 @@ impl WindowsDictationConfig {
                 .raw_dictation_hotkey
                 .as_ref()
                 .map(WindowsHotkey::from),
+            cancel_hotkey: settings.cancel_hotkey.as_ref().map(WindowsHotkey::from),
             annotate_hotkey: settings
                 .capture_on()
                 .then(|| WindowsHotkey::from(&settings.capture.hotkey)),
@@ -161,6 +164,7 @@ pub fn run(
         hotkey,
         paste_last_hotkey,
         raw_dictation_hotkey,
+        cancel_hotkey,
         annotate_hotkey,
         double_tap_lock,
         double_tap_only,
@@ -229,6 +233,7 @@ pub fn run(
         hotkey,
         paste_last_hotkey,
         raw_dictation_hotkey,
+        cancel_hotkey,
         annotate_hotkey,
         double_tap_lock,
         double_tap_only,
@@ -319,6 +324,7 @@ pub fn run(
                 hotkey: next_config.hotkey,
                 paste_last_hotkey: next_config.paste_last_hotkey,
                 raw_dictation_hotkey: next_config.raw_dictation_hotkey,
+                cancel_hotkey: next_config.cancel_hotkey,
                 annotate_hotkey: next_config.annotate_hotkey,
                 double_tap_lock: next_config.double_tap_lock,
                 double_tap_only: next_config.double_tap_only,
@@ -939,6 +945,7 @@ struct Shortcuts {
     hotkey: WindowsHotkey,
     paste_last_hotkey: Option<WindowsHotkey>,
     raw_dictation_hotkey: Option<WindowsHotkey>,
+    cancel_hotkey: Option<WindowsHotkey>,
     annotate_hotkey: Option<WindowsHotkey>,
     double_tap_lock: bool,
     double_tap_only: bool,
@@ -954,6 +961,7 @@ impl Shortcuts {
             self.hotkey.clone(),
             self.paste_last_hotkey.clone(),
             self.raw_dictation_hotkey.clone(),
+            self.cancel_hotkey.clone(),
             self.annotate_hotkey.clone(),
             self.double_tap_lock,
             self.double_tap_lock && self.double_tap_only,

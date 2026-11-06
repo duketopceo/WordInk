@@ -1428,6 +1428,7 @@ impl ShortcutSuppression {
                 capture: None,
                 raw_dictation: None,
                 second_dictation: None,
+                cancel: None,
             },
             delivered,
             false,
@@ -1612,6 +1613,8 @@ pub struct DictationHotkey {
     // that hold both sides of one.
     side_down_at: HashMap<u64, CaptureInstant>,
     physical: PhysicalKeyboard,
+    /// The Escape-twice cancel gesture.
+    escape_cancel: crate::escape_cancel::EscapeCancel,
 }
 
 impl DictationHotkey {
@@ -1656,6 +1659,7 @@ impl DictationHotkey {
             key_down_at: HashMap::new(),
             side_down_at: HashMap::new(),
             physical: PhysicalKeyboard::SESSION,
+            escape_cancel: crate::escape_cancel::EscapeCancel::default(),
         }
     }
 
@@ -1719,6 +1723,7 @@ impl DictationHotkey {
         self.side_down_at.clear();
         self.stale_keys_neutral_since = None;
         self.chord_break_at = None;
+        self.escape_cancel.reset();
         was_recording.then_some(HotkeyAction::Cancel)
     }
 
@@ -2023,6 +2028,38 @@ impl DictationHotkey {
         }
     }
 
+    /// The Cancel shortcut, or a bare Escape pressed twice, discards a
+    /// recording. Idle, neither does anything.
+    fn cancel_gesture(&mut self, event: InputEvent) -> Option<HotkeyAction> {
+        let InputEvent::Key {
+            code,
+            down: true,
+            flags,
+        } = event
+        else {
+            return None;
+        };
+        let recording = self.is_recording();
+        let bound = crate::app_settings::runtime_hotkeys()
+            .cancel
+            .is_some_and(|binding| binding.matches_key_press(code, flags));
+        if bound {
+            self.escape_cancel.reset();
+            return recording.then_some(HotkeyAction::Cancel);
+        }
+        if code != ESCAPE_KEY_CODE {
+            self.escape_cancel.other_key();
+            return None;
+        }
+        if flags & HOTKEY_MODIFIERS_MASK != 0 {
+            self.escape_cancel.other_key();
+            return None;
+        }
+        self.escape_cancel
+            .pressed(std::time::Instant::now(), recording)
+            .then_some(HotkeyAction::Cancel)
+    }
+
     fn process_event(&mut self, event: InputEvent, now: CaptureInstant) -> Option<HotkeyAction> {
         self.stale_keys_neutral_since = None;
         if matches!(event, InputEvent::TapDisabled) {
@@ -2068,6 +2105,11 @@ impl DictationHotkey {
         if fresh_key_down
             && let Some(action) = paste_action(event, crate::app_settings::runtime_hotkeys())
         {
+            self.state = State::Dirty;
+            return Some(action);
+        }
+
+        if fresh_key_down && let Some(action) = self.cancel_gesture(event) {
             self.state = State::Dirty;
             return Some(action);
         }
@@ -2957,6 +2999,7 @@ mod tests {
             capture: None,
             raw_dictation: None,
             second_dictation: None,
+            cancel: None,
         }
     }
 

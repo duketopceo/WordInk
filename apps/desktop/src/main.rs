@@ -37,6 +37,7 @@ mod keyboard;
 #[cfg_attr(target_os = "windows", path = "keyboard_input_sources/windows.rs")]
 #[cfg_attr(target_os = "linux", path = "keyboard_input_sources/x11.rs")]
 mod keyboard_input_sources;
+mod escape_cancel;
 mod keyboard_kind;
 mod keys;
 mod labs;
