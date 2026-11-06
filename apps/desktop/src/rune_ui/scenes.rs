@@ -194,8 +194,19 @@ pub(super) const SCENES: &[Scene] = &[
             onboarding::poll(ui);
         });
     }),
+    ("onboarding-engine-neural-engine", |ui| {
+        engine_step(ui, engine_probe_neural_engine(), |_| {});
+    }),
     ("onboarding-hotkey", |ui| {
         engine_step(ui, engine_probe(true), |ui| {
+            onboarding_kit::engine_setup::choose_local(ui);
+            onboarding::input(ui, crate::desktop::onboarding::Input::Continue);
+        });
+    }),
+    ("onboarding-hotkey-other-tool", |ui| {
+        let mut probed = engine_probe(true);
+        probed.other_tools = vec![crate::hardware::tools::OtherTool::Voxtype];
+        engine_step(ui, probed, |ui| {
             onboarding_kit::engine_setup::choose_local(ui);
             onboarding::input(ui, crate::desktop::onboarding::Input::Continue);
         });
@@ -870,9 +881,21 @@ fn engine_probe(gpu: bool) -> crate::hardware::Probed {
                 x86: false,
                 avx2: false,
             },
+            neural_engine: false,
         },
         has_groq_key: false,
+        other_tools: Vec::new(),
     }
+}
+
+/// Linux on Apple silicon with the Neural Engine runtime ready: a GPU the
+/// probe could not name, and the Neural Engine recommended.
+fn engine_probe_neural_engine() -> crate::hardware::Probed {
+    let mut probed = engine_probe(true);
+    probed.probe.gpu.name = None;
+    probed.probe.gpu.vendor = crate::hardware::gpu::Vendor::Other;
+    probed.probe.neural_engine = true;
+    probed
 }
 
 /// The first run at its engine step, then `then` as a person would act.

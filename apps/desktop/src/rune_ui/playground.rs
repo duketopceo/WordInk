@@ -299,7 +299,15 @@ const PATHS: &[(&str, &str)] = &[
         "onboarding-engine-local",
         "Linux & Windows/Onboarding · engine, downloading",
     ),
+    (
+        "onboarding-engine-neural-engine",
+        "Linux & Windows/Onboarding · engine, Neural Engine",
+    ),
     ("onboarding-hotkey", "Linux & Windows/Onboarding · shortcut"),
+    (
+        "onboarding-hotkey-other-tool",
+        "Linux & Windows/Onboarding · shortcut, other tool",
+    ),
     ("onboarding-welcome", "Linux & Windows/Onboarding · welcome"),
     (
         "onboarding-first-demo",

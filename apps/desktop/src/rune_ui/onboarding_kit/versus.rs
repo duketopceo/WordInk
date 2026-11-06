@@ -298,6 +298,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
     let kb_el = keyboard_lit(
         p,
         "keyboard",
+        keyboard::Legends::for_home(s.home),
         enter_u,
         dim,
         |id| key_depth(s, id),

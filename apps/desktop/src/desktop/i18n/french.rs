@@ -15,6 +15,9 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("{tool} is also installed here. If it listens for the same shortcut, change one of them.", "{tool} est aussi installé ici. S'il écoute le même raccourci, changez l'un des deux."),
+    ("Apple Neural Engine ready.", "Apple Neural Engine prêt."),
+    ("The Neural Engine runs it fast and leaves the GPU free, and nothing leaves this computer.", "Le Neural Engine l'exécute rapidement en laissant le GPU libre, et rien ne quitte cet ordinateur."),
     ("In a private file beside your settings, <provider>.key. This instance has its own data folder, so keys come only from <folder>/<provider>.key; set WORDINK_ALLOW_SYSTEM_KEYS=1 to also use the environment and the OS keyring. Never in the settings file or a log.", "Dans un fichier privé à côté de vos réglages, <provider>.key. Cette instance a son propre dossier de données : les clés ne viennent que de <folder>/<provider>.key ; définissez WORDINK_ALLOW_SYSTEM_KEYS=1 pour utiliser aussi l'environnement et le trousseau du système. Jamais dans le fichier de réglages ni dans un journal."),
     ("Fix results in Output", "Corriger les résultats dans Sortie"),
     ("Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result", "Propose Vocabulaire et Corriger ceci à côté du résultat d'essai de Sortie, pour corriger un résultat erroné"),

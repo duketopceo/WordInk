@@ -17,7 +17,7 @@ use crate::desktop::i18n::tr;
 
 const H: f32 = 28.0;
 /// The stories' and playground's microphone, never the real first run's.
-pub(crate) const DEMO_NAME: &str = "MacBook Pro Microphone";
+pub(crate) const DEMO_NAME: &str = "Built-in Microphone";
 
 /// Where the input listing stands.
 #[derive(Clone, Copy, Debug)]

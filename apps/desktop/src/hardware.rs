@@ -9,11 +9,15 @@
 use std::sync::Mutex;
 
 pub mod gpu;
+pub mod tools;
 
 use crate::transcription::cloud::Provider;
 
 /// The model local dictation recommends: its wire name in the catalogue.
 pub const PARAKEET_V3: &str = "parakeet_v3";
+/// The same model on the Apple Neural Engine (Linux on Apple silicon), which
+/// local dictation recommends where its runtime answers.
+pub const PARAKEET_V3_ANE: &str = "parakeet_v3_ane";
 /// Local dictation wants at least this much RAM (GB).
 pub const MIN_LOCAL_RAM_GB: f64 = 8.0;
 
@@ -47,6 +51,9 @@ pub struct Probe {
     /// System RAM. 0 when it could not be read.
     pub ram_gb: f64,
     pub cpu_features: CpuFeatures,
+    /// The Apple Neural Engine and its runtime are ready here (Linux on
+    /// Apple silicon only; see `transcription::ane::probe`).
+    pub neural_engine: bool,
 }
 
 /// One device, as the probe classifies it.
@@ -78,6 +85,8 @@ pub enum Reason {
     SoftwareGpu,
     LowMemory,
     FitsLocal,
+    /// The Apple Neural Engine runs the local model.
+    NeuralEngine,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -144,8 +153,9 @@ pub fn parse_meminfo(text: &str) -> Option<f64> {
 /// The recommendation for `probe`, in this order: a key already set means
 /// Groq; x86 without AVX2 can't run the local model well; no GPU, or only a
 /// software driver, means Groq; known RAM under [`MIN_LOCAL_RAM_GB`] means
-/// Groq; otherwise Parakeet v3 on this computer. Each names the other as the
-/// alternative. Unknown RAM (0) does not rule local out.
+/// Groq; otherwise Parakeet v3 on this computer, on the Neural Engine where
+/// that is ready. Each names the other as the alternative. Unknown RAM (0)
+/// does not rule local out.
 pub fn recommend(probe: &Probe, has_groq_key: bool) -> Recommendation {
     const GROQ: Choice = Choice::Cloud(Provider::Groq);
     const LOCAL: Choice = Choice::Local(PARAKEET_V3);
@@ -159,6 +169,14 @@ pub fn recommend(probe: &Probe, has_groq_key: bool) -> Recommendation {
     }
     if probe.cpu_features.x86 && !probe.cpu_features.avx2 {
         return cloud(Reason::NoAvx2);
+    }
+    // The Neural Engine needs no GPU driver: its own runtime drives it.
+    if probe.neural_engine && !(probe.ram_gb > 0.0 && probe.ram_gb < MIN_LOCAL_RAM_GB) {
+        return Recommendation {
+            primary: Choice::Local(PARAKEET_V3_ANE),
+            alternative: GROQ,
+            reason: Reason::NeuralEngine,
+        };
     }
     if probe.gpu.status == gpu::GpuStatus::NeedsDriver {
         return cloud(Reason::NeedsDriver);
@@ -178,11 +196,13 @@ pub fn recommend(probe: &Probe, has_groq_key: bool) -> Recommendation {
     }
 }
 
-/// What the probe found, with whether a Groq key is already set.
+/// What the probe found, with whether a Groq key is already set and which
+/// other dictation tools are installed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Probed {
     pub probe: Probe,
     pub has_groq_key: bool,
+    pub other_tools: Vec<tools::OtherTool>,
 }
 
 impl Probed {
@@ -262,7 +282,26 @@ pub fn probe() -> Probe {
             #[cfg(not(target_arch = "x86_64"))]
             avx2: false,
         },
+        neural_engine: neural_engine_ready(),
     }
+}
+
+/// Whether the Neural Engine engine could run now. Only Linux on Apple
+/// silicon asks the runtime (a short subprocess, on the probe's thread);
+/// everywhere else the answer is no without touching anything.
+#[cfg(target_os = "linux")]
+fn neural_engine_ready() -> bool {
+    if !cfg!(target_arch = "aarch64") {
+        return false;
+    }
+    let ane = crate::transcription::ane::probe::current();
+    tracing::info!(verdict = ?ane.verdict, "Neural Engine probe");
+    ane.verdict == crate::transcription::ane::probe::Verdict::Available
+}
+
+#[cfg(not(target_os = "linux"))]
+fn neural_engine_ready() -> bool {
+    false
 }
 
 #[cfg(target_os = "linux")]
@@ -302,12 +341,14 @@ pub fn start() {
                 let probe = probe();
                 let has_groq_key =
                     crate::keys::status(Provider::Groq.id(), Provider::Groq.key_env()).is_some();
-                tracing::info!(?probe, has_groq_key, "hardware probe");
+                let other_tools = tools::assess(&tools::observe());
+                tracing::info!(?probe, has_groq_key, ?other_tools, "hardware probe");
                 *PROBED
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Probed {
                     probe,
                     has_groq_key,
+                    other_tools,
                 });
             });
         if let Err(error) = spawned {
@@ -347,6 +388,7 @@ mod tests {
             vram_or_unified_gb: vram,
             ram_gb: ram,
             cpu_features: CpuFeatures { x86, avx2 },
+            neural_engine: false,
         }
     }
 
@@ -545,6 +587,37 @@ mod tests {
         ] {
             assert!(!is_software(name), "{name}");
         }
+    }
+
+    #[test]
+    fn a_ready_neural_engine_is_recommended_ahead_of_the_gpu() {
+        use GpuApi::{None as NoGpu, Vulkan};
+        const ANE: Choice = Choice::Local(PARAKEET_V3_ANE);
+        let with_ane = |mut probe: Probe| {
+            probe.neural_engine = true;
+            probe
+        };
+        let ready = recommend(&with_ane(probe(Vulkan, 0.0, 64.0, false, false)), false);
+        assert_eq!(ready.primary, ANE);
+        assert_eq!(ready.alternative, GROQ);
+        assert_eq!(ready.reason, Reason::NeuralEngine);
+        // The Neural Engine needs no Vulkan driver of its own.
+        let no_gpu = recommend(&with_ane(probe(NoGpu, 0.0, 16.0, false, false)), false);
+        assert_eq!(no_gpu.primary, ANE);
+        // A key already set and too little memory still win.
+        assert_eq!(
+            recommend(&with_ane(probe(Vulkan, 0.0, 64.0, false, false)), true).reason,
+            Reason::HasKey
+        );
+        assert_eq!(
+            recommend(&with_ane(probe(Vulkan, 0.0, 4.0, false, false)), false).reason,
+            Reason::LowMemory
+        );
+        // Without it, the same machine gets Parakeet v3 on the GPU.
+        assert_eq!(
+            recommend(&probe(Vulkan, 0.0, 64.0, false, false), false).primary,
+            LOCAL
+        );
     }
 
     #[test]
