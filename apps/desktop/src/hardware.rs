@@ -289,13 +289,19 @@ pub fn probe() -> Probe {
 /// Whether the Neural Engine engine could run now. Only Linux on Apple
 /// silicon asks the runtime (a short subprocess, on the probe's thread);
 /// everywhere else the answer is no without touching anything.
+#[cfg(target_os = "linux")]
 fn neural_engine_ready() -> bool {
-    if !cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+    if !cfg!(target_arch = "aarch64") {
         return false;
     }
     let ane = crate::transcription::ane::probe::current();
     tracing::info!(verdict = ?ane.verdict, "Neural Engine probe");
     ane.verdict == crate::transcription::ane::probe::Verdict::Available
+}
+
+#[cfg(not(target_os = "linux"))]
+fn neural_engine_ready() -> bool {
+    false
 }
 
 #[cfg(target_os = "linux")]

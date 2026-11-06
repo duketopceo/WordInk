@@ -194,7 +194,8 @@ pub(crate) struct KeySlot {
     pub(crate) rect: [f32; 4],
 }
 
-pub(crate) fn key_slots() -> [KeySlot; KEY_COUNT] {
+#[cfg(test)]
+fn key_slots() -> [KeySlot; KEY_COUNT] {
     key_slots_for(Legends::Mac)
 }
 
