@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="WordInk app icon"><title>WordInk app icon</title>
+  <!-- Vector source for every generated app icon (see scripts/icons/generate.sh).
+       Mark geometry is assets/brand/logo.svg (viewBox 32) at 12x, centred on a dark tile. -->
+  <rect width="512" height="512" rx="112" fill="#0E1116"/>
+  <g transform="translate(80 84) scale(11)">
+    <rect x="5" y="11" width="4" height="10" rx="2" fill="#E8ECEF"/>
+    <rect x="23" y="11" width="4" height="10" rx="2" fill="#E8ECEF"/>
+    <path d="M14 6a2 2 0 0 1 4 0v14l-2 8-2-8z" fill="#4FD1C5" stroke="#4FD1C5" stroke-linejoin="round" stroke-width="0.5"/>
+  </g>
+</svg>

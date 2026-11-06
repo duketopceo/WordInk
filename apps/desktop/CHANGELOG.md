@@ -8,6 +8,8 @@ when the section is missing. See [`docs/releasing.md`](../../docs/releasing.md).
 
 ## Unreleased
 
+## 1.0.1
+
 - **Installers on every release.** Alongside the one-line installers, each
   release now carries a per-user Windows installer
   (`WordInk-Setup-windows-x64.exe`, no admin, Start Menu shortcut and
@@ -19,6 +21,19 @@ when the section is missing. See [`docs/releasing.md`](../../docs/releasing.md).
   Windows and macOS builds are still unsigned: on Windows choose **More info >
   Run anyway**, on macOS **System Settings > Privacy & Security > Open
   Anyway**.
+- **The right icon everywhere.** Every icon size is now generated from one
+  WordInk vector source: the Windows `.ico` carries all nine sizes (16 to 256,
+  including 20, 24 and 40 for high-DPI taskbars), Linux gets a scalable SVG
+  beside the PNGs, and the macOS app icon no longer uses Hex's hexagon.
+- **A disk image that looks like WordInk.** The macOS `.dmg` volume carries
+  WordInk's icon.
+- **Updates open the right download.** On Windows, an installed WordInk now
+  opens the Setup installer when a new version exists, and on macOS the disk
+  image; an AppImage opens the AppImage download. `.deb`, `.rpm` and Arch
+  installs keep telling you to update through your package manager. Leftover
+  Hex wording in updater messages is gone.
+- **Download page.** The docs site now has the download links and the
+  first-launch steps for the unsigned Windows and macOS builds.
 
 ## 1.0.0
 

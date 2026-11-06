@@ -797,7 +797,11 @@ fn check(
             version, target, ..
         } => {
             if *method == Method::DownloadOnly {
-                let url = download_page_url(&manifest, &manifest_url, platform::DOWNLOAD_TARGET);
+                let url = release_asset_url(platform::TARGET, platform::running_appimage())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| {
+                        download_page_url(&manifest, &manifest_url, platform::DOWNLOAD_TARGET)
+                    });
                 return Ok(State::Download { url });
             }
             let url = protocol::resolve_url(&manifest_url, &target.url)
@@ -831,6 +835,29 @@ fn check(
 
 /// Where a download-only install is sent: its target's file in the release,
 /// else the release notes, else the Releases page.
+macro_rules! asset {
+    ($name:literal) => {
+        concat!(
+            "https://github.com/duketopceo/WordInk/releases/latest/download/",
+            $name
+        )
+    };
+}
+
+/// The versionless asset an install that cannot replace itself opens to
+/// update: the installer or image a first-time user downloads, not the bare
+/// executable zip in the manifest. `None` falls back to the manifest's file
+/// for the target, then the Releases page.
+fn release_asset_url(target: &str, appimage: bool) -> Option<&'static str> {
+    match (target, appimage) {
+        ("windows-x64", _) => Some(asset!("WordInk-Setup-windows-x64.exe")),
+        ("macos-arm64", _) => Some(asset!("WordInk-macos-arm64.dmg")),
+        ("linux-x64", true) => Some(asset!("WordInk-linux-x86_64.AppImage")),
+        ("linux-arm64", true) => Some(asset!("WordInk-linux-aarch64.AppImage")),
+        _ => None,
+    }
+}
+
 fn download_page_url(manifest: &str, manifest_url: &str, target: &str) -> String {
     protocol::parse_manifest(manifest)
         .and_then(|manifest| {
@@ -993,6 +1020,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn release_asset_routing() {
+        let base = "https://github.com/duketopceo/WordInk/releases/latest/download/";
+        assert_eq!(
+            release_asset_url("windows-x64", false),
+            Some(format!("{base}WordInk-Setup-windows-x64.exe").as_str())
+        );
+        assert_eq!(
+            release_asset_url("macos-arm64", false),
+            Some(format!("{base}WordInk-macos-arm64.dmg").as_str())
+        );
+        assert_eq!(
+            release_asset_url("linux-x64", true),
+            Some(format!("{base}WordInk-linux-x86_64.AppImage").as_str())
+        );
+        assert_eq!(
+            release_asset_url("linux-arm64", true),
+            Some(format!("{base}WordInk-linux-aarch64.AppImage").as_str())
+        );
+        // A non-AppImage Linux install and unknown targets use the manifest.
+        assert_eq!(release_asset_url("linux-x64", false), None);
+        assert_eq!(release_asset_url("freebsd-x64", true), None);
     }
 
     #[test]

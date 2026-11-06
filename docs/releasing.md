@@ -102,6 +102,24 @@ No other tag suffix is accepted.
 
    The gate refuses a final tag whose commit has no published candidate.
 
+## Release-cut checklist
+
+The app version comes from the tag (the workflow stamps it into the build with
+`scripts/set-crate-version.sh`), so no version bump is committed. Before
+tagging:
+
+- [ ] `apps/desktop/CHANGELOG.md` has a non-empty `## X.Y.Z` section, merged.
+- [ ] The **Desktop** workflow is green on the commit to tag (it includes the
+      icon-size check and the installer tests).
+- [ ] A dry run on `master` is green: `gh workflow run desktop-release.yml
+      --ref master -f dry_run=true` builds every installer and `check-installers`
+      passes on all four legs.
+- [ ] Tag `desktop-vX.Y.Z-rc.N`, approve `release`, then run the
+      [per-OS update test](release-checklist.md#update-test-per-os) and the rest
+      of the checklist on real machines.
+- [ ] Tag the same commit `desktop-vX.Y.Z`, approve `release`, and confirm the
+      `releases/latest/download/` links in the README resolve.
+
 ## What a release contains
 
 For version `V` (`stable.json` only on final releases):

@@ -60,6 +60,10 @@ contents:
     dst: /usr/share/icons/hicolor/512x512/apps/io.github.duketopceo.wordink.png
     file_info:
       mode: 0644
+  - src: icons/hicolor/scalable/apps/io.github.duketopceo.wordink.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/io.github.duketopceo.wordink.svg
+    file_info:
+      mode: 0644
   - src: wordink.service
     dst: /usr/lib/systemd/user/wordink.service
     file_info:

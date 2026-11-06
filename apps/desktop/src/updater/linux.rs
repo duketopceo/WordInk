@@ -83,7 +83,23 @@ const SOURCE_MARKER: &str = "source-build";
 #[derive(Clone, Debug)]
 pub struct Staged(PathBuf);
 
+/// Whether `value` (the `APPIMAGE` variable the AppImage runtime sets) names
+/// an existing file: this process runs from an AppImage, which cannot
+/// replace itself, so updates link to the AppImage download.
+fn appimage_set(value: Option<&std::ffi::OsStr>, exists: impl Fn(&Path) -> bool) -> bool {
+    value.is_some_and(|path| !path.is_empty() && exists(Path::new(path)))
+}
+
+pub fn running_appimage() -> bool {
+    appimage_set(std::env::var_os("APPIMAGE").as_deref(), |path| {
+        path.is_file()
+    })
+}
+
 pub fn method() -> Method {
+    if running_appimage() {
+        return Method::DownloadOnly;
+    }
     // geteuid has no preconditions and does not mutate process state.
     let user = unsafe { libc::geteuid() };
     let Ok(executable) = std::env::current_exe().and_then(|path| path.canonicalize()) else {
@@ -241,6 +257,23 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn appimage_detection() {
+        use std::ffi::OsStr;
+        let yes = |_: &std::path::Path| true;
+        let no = |_: &std::path::Path| false;
+        assert!(super::appimage_set(
+            Some(OsStr::new("/x/WordInk.AppImage")),
+            yes
+        ));
+        assert!(!super::appimage_set(
+            Some(OsStr::new("/x/WordInk.AppImage")),
+            no
+        ));
+        assert!(!super::appimage_set(Some(OsStr::new("")), yes));
+        assert!(!super::appimage_set(None, yes));
+    }
+
     use super::*;
 
     #[test]

@@ -90,6 +90,27 @@ PowerShell) and every command below uses it; in these commands `<base>` is that 
     Windows): after one confirmation it also removes settings, history and
     models.
 
+### Update test per OS
+
+Install the previous final release (for the first run of this test, 1.0.0), then
+publish or serve the candidate as the newer version and open Settings. The
+update state must say a newer version exists and the button must open the right
+file:
+
+- **Windows (installed from Setup):** the link opens
+  `WordInk-Setup-windows-x64.exe`. Run it over the old install: it keeps
+  settings and history and `wordink.exe --version` reports the new version.
+- **macOS (dmg install):** the link opens `WordInk-macos-arm64.dmg`. Mounting it
+  shows `WordInk.app`, the Applications link and the WordInk volume icon. Drag
+  the app over the old one, confirm the replace, and open it: the new version
+  runs and settings survive.
+- **Linux one-line install:** the app downloads, verifies the signature and
+  restarts into the new version (step 11).
+- **Linux AppImage:** the link opens the AppImage download; replace the file and
+  run it.
+- **Linux `.deb`, `.rpm`, Arch package:** the app shows the package-manager
+  command and installs nothing itself.
+
 Extra for the Linux laptop and desktop:
 
 - Run the installer over a machine that has a local source build of WordInk: the

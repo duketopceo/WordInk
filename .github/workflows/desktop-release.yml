@@ -529,6 +529,7 @@ jobs:
           hdiutil attach -quiet -nobrowse -readonly -mountpoint "$mnt" "$RUNNER_TEMP/files/WordInk-macos-arm64.dmg"
           trap 'hdiutil detach -quiet "$mnt" || true' EXIT
           [ "$(readlink "$mnt/Applications")" = /Applications ] || { echo "::error::the .dmg has no Applications link"; exit 1; }
+          [ -f "$mnt/.VolumeIcon.icns" ] || { echo "::error::the .dmg has no volume icon"; exit 1; }
           reported=$("$mnt/WordInk.app/Contents/MacOS/wordink" --version | awk 'NF { value=$NF } END { print value }')
           [ "$reported" = "$WORDINK_VERSION" ] || { echo "::error::the .dmg's WordInk.app reports $reported, not $WORDINK_VERSION"; exit 1; }
           echo "the .dmg's WordInk.app reports $reported"
