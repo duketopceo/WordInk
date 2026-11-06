@@ -26,7 +26,10 @@ render() { rsvg-convert -w "$1" -h "$1" "$svg" -o "$2"; }
 
 for size in $hicolor_sizes; do
   mkdir -p "$hicolor/${size}x${size}/apps"
-  render "$size" "$hicolor/${size}x${size}/apps/$name.png"
+  png=$hicolor/${size}x${size}/apps/$name.png
+  render "$size" "$png"
+  # src/linux/icons.rs replaces only icons that carry this text chunk.
+  im convert "$png" -set comment 'X-Hex-Managed=true' "$png"
 done
 mkdir -p "$hicolor/scalable/apps"
 cp "$svg" "$hicolor/scalable/apps/$name.svg"

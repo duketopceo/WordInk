@@ -17,6 +17,7 @@ for size in $sizes; do
   [ -f "$file" ] || { fail "missing $file"; continue; }
   [ "$(im identify -format '%wx%h' "$file")" = "${size}x${size}" ] \
     || fail "$file is not ${size}x${size}"
+  grep -aq 'X-Hex-Managed=true' "$file" || fail "$file lacks the X-Hex-Managed text chunk"
 done
 [ -f "$hicolor/scalable/apps/$name.svg" ] || fail "missing scalable/apps/$name.svg"
 [ -f "$root/app/AppIcon.icon/Assets/Image.png" ] || fail "missing the macOS glyph layer"
