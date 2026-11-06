@@ -1133,11 +1133,13 @@ pub struct RuntimeHotkeys {
     pub raw_dictation: Option<RuntimeHotkey>,
     /// Labs › Second dictation shortcut (macOS), while it is on and bound.
     pub second_dictation: Option<RuntimeHotkey>,
+    /// Cancels a recording, while it is bound.
+    pub cancel: Option<RuntimeHotkey>,
 }
 
 impl RuntimeHotkeys {
     /// Every shortcut Hex matches, for suppression and chord evidence.
-    pub fn all(self) -> [Option<RuntimeHotkey>; 6] {
+    pub fn all(self) -> [Option<RuntimeHotkey>; 7] {
         [
             Some(self.dictation),
             self.paste_last,
@@ -1145,6 +1147,7 @@ impl RuntimeHotkeys {
             self.capture,
             self.raw_dictation,
             self.second_dictation,
+            self.cancel,
         ]
     }
 }
@@ -1159,6 +1162,7 @@ impl Default for RuntimeHotkeys {
             capture: None,
             raw_dictation: None,
             second_dictation: None,
+            cancel: None,
         }
     }
 }
@@ -2670,6 +2674,7 @@ impl AppSettings {
             second_dictation: self
                 .active_second_dictation_hotkey()
                 .map(HotkeyBinding::runtime),
+            cancel: self.cancel_hotkey.as_ref().map(HotkeyBinding::runtime),
         }
     }
 

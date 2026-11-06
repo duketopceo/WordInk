@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
 use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -246,6 +246,12 @@ struct CallbackState {
     raw: Option<WindowsHotkey>,
     raw_trigger_vk: Option<u32>,
     raw_trigger_down: bool,
+    /// Cancels a recording, while it is bound.
+    cancel: Option<WindowsHotkey>,
+    cancel_trigger_vk: Option<u32>,
+    cancel_trigger_down: bool,
+    /// The Escape-twice cancel gesture.
+    escape: crate::escape_cancel::EscapeCancel,
     annotate: Option<WindowsHotkey>,
     annotate_trigger_vk: Option<u32>,
     annotate_trigger_down: bool,
@@ -451,6 +457,7 @@ impl WindowsHotkeyMonitor {
         binding: WindowsHotkey,
         paste_last: Option<WindowsHotkey>,
         raw: Option<WindowsHotkey>,
+        cancel: Option<WindowsHotkey>,
         annotate: Option<WindowsHotkey>,
         double_tap_enabled: bool,
         double_tap_only: bool,
@@ -461,6 +468,7 @@ impl WindowsHotkeyMonitor {
         let trigger_vk = binding.key.as_deref().map(virtual_key).transpose()?;
         let paste_trigger_vk = chord_virtual_key(paste_last.as_ref(), "Paste Last")?;
         let raw_trigger_vk = chord_virtual_key(raw.as_ref(), "Dictate without processing")?;
+        let cancel_trigger_vk = chord_virtual_key(cancel.as_ref(), "Cancel dictation")?;
         let annotate_trigger_vk = chord_virtual_key(annotate.as_ref(), "Annotate")?;
         let label = binding.label();
         let (event_sender, events) = mpsc::sync_channel(EVENT_CAPACITY);
@@ -476,6 +484,10 @@ impl WindowsHotkeyMonitor {
             raw,
             raw_trigger_vk,
             raw_trigger_down: false,
+            cancel,
+            cancel_trigger_vk,
+            cancel_trigger_down: false,
+            escape: crate::escape_cancel::EscapeCancel::default(),
             annotate,
             annotate_trigger_vk,
             annotate_trigger_down: false,
@@ -870,6 +882,28 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> Disposition {
                 state.drawing_escape_down = is_down;
                 return Disposition::Suppress;
             }
+            // The Cancel shortcut discards a recording. Idle, it is not ours
+            // and reaches the app.
+            let cancel_event = state.cancel_trigger_vk == Some(vk)
+                && (state.cancel_trigger_down
+                    || (is_down
+                        && state.capture.recording
+                        && state
+                            .cancel
+                            .as_ref()
+                            .is_some_and(|binding| state.modifiers.matches(binding))));
+            if cancel_event {
+                if is_down && !state.cancel_trigger_down {
+                    state.cancel_trigger_down = true;
+                    state.escape.reset();
+                    if let Some(action) = state.capture.cancel() {
+                        send_event(state, action, time);
+                    }
+                } else if is_up {
+                    state.cancel_trigger_down = false;
+                }
+                return Disposition::Suppress;
+            }
             // Dictate without processing: a key chord, held, locked, and
             // finished like the dictation key, owning the capture it starts.
             let raw_event = state.raw_trigger_vk == Some(vk)
@@ -964,9 +998,23 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> Disposition {
                     }
                 }
             } else if vk == u32::from(VK_ESCAPE) {
-                // Escape ends no dictation, not even as a chord: it reaches
-                // the app (#786).
+                // Escape ends no dictation, not even as a chord (#786), but
+                // a bare Escape pressed twice cancels a recording. It still
+                // reaches the app.
+                if is_down && state.modifiers.none_down() {
+                    let recording = state.capture.recording;
+                    if state.escape.pressed(Instant::now(), recording)
+                        && let Some(action) = state.capture.cancel()
+                    {
+                        send_event(state, action, time);
+                    }
+                } else if is_down {
+                    state.escape.other_key();
+                }
             } else if !modifier_event {
+                if is_down {
+                    state.escape.other_key();
+                }
                 // A key or button joining a held modifier-only shortcut makes
                 // a chord meant for another application, such as Alt+Tab.
                 if is_down
@@ -1121,6 +1169,17 @@ impl ModifierState {
             && side_matches(binding.windows, self.left_windows, self.right_windows)
             && side_matches(binding.alt, self.left_alt, self.right_alt)
             && side_matches(binding.shift, self.left_shift, self.right_shift)
+    }
+
+    fn none_down(&self) -> bool {
+        !(self.left_control
+            || self.right_control
+            || self.left_windows
+            || self.right_windows
+            || self.left_alt
+            || self.right_alt
+            || self.left_shift
+            || self.right_shift)
     }
 
     fn any_required_down(&self, binding: &WindowsHotkey) -> bool {

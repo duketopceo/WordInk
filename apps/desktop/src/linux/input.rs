@@ -366,11 +366,6 @@ pub(crate) const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
 /// Desktops that repeat a held shortcut's press (KWin) repeat it sooner
 /// than this, so a press after a longer gap is a new press.
 const KEY_REPEAT_GAP: Duration = Duration::from_secs(1);
-/// Two Escape presses this close cancel a recording.
-const ESCAPE_CANCEL_WINDOW: Duration = Duration::from_millis(600);
-/// An Escape press this soon after the last is the key repeating, not a
-/// second press.
-const ESCAPE_REPEAT_GAP: Duration = Duration::from_millis(100);
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
 /// Binding through the portal can wait for the user to approve a dialog.
 const PORTAL_READY_TIMEOUT: Duration = Duration::from_secs(65);
@@ -725,10 +720,8 @@ struct ShortcutState {
     /// Dictate without processing, not the dictation shortcut, owns the
     /// capture (or the last one).
     raw: bool,
-    /// The first Escape press of a possible double press while recording.
-    last_escape: Option<Instant>,
-    /// The latest Escape press of any kind, to tell a repeating key.
-    escape_seen: Option<Instant>,
+    /// The Escape-twice cancel gesture.
+    escape: crate::escape_cancel::EscapeCancel,
 }
 
 impl ShortcutState {
@@ -742,8 +735,7 @@ impl ShortcutState {
             last_press: None,
             down: false,
             raw: false,
-            last_escape: None,
-            escape_seen: None,
+            escape: crate::escape_cancel::EscapeCancel::default(),
         }
     }
 
@@ -756,7 +748,7 @@ impl ShortcutState {
         let active = self.recording();
         self.capture = Capture::Idle;
         self.last_release = None;
-        self.last_escape = None;
+        self.escape.reset();
         active.then_some(HotkeyEvent::Cancel)
     }
 
@@ -766,32 +758,14 @@ impl ShortcutState {
     }
 
     /// An Escape press while recording: the second within
-    /// [`ESCAPE_CANCEL_WINDOW`] of the first cancels the recording. A press
+    /// [`crate::escape_cancel::ESCAPE_CANCEL_WINDOW`] of the first cancels the recording. A press
     /// right after the last is the key repeating and counts for nothing.
     fn escape_pressed(&mut self, now: Instant) -> Option<HotkeyEvent> {
-        let seen = self.escape_seen.replace(now);
-        if !self.recording() {
-            self.last_escape = None;
-            return None;
-        }
-        // Every press of a held key counts toward the next repeat, so a
-        // key held down never reads as a second press.
-        if seen.is_some_and(|seen| now.saturating_duration_since(seen) < ESCAPE_REPEAT_GAP) {
-            return None;
-        }
-        let since = self
-            .last_escape
-            .map(|pressed| now.saturating_duration_since(pressed));
-        match since {
-            Some(gap) if gap <= ESCAPE_CANCEL_WINDOW => {
-                self.last_escape = None;
-                self.cancel()
-            }
-            _ => {
-                self.last_escape = Some(now);
-                None
-            }
-        }
+        let recording = self.recording();
+        self.escape
+            .pressed(now, recording)
+            .then(|| self.cancel())
+            .flatten()
     }
 
     fn start_dictation(&mut self, raw: bool) -> Option<HotkeyEvent> {
@@ -2547,7 +2521,7 @@ mod tests {
         let mut test = Test::new(true);
         test.lock();
         test.input(Input::Escape);
-        test.now += ESCAPE_CANCEL_WINDOW + Duration::from_millis(100);
+        test.now += crate::escape_cancel::ESCAPE_CANCEL_WINDOW + Duration::from_millis(100);
         test.input(Input::Escape);
         assert!(test.events.is_empty(), "too slow");
         // The late one starts a new pair.
