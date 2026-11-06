@@ -8,13 +8,14 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 name=io.github.duketopceo.wordink
 hicolor=$root/packaging/linux/icons/hicolor
 status=0
+im() { tool=$1; shift; if command -v magick >/dev/null 2>&1; then if [ "$tool" = convert ]; then magick "$@"; else magick "$tool" "$@"; fi; else "$tool" "$@"; fi; }
 fail() { echo "icon check: $1" >&2; status=1; }
 
 sizes=$(sed -n "s/^hicolor //p" "$root/scripts/icons/manifest.txt")
 for size in $sizes; do
   file=$hicolor/${size}x${size}/apps/$name.png
   [ -f "$file" ] || { fail "missing $file"; continue; }
-  [ "$(magick identify -format '%wx%h' "$file")" = "${size}x${size}" ] \
+  [ "$(im identify -format '%wx%h' "$file")" = "${size}x${size}" ] \
     || fail "$file is not ${size}x${size}"
 done
 [ -f "$hicolor/scalable/apps/$name.svg" ] || fail "missing scalable/apps/$name.svg"
@@ -22,7 +23,7 @@ done
 
 ico=$root/resources/windows/wordink.ico
 if [ -f "$ico" ]; then
-  have=$(magick identify -format '%w\n' "$ico" | sort -n | tr '\n' ' ')
+  have=$(im identify -format '%w\n' "$ico" | sort -n | tr '\n' ' ')
   want=$(sed -n 's/^ico //p' "$root/scripts/icons/manifest.txt" | tr ' ' '\n' | sort -n | tr '\n' ' ')
   [ "$have" = "$want" ] || fail "wordink.ico frames are [$have], expected [$want]"
 else

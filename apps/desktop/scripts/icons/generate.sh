@@ -5,7 +5,7 @@
 #   - packaging/linux/icons/hicolor/scalable/apps/io.github.duketopceo.wordink.svg
 #   - resources/windows/wordink.ico (the sizes in manifest.txt)
 #   - app/AppIcon.icon/Assets/Image.png (macOS glyph layer on a transparent canvas)
-# Needs rsvg-convert and ImageMagick (`magick`). With --sheet it also writes
+# Needs rsvg-convert and ImageMagick (7 `magick` or 6 `convert`). With --sheet it also writes
 # a contact sheet of every size, which CI uploads for a visual check.
 set -eu
 
@@ -21,6 +21,7 @@ ico_sizes=$(sed -n 's/^ico //p' "$root/scripts/icons/manifest.txt")
 work=$(mktemp -d "${TMPDIR:-/tmp}/wordink-icons.XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 
+im() { tool=$1; shift; if command -v magick >/dev/null 2>&1; then if [ "$tool" = convert ]; then magick "$@"; else magick "$tool" "$@"; fi; else "$tool" "$@"; fi; }
 render() { rsvg-convert -w "$1" -h "$1" "$svg" -o "$2"; }
 
 for size in $hicolor_sizes; do
@@ -36,7 +37,7 @@ for size in $ico_sizes; do
   frames="$frames $work/ico-$size.png"
 done
 # shellcheck disable=SC2086
-magick $frames "$root/resources/windows/wordink.ico"
+im convert $frames "$root/resources/windows/wordink.ico"
 
 # macOS: the Icon Composer layer is the glyph alone (the app icon's tile and
 # gradient come from icon.json), rendered square on a transparent canvas.
@@ -52,12 +53,12 @@ rsvg-convert -w 1024 -h 1024 "$glyph" -o "$root/app/AppIcon.icon/Assets/Image.pn
 
 if [ -n "$sheet" ]; then
   for size in $hicolor_sizes; do
-    magick "$hicolor/${size}x${size}/apps/$name.png" -background '#808080' \
+    im convert "$hicolor/${size}x${size}/apps/$name.png" -background '#808080' \
       -gravity center -extent 520x520 -gravity south -fill white -pointsize 24 \
       -annotate +0+0 "${size}px" "$work/sheet-$size.png"
   done
   # shellcheck disable=SC2046
-  magick montage $(for s in $hicolor_sizes; do echo "$work/sheet-$s.png"; done) \
+  im montage $(for s in $hicolor_sizes; do echo "$work/sheet-$s.png"; done) \
     -tile 4x -geometry 260x260+6+6 -background '#808080' "$sheet"
   echo "wrote $sheet"
 fi
