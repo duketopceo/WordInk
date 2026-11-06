@@ -1,0 +1,5 @@
+# The icon sizes WordInk ships; check.sh fails when any is missing.
+# hicolor: PNG sizes under packaging/linux/icons/hicolor (plus scalable/apps SVG).
+# ico: frames inside resources/windows/wordink.ico (the Windows exe, taskbar and installer).
+hicolor 16 24 32 48 64 128 256 512
+ico 256 128 64 48 40 32 24 20 16

@@ -366,3 +366,8 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 }
+
+/// Only Linux AppImages need their own update route.
+pub fn running_appimage() -> bool {
+    false
+}

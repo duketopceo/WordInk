@@ -2,7 +2,8 @@
 //! (`%APPDATA%\wordink\install.json`) updates itself by staging the
 //! new `wordink.exe` into its own version directory and switching the
 //! `current-version` pointer. Before anything runs, the download must carry
-//! a valid Authenticode signature from Anomaly's Artifact Signing identity.
+//! a valid Authenticode signature from WordInk's signing identity (not yet
+//! issued: until then Windows installs open the Setup download instead).
 //! Administrators turn updates off with the `DisableUpdates` policy value.
 
 use std::fs::{self, OpenOptions};
@@ -20,12 +21,12 @@ use crate::desktop::background_process;
 pub const TARGET: &str = "windows-x64";
 #[cfg(target_arch = "aarch64")]
 pub const TARGET: &str = "windows-arm64";
-/// The zip of `wordink.exe`: the unsigned release has no installer yet.
+/// The zip of `wordink.exe` in the manifest; the unsigned release routes
+/// installs to the Setup exe instead (see `release_asset_url`).
 pub const DOWNLOAD_TARGET: &str = TARGET;
 
-/// The common name of the certificate Azure Artifact Signing issues to
-/// Anomaly (as on OpenCode's signed Windows builds); updates signed by
-/// anyone else are refused.
+/// The common name of the certificate WordInk's Windows builds will be
+/// signed with; updates signed by anyone else are refused.
 pub const AUTHENTICODE_SIGNER: &str =
     "WordInk contributors (Authenticode signing is deferred; set in U14)";
 /// `HKLM` (or `HKCU`) `\SOFTWARE\Policies\WordInk`, value `DisableUpdates`.
@@ -358,4 +359,9 @@ mod tests {
         assert!(verify_authenticode(&unsigned, &signer).is_err());
         let _ = fs::remove_file(unsigned);
     }
+}
+
+/// Only Linux AppImages need their own update route.
+pub fn running_appimage() -> bool {
+    false
 }

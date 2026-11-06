@@ -20,9 +20,9 @@
       "layers": [
         {
           "image-name": "Image.png",
-          "name": "Hex",
+          "name": "WordInk",
           "position": {
-            "scale": 0.44,
+            "scale": 0.6,
             "translation-in-points": [
               0,
               0
