@@ -6,7 +6,7 @@
 #   - resources/windows/wordink.ico (the sizes in manifest.txt)
 #   - app/AppIcon.icon/Assets/Image.png (macOS glyph layer on a transparent canvas)
 # Needs rsvg-convert and ImageMagick (7 `magick` or 6 `convert`). With --sheet it also writes
-# a contact sheet of every size, which CI uploads for a visual check.
+# a contact sheet of every size (smallest first, no labels: runners have no fonts), which CI uploads for a visual check.
 set -eu
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -54,8 +54,7 @@ rsvg-convert -w 1024 -h 1024 "$glyph" -o "$root/app/AppIcon.icon/Assets/Image.pn
 if [ -n "$sheet" ]; then
   for size in $hicolor_sizes; do
     im convert "$hicolor/${size}x${size}/apps/$name.png" -background '#808080' \
-      -gravity center -extent 520x520 -gravity south -fill white -pointsize 24 \
-      -annotate +0+0 "${size}px" "$work/sheet-$size.png"
+      -gravity center -extent 520x520 "$work/sheet-$size.png"
   done
   # shellcheck disable=SC2046
   im montage $(for s in $hicolor_sizes; do echo "$work/sheet-$s.png"; done) \
