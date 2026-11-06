@@ -46,7 +46,11 @@ pub(super) const SCENES: &[&str] = &[
     "onboarding-engine",
     "onboarding-engine-cloud",
     "onboarding-engine-local",
+    // Linux on Apple silicon: the Neural Engine recommended.
+    "onboarding-engine-neural-engine",
     "onboarding-hotkey",
+    // Another dictation tool is installed: the shortcut step says so.
+    "onboarding-hotkey-other-tool",
     // The short first run: welcome, the one demo (with Skip), Setup with
     // Finish later (macOS), the test dictation in a plain field, and the
     // main window's "Set up dictation" row after Finish later, and the test

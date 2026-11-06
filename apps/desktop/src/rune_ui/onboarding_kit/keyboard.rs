@@ -15,6 +15,47 @@ use super::gpu_stage::KEY_COUNT;
 
 struct Cap(&'static str, &'static str, f32);
 
+/// Which keyboard's modifier legends the deck shows: the Mac's glyphs, or a
+/// PC's words in a PC's order (Ctrl, Fn, Win or Super, Alt). The geometry
+/// stays the same; only the bottom row's ids and legends move.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Legends {
+    Mac,
+    Windows,
+    Linux,
+}
+
+impl Legends {
+    /// The keyboard of the computer the first run is on, by where WordInk
+    /// lives once it closes.
+    pub(crate) fn for_home(home: super::landing::Home) -> Self {
+        match home {
+            super::landing::Home::MenuBar => Self::Mac,
+            super::landing::Home::Tray => Self::Windows,
+            super::landing::Home::Launcher => Self::Linux,
+        }
+    }
+
+    /// The bottom row's `(id, legend)` at `index`, left to right, where it
+    /// differs from the Mac's.
+    fn bottom(self, index: usize) -> Option<(&'static str, &'static str)> {
+        let system = match self {
+            Self::Mac => return None,
+            Self::Windows => "Win",
+            Self::Linux => "Super",
+        };
+        Some(match index {
+            0 => ("control", "Ctrl"),
+            1 => ("fn", "Fn"),
+            2 => ("command", system),
+            3 => ("option", "Alt"),
+            5 => ("option-right", "Alt"),
+            6 => ("control-right", "Ctrl"),
+            _ => return None,
+        })
+    }
+}
+
 const fn k(id: &'static str) -> Cap {
     Cap(id, id, 1.0)
 }
@@ -127,6 +168,8 @@ pub(crate) fn modifier(cap: &str) -> Option<&'static str> {
         ("⌘", "command"),
         ("⌃", "control"),
         ("Ctrl", "control"),
+        ("Win", "command"),
+        ("Super", "command"),
         ("⇧", "shift"),
         ("Shift", "shift"),
         ("fn", "fn"),
@@ -137,6 +180,7 @@ pub(crate) fn modifier(cap: &str) -> Option<&'static str> {
     Some(match (key, right) {
         ("option", true) => "option-right",
         ("command", true) => "command-right",
+        ("control", true) => "control-right",
         ("shift", true) => "shift-right",
         (key, _) => key,
     })
@@ -151,6 +195,10 @@ pub(crate) struct KeySlot {
 }
 
 pub(crate) fn key_slots() -> [KeySlot; KEY_COUNT] {
+    key_slots_for(Legends::Mac)
+}
+
+pub(crate) fn key_slots_for(legends: Legends) -> [KeySlot; KEY_COUNT] {
     let dummy = KeySlot {
         id: "",
         legend: "",
@@ -162,7 +210,11 @@ pub(crate) fn key_slots() -> [KeySlot; KEY_COUNT] {
     for (r, row_caps) in ROWS.iter().enumerate() {
         let y = KEY_INSET + r as f32 * (ROW_H + ROW_GAP);
         let mut u_acc = 0.0;
-        for cap in *row_caps {
+        for (i, cap) in row_caps.iter().enumerate() {
+            let (id, legend) = (r == ROWS.len() - 1)
+                .then(|| legends.bottom(i))
+                .flatten()
+                .unwrap_or((cap.0, cap.1));
             let x = KEY_INSET + u_acc * PITCH;
             let w = cap.2 * PITCH - GAP;
             if cap.0 == "updown" {
@@ -182,8 +234,8 @@ pub(crate) fn key_slots() -> [KeySlot; KEY_COUNT] {
                 idx += 1;
             } else {
                 slots[idx] = KeySlot {
-                    id: cap.0,
-                    legend: cap.1,
+                    id,
+                    legend,
                     rect: [x, y, w, ROW_H],
                 };
                 idx += 1;
@@ -203,6 +255,7 @@ pub(crate) fn ember(p: Paint) -> Color {
 pub(crate) fn keyboard_lit(
     p: Paint,
     key: &str,
+    legends: Legends,
     enter_u: f32,
     dim: f32,
     depth: impl Fn(&str) -> f32,
@@ -243,7 +296,7 @@ pub(crate) fn keyboard_lit(
         c.border_weak
     };
 
-    let slots = key_slots();
+    let slots = key_slots_for(legends);
     let mut key_els = Vec::with_capacity(KEY_COUNT);
 
     for slot in slots.iter() {
@@ -322,17 +375,27 @@ pub(crate) fn keyboard_lit(
             let lit_ink = if k.dark { c.bg_deep } else { c.text_strong };
             let ink = bg.mix(base_ink.mix(lit_ink, lit * 0.88), vis);
 
-            let left_word = matches!(slot.id, "tab" | "caps" | "shift" | "fn");
             let right_word = matches!(slot.id, "delete" | "return" | "shift-right");
+            // Word legends ("tab", "fn", a PC's "Ctrl" or "Alt") sit small in
+            // a corner; glyphs and single characters sit centred.
+            let word = slot.legend.chars().count() > 1
+                && slot.legend.chars().all(|c| c.is_ascii_alphabetic());
+            let left_word = word && !right_word;
             let half_arrow = matches!(slot.id, "up" | "down");
 
             if left_word || right_word {
-                let font = TextStyle::new(8.2, 470.0).lh(10.0);
+                // A long word on a one-unit key (a PC's "Super") shrinks to fit.
+                let narrow = w < PITCH * 1.1 && slot.legend.len() >= 5;
+                let font = if narrow {
+                    TextStyle::new(7.0, 470.0).lh(9.0)
+                } else {
+                    TextStyle::new(8.2, 470.0).lh(10.0)
+                };
                 let mut r = row()
                     .key("lbl-row")
                     .w_full()
                     .h_full()
-                    .px(4.5)
+                    .px(if narrow { 3.0 } else { 4.5 })
                     .pb(3.0)
                     .items_end();
                 if right_word {
@@ -435,6 +498,42 @@ mod tests {
                 "key {} out of well: {:?}",
                 slot.id,
                 slot.rect
+            );
+        }
+    }
+
+    #[test]
+    fn pc_keyboards_show_pc_modifiers_where_a_pc_has_them() {
+        let bottom = |legends| {
+            key_slots_for(legends)
+                .into_iter()
+                .filter(|slot| slot.rect[1] > DECK_H * 0.7)
+                .map(|slot| slot.legend)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            &bottom(Legends::Windows)[..7],
+            ["Ctrl", "Fn", "Win", "Alt", "", "Alt", "Ctrl"]
+        );
+        assert_eq!(bottom(Legends::Linux)[2], "Super");
+        assert_eq!(&bottom(Legends::Mac)[..4], ["fn", "⌃", "⌥", "⌘"]);
+        // A PC shortcut's caps light the key that carries their legend.
+        let id_of = |legends, legend| {
+            key_slots_for(legends)
+                .into_iter()
+                .find(|slot| slot.legend == legend)
+                .map(|slot| slot.id)
+        };
+        assert_eq!(modifier("Alt"), id_of(Legends::Windows, "Alt"));
+        assert_eq!(modifier("Ctrl"), id_of(Legends::Windows, "Ctrl"));
+        assert_eq!(modifier("Super"), id_of(Legends::Linux, "Super"));
+        // Nothing on a PC deck is drawn with a Mac glyph.
+        for legends in [Legends::Windows, Legends::Linux] {
+            assert!(
+                key_slots_for(legends)
+                    .iter()
+                    .all(|slot| !["⌘", "⌥", "⌃"].contains(&slot.legend)),
+                "{legends:?}"
             );
         }
     }

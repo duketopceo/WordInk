@@ -68,17 +68,30 @@ pub(in crate::rune_ui) fn selection(ui: &Ui) -> TranscriptionSelection {
         .unwrap_or_else(|| ui.settings.transcription.clone())
 }
 
-/// Parakeet v3 in the person's language where it speaks it, else English.
-fn local_selection() -> TranscriptionSelection {
-    let v3 = transcription_models::definition(TranscriptionModelId::ParakeetV3);
+/// The local model the probe recommends (Parakeet v3, or the same model on
+/// the Neural Engine where that is ready), else Parakeet v3.
+fn local_model(ui: &Ui) -> TranscriptionModelId {
+    ui.engine_setup
+        .probed
+        .as_ref()
+        .map(Probed::recommendation)
+        .into_iter()
+        .flat_map(|r| [r.primary, r.alternative])
+        .find_map(|choice| match choice {
+            Choice::Local(id) => id.parse().ok(),
+            Choice::Cloud(_) => None,
+        })
+        .unwrap_or(TranscriptionModelId::ParakeetV3)
+}
+
+/// The local model in the person's language where it speaks it, else English.
+fn local_selection(model: TranscriptionModelId) -> TranscriptionSelection {
+    let definition = transcription_models::definition(model);
     let preferred = crate::desktop::i18n::preferred_language();
     // Parakeet v3 cannot detect a language, so a locale it lacks (or none at
     // all, as in a bare environment) falls to its default, English.
-    let language = v3.language_for(&preferred).to_string();
-    TranscriptionSelection {
-        model: TranscriptionModelId::ParakeetV3,
-        language,
-    }
+    let language = definition.language_for(&preferred).to_string();
+    TranscriptionSelection { model, language }
 }
 
 fn engine(ui: &Ui) -> Option<EngineView> {
@@ -97,12 +110,19 @@ fn step(ui: &Ui) -> Option<Step> {
 // Handlers
 
 pub(in crate::rune_ui) fn choose_local(ui: &mut Ui) {
-    let selection = local_selection();
+    let model = local_model(ui);
+    let selection = local_selection(model);
     ui.engine_setup.local = Some(selection.clone());
     if let Some(live) = ui.first_run.as_mut().and_then(|s| s.live.as_mut()) {
         live.set_choice(selection);
     }
-    ui.update(|settings| settings.engine = crate::transcription::cloud::EngineChoice::Local);
+    ui.update(|settings| {
+        settings.engine = crate::transcription::cloud::EngineChoice::Local;
+        // The Neural Engine model is a Labs engine: choosing it here turns it on.
+        if model == TranscriptionModelId::ParakeetV3Ane {
+            settings.labs.neural_engine = true;
+        }
+    });
     onboarding::input(ui, Input::ChooseEngine(EngineKind::Local));
 }
 
@@ -188,10 +208,14 @@ pub(in crate::rune_ui) fn overlay(ui: &Ui, p: Paint) -> Option<El> {
 }
 
 /// The probe's one-line summary of this computer: the GPU by name and
-/// whether it is ready, then the memory.
+/// whether it is ready, the Neural Engine where it is, then the memory.
 pub(crate) fn machine_line(probed: &Probed) -> String {
     let probe = &probed.probe;
     let mut line = gpu_line(&probe.gpu);
+    if probe.neural_engine {
+        line.push(' ');
+        line.push_str(tr("Apple Neural Engine ready."));
+    }
     if probe.ram_gb > 0.0 {
         line.push(' ');
         line.push_str(&tr_fill("Memory: {} GB.", &format!("{:.0}", probe.ram_gb)));
@@ -253,6 +277,9 @@ pub(crate) fn reason_copy(reason: Reason) -> &'static str {
         Reason::FitsLocal => {
             tr("This computer's GPU and memory run it well, and nothing leaves it.")
         }
+        Reason::NeuralEngine => tr(
+            "The Neural Engine runs it fast and leaves the GPU free, and nothing leaves this computer.",
+        ),
     }
 }
 
@@ -574,6 +601,7 @@ fn hotkey_page(ui: &Ui, p: Paint) -> El {
             tr("Keep this one, or choose another. You can change it later in General."),
         ))
         .child(card(p, "hotkey-card", rows).w_full())
+        .children(other_tools_note(ui, p))
         .child(
             row().key("action").h(32.0).center().child(
                 Button::new(tr("Continue"))
@@ -584,6 +612,27 @@ fn hotkey_page(ui: &Ui, p: Paint) -> El {
                     .transition(arrives()),
             ),
         )
+}
+
+/// Another dictation tool on this computer, named, so two tools don't both
+/// start on one shortcut.
+fn other_tools_note(ui: &Ui, p: Paint) -> Option<El> {
+    let tools = &ui.engine_setup.probed.as_ref()?.other_tools;
+    let names = tools
+        .iter()
+        .map(|tool| tool.name())
+        .collect::<Vec<_>>()
+        .join(", ");
+    (!tools.is_empty()).then(|| {
+        text(tr_named(
+            "{tool} is also installed here. If it listens for the same shortcut, change one of them.",
+            &[("tool", &names)],
+        ))
+        .key("other-tools")
+        .font(DESCRIPTION)
+        .color(p.muted())
+        .wrap()
+    })
 }
 
 #[cfg(test)]
