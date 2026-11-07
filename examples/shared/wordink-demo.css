@@ -63,6 +63,42 @@ wordink-mic {
   --wordink-active-icon: var(--wi-on-accent);
 }
 
+.demo-mic {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  padding: 0;
+  border: 2px solid var(--wi-rule);
+  border-radius: 999px;
+  background: var(--wi-surface);
+  color: var(--wi-ink);
+  font: inherit;
+  cursor: pointer;
+  user-select: none;
+}
+.demo-mic[aria-pressed="true"] {
+  background: var(--wi-accent);
+  color: var(--wi-on-accent);
+  border-color: var(--wi-accent);
+}
+.demo-mic:focus-visible {
+  outline: 2px solid var(--wi-accent);
+  outline-offset: 2px;
+}
+.demo-meter {
+  display: block;
+  width: 100%;
+  margin-top: 0.6rem;
+  block-size: 0.35rem;
+}
+.demo-status {
+  margin-top: 0.5rem;
+  color: var(--wi-muted);
+  font-size: 0.9375rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
