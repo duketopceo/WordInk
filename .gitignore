@@ -31,3 +31,6 @@ node_modules/
 .turbo/
 packages/*/dist/
 apps/*/dist/
+
+# codebase-memory-mcp local index cache
+.codebase-memory/
