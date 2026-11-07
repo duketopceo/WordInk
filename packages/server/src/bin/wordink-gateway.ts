@@ -20,6 +20,15 @@ const PREFIX = "wordink-gateway:";
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8941;
 
+/** True when stdout may emit ANSI styling (respects NO_COLOR, FORCE_COLOR, TTY, color depth). */
+function stdoutSupportsAnsi(): boolean {
+  if (process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== "") return false;
+  const force = process.env.FORCE_COLOR;
+  if (force !== undefined && force !== "" && force !== "0") return true;
+  if (!process.stdout.isTTY) return false;
+  return process.stdout.hasColors?.() !== false;
+}
+
 const USAGE = `Usage: wordink-gateway <command>
 
   serve                  Run the gateway (config: $XDG_CONFIG_HOME/wordink/gateway.json)
@@ -181,9 +190,17 @@ async function cmdTokens(args: string[]): Promise<number> {
       const made = await store.create(label, admin ? "admin" : "device");
       // The full token is printed exactly once (R10); only its hash is stored.
       console.log(made.token);
-      console.log(
-        `created id=${made.id} scope=${made.scope} label="${made.label}" — store the token now; it is never shown again.`,
-      );
+      const meta =
+        `created id=${made.id} scope=${made.scope} label="${made.label}" — store the token now; it is never shown again.`;
+      const copyHint = "Copy the token above now — it will not be shown again.";
+      if (stdoutSupportsAnsi()) {
+        // Pen and Signal accent on stderr-free success metadata only (DESIGN.md CLI surface).
+        console.log(`\x1b[38;2;10;107;115m${meta}\x1b[0m`);
+        console.log(`\x1b[2m${copyHint}\x1b[0m`);
+      } else {
+        console.log(meta);
+        console.log(copyHint);
+      }
       return 0;
     }
     case "list": {

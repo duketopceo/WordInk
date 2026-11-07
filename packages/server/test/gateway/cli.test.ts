@@ -176,6 +176,8 @@ describe("tokens", () => {
     expect(token).toBeTruthy();
     // R10: printed exactly once, never stored or reprinted.
     expect(created.stdout.split(token!).length - 1).toBe(1);
+    expect(created.stdout).toContain("Copy the token above now");
+    expect(created.stdout).not.toMatch(/\x1b\[/);
 
     const listed = await run(["tokens", "list"]);
     expect(listed.code).toBe(0);

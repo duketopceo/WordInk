@@ -1,30 +1,16 @@
+@import "../../../assets/brand/tokens.css";
+
 :root {
-  --bg: #f8f9fa;
-  --surface: #ffffff;
-  --text: #0e1116;
-  --muted: #4a5260;
-  --border: #d9dee4;
-  --accent: #0a6b73;
-  --code-bg: #edf0f3;
-  --error: #b42318;
-  --warn-bg: #fff7e6;
-  --warn-border: #f0c36d;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0b0e12;
-    --surface: #141920;
-    --text: #e8ecef;
-    --muted: #9aa3af;
-    --border: #2a313b;
-    --accent: #4fd1c5;
-    --code-bg: #141920;
-    --error: #f97066;
-    --warn-bg: #2a2416;
-    --warn-border: #7a6223;
-    color-scheme: dark;
-  }
+  --bg: var(--wi-bg);
+  --surface: var(--wi-surface);
+  --text: var(--wi-ink);
+  --muted: var(--wi-muted);
+  --border: var(--wi-rule);
+  --accent: var(--wi-accent);
+  --code-bg: var(--wi-surface-sunk);
+  --error: var(--wi-error);
+  --warn-bg: color-mix(in srgb, var(--wi-warn) 12%, var(--wi-bg));
+  --warn-border: color-mix(in srgb, var(--wi-warn) 45%, var(--wi-rule));
 }
 
 * { box-sizing: border-box; }
@@ -42,9 +28,11 @@ a { color: var(--accent); }
   --wordink-bg: var(--surface);
   --wordink-border: 2px solid var(--border);
   --wordink-icon: var(--text);
+  --wordink-accent: var(--accent);
   --wordink-error: var(--error);
+  --wordink-active-bg: var(--accent);
+  --wordink-active-icon: var(--wi-on-accent);
 }
-.demo wordink-mic[data-state="listening"] { --wordink-active-bg: var(--accent); --wordink-active-icon: var(--bg); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
 .top {

@@ -19,28 +19,34 @@ export function App() {
   });
 
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: 560, margin: "3rem auto", padding: "0 1rem" }}>
+    <main className="demo-shell">
       <h1>WordInk + React</h1>
       <label htmlFor="message">Message</label>
-      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-        <input
-          id="message"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          style={{ flex: 1, padding: 8, fontSize: 16 }}
-        />
+      <textarea
+        id="message"
+        className="demo-field"
+        rows={5}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Hold the mic and speak…"
+      />
+      <div className="demo-row">
         <button
           type="button"
-          aria-pressed={state === "listening"}
+          className="demo-mic"
+          aria-pressed={state === "listening" || state === "requesting-mic"}
           onPointerDown={() => void press()}
           onPointerUp={() => void release()}
           onPointerLeave={() => state === "listening" && void release()}
         >
           {state === "listening" ? "Release to stop" : "Hold to talk"}
         </button>
+        <span className="demo-hint">Uses the `useDictation` hook with Pen and Signal demo styles.</span>
       </div>
-      <meter min={0} max={1} value={level} style={{ width: "100%", marginTop: 8 }} />
-      <p role="status">{state === "error" && error ? `${error.message} ${error.hint ?? ""}` : interim || STATUS[state]}</p>
+      <meter className="demo-meter" min={0} max={1} value={level} />
+      <p role="status" className="demo-status">
+        {state === "error" && error ? `${error.message} ${error.hint ?? ""}` : interim || STATUS[state]}
+      </p>
     </main>
   );
 }
