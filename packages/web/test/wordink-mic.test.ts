@@ -99,6 +99,20 @@ describe("<wordink-mic> rendering", () => {
     expect(button(mic).getAttribute("aria-label")).toBe("Dictate");
   });
 
+  it("shows Pen and Signal state glyphs instead of a microphone icon", () => {
+    const mic = mount(`<wordink-mic for="msg"></wordink-mic>`);
+    expect(button(mic).innerHTML).toContain('d="M12 3v13');
+    pointer(button(mic), "pointerdown");
+    const d = last();
+    d.emit("state", "listening");
+    expect(button(mic).innerHTML).toContain('d="M4 10v4');
+    d.emit("state", "transcribing");
+    expect(button(mic).innerHTML).toContain('d="M4 12h2');
+    d.emit("state", "error");
+    d.emit("error", wordinkError("mic-denied", "Mic blocked", "Allow the mic."));
+    expect(button(mic).innerHTML).toContain('d="M12 4v10');
+  });
+
   it("creates no dictation until the first press (it must start in a user gesture)", () => {
     mount(`<wordink-mic></wordink-mic>`);
     expect(createDictation).not.toHaveBeenCalled();

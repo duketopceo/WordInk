@@ -1,0 +1,33 @@
+/**
+ * WordInk design tokens ("Pen and Signal"). Canonical source: DESIGN.md
+ * Import in apps, examples, and documentation; <wordink-mic> mirrors these via --wordink-* overrides.
+ */
+:root {
+  --wi-bg: #f8f9fa;
+  --wi-surface: #ffffff;
+  --wi-surface-sunk: #edf0f3;
+  --wi-ink: #0e1116;
+  --wi-muted: #4a5260;
+  --wi-accent: #0a6b73;
+  --wi-on-accent: #ffffff;
+  --wi-error: #b42318;
+  --wi-warn: #8a5a00;
+  --wi-rule: #d9dee4;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --wi-bg: #0b0e12;
+    --wi-surface: #141920;
+    --wi-surface-sunk: #0b0e12;
+    --wi-ink: #e8ecef;
+    --wi-muted: #9aa3af;
+    --wi-accent: #4fd1c5;
+    --wi-on-accent: #0b0e12;
+    --wi-error: #f97066;
+    --wi-warn: #f0b84a;
+    --wi-rule: #2a313b;
+    color-scheme: dark;
+  }
+}

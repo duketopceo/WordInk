@@ -94,11 +94,12 @@ The state is reflected as `data-state` on the element (`idle`, `requesting-mic`,
 
 | Property | Default |
 |---|---|
-| `--wordink-accent` | `#0a6b73` |
-| `--wordink-size` | `2.5rem` (button) |
-| `--wordink-bg`, `--wordink-icon` | `#fff`, accent |
-| `--wordink-active-bg`, `--wordink-active-icon` | accent, `#fff` (while listening) |
-| `--wordink-border`, `--wordink-radius` | accent-tinted 1px, `999px` |
+| `--wordink-accent` | `#0a6b73` (chains to `--wi-accent` when set on the host) |
+| `--wordink-rule` | `#d9dee4` (chains to `--wi-rule`) |
+| `--wordink-size` | `2.5rem` (40 px button) |
+| `--wordink-bg`, `--wordink-icon` | surface `#fff`, ink-colour icon |
+| `--wordink-active-bg`, `--wordink-active-icon` | accent, on-accent (while listening) |
+| `--wordink-border`, `--wordink-radius` | `2px solid` rule colour, `999px` |
 | `--wordink-error` | `#b42318` |
 | `--wordink-meter-width`, `--wordink-meter-height` | `3em`, `0.35em` |
 | `--wordink-meter-track`, `--wordink-meter-fill` | tinted text color, accent |

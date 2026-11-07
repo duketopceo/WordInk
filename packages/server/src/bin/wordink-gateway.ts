@@ -181,9 +181,17 @@ async function cmdTokens(args: string[]): Promise<number> {
       const made = await store.create(label, admin ? "admin" : "device");
       // The full token is printed exactly once (R10); only its hash is stored.
       console.log(made.token);
-      console.log(
-        `created id=${made.id} scope=${made.scope} label="${made.label}" — store the token now; it is never shown again.`,
-      );
+      const meta =
+        `created id=${made.id} scope=${made.scope} label="${made.label}" — store the token now; it is never shown again.`;
+      const copyHint = "Copy the token above now — it will not be shown again.";
+      if (process.stdout.isTTY) {
+        // Pen and Signal accent on stderr-free success metadata only (DESIGN.md CLI surface).
+        console.log(`\x1b[38;2;10;107;115m${meta}\x1b[0m`);
+        console.log(`\x1b[2m${copyHint}\x1b[0m`);
+      } else {
+        console.log(meta);
+        console.log(copyHint);
+      }
       return 0;
     }
     case "list": {

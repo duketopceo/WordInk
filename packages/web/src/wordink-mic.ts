@@ -12,7 +12,7 @@ import {
   type WordInkError,
 } from "@wordink/core";
 import { insertText, type SavedSelection, saveSelection } from "./insert.js";
-import { MIC_ICON, STYLES } from "./styles.js";
+import { GLYPH_IDLE, STYLES, glyphForState } from "./styles.js";
 
 export interface WordInkTranscriptDetail {
   text: string;
@@ -65,13 +65,14 @@ export class WordInkMic extends Base {
   private readonly slotEl: HTMLSlotElement;
   private readonly meter: HTMLElement;
   private readonly statusEl: HTMLElement;
+  private glyphKey = "";
 
   constructor() {
     super();
     this.root = this.attachShadow({ mode: "open" });
     this.root.innerHTML =
       `<style>${STYLES}</style>` +
-      `<slot><button part="button" type="button" aria-pressed="false">${MIC_ICON}</button></slot>` +
+      `<slot><button part="button" type="button" aria-pressed="false">${GLYPH_IDLE}</button></slot>` +
       `<span part="meter" aria-hidden="true"></span>` +
       `<span part="status" role="status" aria-live="polite"></span>`;
     this.slotEl = this.root.querySelector("slot")!;
@@ -407,7 +408,14 @@ export class WordInkMic extends Base {
     const control = this.control();
     const active = this.currentState === "listening" || this.currentState === "requesting-mic";
     control.setAttribute("aria-pressed", String(active));
-    if (control === this.button) this.button.setAttribute("aria-label", this.mode === "hold" ? "Hold to dictate" : "Dictate");
+    if (control === this.button) {
+      this.button.setAttribute("aria-label", this.mode === "hold" ? "Hold to dictate" : "Dictate");
+      const key = this.currentState;
+      if (key !== this.glyphKey) {
+        this.glyphKey = key;
+        this.button.innerHTML = glyphForState(key);
+      }
+    }
     const text = this.currentState === "error" ? this.errorText : this.interim || STATUS[this.currentState];
     if (this.statusEl.textContent !== text) this.statusEl.textContent = text;
   }

@@ -1,6 +1,6 @@
 # WordInk design direction (proposal)
 
-Status: proposal for maintainer sign-off. It covers the web SDK, the docs site and the brand assets; the desktop app (`apps/desktop`, based on Hex) adopts the accent and brand assets through a theme layer; see the apps/desktop section. Nothing in the packages or docs site uses these tokens yet; applying them is a later code change. Today the docs site and `<wordink-mic>` use indigo `#4f46e5` (`apps/docs/src/style.css`, `packages/web/src/styles.ts`).
+Status: proposal for maintainer sign-off. It covers the web SDK, the docs site and the brand assets; the desktop app (`apps/desktop`, based on Hex) adopts the accent and brand assets through a theme layer; see the apps/desktop section. Canonical CSS tokens live in `assets/brand/tokens.css` (`--wi-*`); the docs site and examples import them, and `<wordink-mic>` mirrors them through `--wordink-*` (and optional `var(--wi-*)` on the host). State glyphs from `assets/brand/glyphs.svg` ship in `@wordink/web`.
 
 ## Direction: "Pen and Signal"
 

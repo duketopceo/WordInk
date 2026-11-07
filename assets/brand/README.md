@@ -2,6 +2,10 @@
 
 These are a proposal. The owner signs off logos before they are used as the official mark. All files are hand-written SVG; no raster sources, stock icons or generated images. PNG previews in `preview/` are rendered with `resvg` and optimised with `oxipng`.
 
+## Design tokens (`tokens.css`)
+
+Light and dark `--wi-*` custom properties from `DESIGN.md` (colour, contrast-checked). Import this file in sites and examples; `@wordink/web` defaults chain to the same values.
+
 ## Mark (`logo.svg`, `logo-dark.svg`)
 
 A 32 x 32 grid, three vertical rounded bars:
