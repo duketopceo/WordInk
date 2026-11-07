@@ -150,6 +150,8 @@ fn notes_available(ui: &Ui) -> bool {
 
 #[derive(Default)]
 pub(super) struct MeetingsPane {
+    /// The sidebar control's one-line note ("Meetings turned on.").
+    pub(super) sidebar_note: Option<String>,
     pub(super) view: View,
     /// Newest first, as the store lists them.
     pub(super) meetings: Vec<Meeting>,
@@ -584,6 +586,115 @@ fn search(ui: &Ui, p: Paint) -> El {
         .on_edit(|ui: &mut Ui| &mut ui.meetings.search)
         .build(p.k)
         .key("meetings-search")
+}
+
+/// The window's always-visible meeting control (sidebar, above Quit): Start
+/// meeting, or while recording the red "In a meeting" state with the elapsed
+/// time and Stop & transcribe. With Meetings off, Start turns it on (and
+/// says so) instead of hiding.
+pub(super) fn sidebar_control(ui: &Ui, p: Paint) -> El {
+    let pane = &ui.meetings;
+    let c = &p.k.c;
+    let active = pane.active();
+    let recording =
+        matches!(active.map(|m| m.status), Some(Status::Recording)) && !pane.stop_pending;
+    let busy = pane.stop_pending
+        || pane.start_pending
+        || matches!(
+            active.map(|m| m.status),
+            Some(Status::Starting | Status::Transcribing)
+        );
+    let (label, danger) = if recording {
+        (tr("Stop & transcribe"), true)
+    } else if busy {
+        (tr("Starting…"), false)
+    } else {
+        (tr("Start meeting"), false)
+    };
+    let mut control = row()
+        .key("meeting-toggle")
+        .role("button")
+        .label(label)
+        .h(super::sidebar::NAV_ROW_HEIGHT)
+        .px(6.0)
+        .gap(8.0)
+        .center_y()
+        .radius(p.k.radius.sm)
+        .hover(c.hover)
+        .press(c.pressed)
+        .focusable(true)
+        .focus_ring(2.0, -2.0, c.border_focus);
+    if !busy {
+        control = control.on_press(toggle_from_sidebar);
+    }
+    control = control.child(if recording {
+        pulsing_dot(p.danger())
+    } else {
+        text(if busy { "\u{2026}" } else { "\u{25cf}" })
+            .key("glyph")
+            .font(p.k.ty.small)
+            .color(p.muted())
+    });
+    control = control.child(
+        text(label)
+            .key("label")
+            .font(p.k.ty.ui)
+            .color(if danger { p.danger() } else { c.text_base })
+            .truncate()
+            .grow(1.0),
+    );
+    if let (true, Some(meeting)) = (recording, active) {
+        control = control.child(
+            text(clock_offset(meeting.duration_ms))
+                .key("elapsed")
+                .font(p.k.ty.mono)
+                .color(p.muted()),
+        );
+    }
+    let mut column = col().key("meeting-control").gap(2.0);
+    if recording {
+        column = column.child(
+            text(tr("In a meeting"))
+                .key("in-meeting")
+                .font(p.k.ty.small)
+                .color(p.danger())
+                .px(6.0),
+        );
+    }
+    column = column.child(control);
+    if let Some(note) = &pane.sidebar_note {
+        column = column.child(
+            text(note.clone())
+                .key("meeting-note")
+                .font(p.k.ty.small)
+                .color(p.faint())
+                .wrap()
+                .px(6.0),
+        );
+    }
+    column.mt(super::sidebar::NAV_ROW_GAP)
+}
+
+fn toggle_from_sidebar(ui: &mut Ui) {
+    let recording = matches!(
+        ui.meetings.active().map(|m| m.status),
+        Some(Status::Recording)
+    );
+    if recording {
+        ui.meetings.sidebar_note = None;
+        stop(ui);
+        return;
+    }
+    ui.meetings.sidebar_note = None;
+    if !ui.settings.meetings.enabled {
+        ui.update(|settings| settings.meetings.enabled = true);
+        ui.meetings.sidebar_note = Some(tr("Meetings turned on.").to_owned());
+    }
+    // The first meeting on the local chain: say what the cloud would add.
+    if ui.settings.meeting_engine.is_none() && !ui.openrouter.connected() {
+        ui.meetings.sidebar_note = Some(super::openrouter_connect::first_meeting_note());
+    }
+    start(ui);
 }
 
 /// Start recording, or the active recording's elapsed time and Stop.

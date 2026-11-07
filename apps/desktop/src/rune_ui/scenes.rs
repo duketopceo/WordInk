@@ -881,9 +881,11 @@ fn engine_probe(gpu: bool) -> crate::hardware::Probed {
                 x86: false,
                 avx2: false,
             },
+            cpu_cores: if gpu { 8 } else { 2 },
             neural_engine: false,
         },
         has_groq_key: false,
+        has_openrouter_key: false,
         other_tools: Vec::new(),
     }
 }

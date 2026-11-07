@@ -226,6 +226,7 @@ pub(super) fn sidebar(ui: &Ui, p: Paint) -> El {
         .child(el().key("spacer").grow(1.0))
         .children(sidebar_update::control(ui, p))
         .children(sidebar_update::notes(ui, p))
+        .child(super::meetings::sidebar_control(ui, p))
         .children(host::QUIT_IN_WINDOW.then(|| quit_item(p)))
         .child(footer(ui, p))
 }

@@ -695,6 +695,9 @@ pub(super) struct ChunkModel {
     selection: TranscriptionSelection,
     owned: Option<Transcriber>,
     unavailable: bool,
+    /// The cloud meeting engine failed once: the rest of this meeting
+    /// stays on the local chain, so the recording is never lost.
+    cloud_down: bool,
 }
 
 enum Chunked {
@@ -711,6 +714,7 @@ impl ChunkModel {
             selection,
             owned: None,
             unavailable: false,
+            cloud_down: false,
         }
     }
 
@@ -727,8 +731,19 @@ impl ChunkModel {
         }
         // A meeting engine set to a cloud provider takes the chunk there; the
         // local model is not loaded at all.
-        if let Some(provider) = crate::transcription::cloud::meeting_route() {
-            return transcribe_in_cloud(provider, samples).map(Chunked::Done);
+        // A missing key or a failed request falls back to the local chain
+        // for the rest of the meeting, and says so (`take_fallback_note`).
+        if !self.cloud_down
+            && let Some(provider) = crate::transcription::cloud::meeting_route()
+        {
+            match transcribe_in_cloud(provider, samples) {
+                Ok(transcript) => return Ok(Chunked::Done(transcript)),
+                Err(error) => {
+                    tracing::warn!(error = %error, "cloud meeting engine failed; using the local model");
+                    self.cloud_down = true;
+                    note_cloud_fallback(provider.name());
+                }
+            }
         }
         let engine = crate::transcription::engine::TranscriptionEngine::shared();
         if let Some(engine) = &engine
@@ -817,15 +832,38 @@ impl ChunkModel {
     }
 }
 
+static FALLBACK_NOTE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn note_cloud_fallback(provider: &str) {
+    *FALLBACK_NOTE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!(
+        "{provider} could not transcribe this meeting, so it continues on this computer."
+    ));
+}
+
+/// The one-time note that a meeting fell back from the cloud to the local
+/// model, for the window to show. Taking it clears it.
+pub fn take_fallback_note() -> Option<String> {
+    FALLBACK_NOTE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take()
+}
+
 /// Transcribes a chunk with the meeting engine's cloud provider. The error
 /// is the provider's own words for the failure, as dictation shows them.
 fn transcribe_in_cloud(
     provider: crate::transcription::cloud::Provider,
     samples: &[f32],
 ) -> Result<Transcript> {
-    let outcome =
-        crate::transcription::cloud::run_meeting(provider, samples).map_err(|error| eyre!(error))?;
-    Ok(cloud_transcript(outcome.text, outcome.segments, outcome.words))
+    let outcome = crate::transcription::cloud::run_meeting(provider, samples)
+        .map_err(|error| eyre!(error))?;
+    Ok(cloud_transcript(
+        outcome.text,
+        outcome.segments,
+        outcome.words,
+    ))
 }
 
 /// A cloud reply as a transcript: word timings when the provider gave them,

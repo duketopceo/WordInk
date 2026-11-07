@@ -28,6 +28,9 @@ pub(super) struct Tour {
     /// A Groq key was already set, and the engine isn't Local, when the tour
     /// opened: cloud dictation works without a local model.
     cloud_ready: bool,
+    /// Run setup again: an existing install, whose settings stay as they are
+    /// (the engine step still shows the recommendation).
+    pub(super) replayed: bool,
 }
 
 /// Whether dictation already runs on the cloud: a key resolves (once, here,
@@ -54,6 +57,7 @@ impl Tour {
             advance_at: None,
             completed,
             cloud_ready,
+            replayed: false,
         }
     }
 
@@ -65,7 +69,7 @@ impl Tour {
     ) -> Tour {
         let cloud = key_already_set(settings);
         let installed = picker.selected_installed(settings) || cloud;
-        Tour::new(
+        let mut tour = Tour::new(
             Flow::with_engine_setup(
                 Step::Welcome,
                 platform.setup_status(installed),
@@ -74,7 +78,9 @@ impl Tour {
             ),
             false,
             cloud,
-        )
+        );
+        tour.replayed = true;
+        tour
     }
 
     /// The tour when this run still needs it: a new install, or a run quit

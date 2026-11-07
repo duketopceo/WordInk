@@ -116,7 +116,19 @@ pub(in crate::rune_ui) fn choose_local(ui: &mut Ui) {
     if let Some(live) = ui.first_run.as_mut().and_then(|s| s.live.as_mut()) {
         live.set_choice(selection);
     }
+    // A new install (not a replay) starts with the cloud retry the keys it
+    // already has allow: Groq first, then OpenRouter, else off.
+    let new_install = ui.tour.as_ref().is_some_and(|tour| !tour.replayed);
+    let fallback = ui
+        .engine_setup
+        .probed
+        .as_ref()
+        .map(Probed::default_fallback)
+        .filter(|_| new_install);
     ui.update(|settings| {
+        if let Some(fallback) = fallback {
+            settings.local_cloud_fallback = fallback;
+        }
         settings.engine = crate::transcription::cloud::EngineChoice::Local;
         // The Neural Engine model is a Labs engine: choosing it here turns it on.
         if model == TranscriptionModelId::ParakeetV3Ane {
@@ -264,15 +276,14 @@ pub(crate) fn gpu_line(gpu: &GpuSummary) -> String {
 
 pub(crate) fn reason_copy(reason: Reason) -> &'static str {
     match reason {
-        Reason::HasKey => tr("A Groq key is already set on this computer."),
         Reason::NoAvx2 => tr("This processor can't run local models fast enough."),
-        Reason::NoGpu => tr("There is no GPU here to run a local model on."),
+        Reason::NoGpu | Reason::SoftwareGpu | Reason::CpuOnly => {
+            tr("This computer's processor runs it well, and nothing leaves it.")
+        }
         Reason::NeedsDriver => {
-            tr("Until the GPU has a Vulkan driver, a local model would run slowly on the CPU.")
+            tr("Until the GPU has a Vulkan driver, it runs on the processor, a little slower.")
         }
-        Reason::SoftwareGpu => {
-            tr("Only a software graphics driver is available, which is too slow for a local model.")
-        }
+        Reason::WeakCpu => tr("This processor is too slow for a local model."),
         Reason::LowMemory => tr("This computer has little memory for a local model."),
         Reason::FitsLocal => {
             tr("This computer's GPU and memory run it well, and nothing leaves it.")
@@ -523,7 +534,7 @@ fn cloud_detail(ui: &Ui, p: Paint, view: Option<EngineView>) -> El {
             .wrap(),
         );
     }
-    detail
+    detail.child(crate::rune_ui::openrouter_connect::onboarding_row(ui, p))
 }
 
 fn local_detail(ui: &Ui, p: Paint) -> El {

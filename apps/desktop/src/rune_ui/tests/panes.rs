@@ -2631,3 +2631,47 @@ fn the_view_shows_buffered_events_filters_them_and_pauses() {
     tap(&mut rt, "log-view-clear");
     assert!(body(&rt).contains("No events match yet"));
 }
+
+#[test]
+fn the_sidebar_meeting_button_is_always_there_and_shares_the_meetings_paths() {
+    // Recording: red state, elapsed time, Stop & transcribe.
+    let mut rt = runtime("meetings-recording", true, PANE_SIZE);
+    assert!(rt.find("meeting-toggle").is_some());
+    assert!(
+        rt.find("in-meeting").is_some(),
+        "the red In a meeting state"
+    );
+    assert!(rt.find("elapsed").is_some());
+    assert!(texts(&rt).iter().any(|t| t.contains("Stop & transcribe")));
+    tap(&mut rt, "meeting-toggle");
+    assert_eq!(asked(&rt), [PlatformRequest::Meeting(MeetingRequest::Stop)]);
+
+    // Idle: Start meeting, same request as the Meetings page.
+    let mut rt = runtime("meetings-empty", true, PANE_SIZE);
+    assert!(texts(&rt).iter().any(|t| t.contains("Start meeting")));
+    assert!(rt.find("in-meeting").is_none());
+    tap(&mut rt, "meeting-toggle");
+    assert_eq!(
+        asked(&rt),
+        [PlatformRequest::Meeting(MeetingRequest::Start)]
+    );
+}
+
+#[test]
+fn the_sidebar_meeting_button_turns_meetings_on_instead_of_hiding() {
+    let mut rt = runtime("meetings-off", true, PANE_SIZE);
+    assert!(!rt.state.settings.meetings.enabled);
+    rt.state.meetings.meetings.clear();
+    refresh(&mut rt);
+    assert!(rt.find("meeting-toggle").is_some(), "visible while off");
+    tap(&mut rt, "meeting-toggle");
+    assert!(rt.state.settings.meetings.enabled);
+    assert!(
+        rt.find("meeting-note").is_some(),
+        "says it turned Meetings on"
+    );
+    assert_eq!(
+        asked(&rt),
+        [PlatformRequest::Meeting(MeetingRequest::Start)]
+    );
+}

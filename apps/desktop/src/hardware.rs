@@ -11,7 +11,7 @@ use std::sync::Mutex;
 pub mod gpu;
 pub mod tools;
 
-use crate::transcription::cloud::Provider;
+use crate::transcription::cloud::{LocalFallback, Provider};
 
 /// The model local dictation recommends: its wire name in the catalogue.
 pub const PARAKEET_V3: &str = "parakeet_v3";
@@ -20,6 +20,10 @@ pub const PARAKEET_V3: &str = "parakeet_v3";
 pub const PARAKEET_V3_ANE: &str = "parakeet_v3_ane";
 /// Local dictation wants at least this much RAM (GB).
 pub const MIN_LOCAL_RAM_GB: f64 = 8.0;
+/// CPU-only local dictation wants at least this many logical cores. Parakeet
+/// v3 runs at about 0.03-0.06x real time on a modern CPU; with fewer cores
+/// the first words lag, so such machines are pointed at the cloud.
+pub const MIN_CPU_ONLY_CORES: usize = 4;
 
 /// The GPU API the speech model could run on.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,6 +55,8 @@ pub struct Probe {
     /// System RAM. 0 when it could not be read.
     pub ram_gb: f64,
     pub cpu_features: CpuFeatures,
+    /// Logical CPU cores. 0 when unknown.
+    pub cpu_cores: usize,
     /// The Apple Neural Engine and its runtime are ready here (Linux on
     /// Apple silicon only; see `transcription::ane::probe`).
     pub neural_engine: bool,
@@ -77,7 +83,6 @@ pub enum Choice {
 /// Why `primary` was picked, for the line under it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Reason {
-    HasKey,
     NoAvx2,
     NoGpu,
     /// A hardware GPU without a Vulkan driver (`gpu::GpuStatus::NeedsDriver`).
@@ -87,6 +92,10 @@ pub enum Reason {
     FitsLocal,
     /// The Apple Neural Engine runs the local model.
     NeuralEngine,
+    /// No usable GPU, but the CPU is strong enough for the local model.
+    CpuOnly,
+    /// No usable GPU and too few CPU cores for the local model.
+    WeakCpu,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -150,13 +159,15 @@ pub fn parse_meminfo(text: &str) -> Option<f64> {
     Some(kilobytes * 1024.0 / GB)
 }
 
-/// The recommendation for `probe`, in this order: a key already set means
-/// Groq; x86 without AVX2 can't run the local model well; no GPU, or only a
-/// software driver, means Groq; known RAM under [`MIN_LOCAL_RAM_GB`] means
-/// Groq; otherwise Parakeet v3 on this computer, on the Neural Engine where
-/// that is ready. Each names the other as the alternative. Unknown RAM (0)
-/// does not rule local out.
-pub fn recommend(probe: &Probe, has_groq_key: bool) -> Recommendation {
+/// The recommendation for `probe`: local first, with the cloud as the
+/// alternative. x86 without AVX2 can't run the local model well, so it gets
+/// Groq. Otherwise the Neural Engine where ready, then a usable GPU
+/// (Vulkan or Metal), then the CPU when it has at least
+/// [`MIN_CPU_ONLY_CORES`] cores; known RAM under [`MIN_LOCAL_RAM_GB`] means
+/// Groq everywhere but the Neural Engine path. Unknown RAM (0) or cores (0)
+/// does not rule local out. A key already set does not displace a machine
+/// that runs local well: it only becomes the cloud fallback.
+pub fn recommend(probe: &Probe) -> Recommendation {
     const GROQ: Choice = Choice::Cloud(Provider::Groq);
     const LOCAL: Choice = Choice::Local(PARAKEET_V3);
     let cloud = |reason| Recommendation {
@@ -164,37 +175,58 @@ pub fn recommend(probe: &Probe, has_groq_key: bool) -> Recommendation {
         alternative: LOCAL,
         reason,
     };
-    if has_groq_key {
-        return cloud(Reason::HasKey);
-    }
+    let local = |reason| Recommendation {
+        primary: LOCAL,
+        alternative: GROQ,
+        reason,
+    };
     if probe.cpu_features.x86 && !probe.cpu_features.avx2 {
         return cloud(Reason::NoAvx2);
     }
+    let low_ram = probe.ram_gb > 0.0 && probe.ram_gb < MIN_LOCAL_RAM_GB;
     // The Neural Engine needs no GPU driver: its own runtime drives it.
-    if probe.neural_engine && !(probe.ram_gb > 0.0 && probe.ram_gb < MIN_LOCAL_RAM_GB) {
+    if probe.neural_engine && !low_ram {
         return Recommendation {
             primary: Choice::Local(PARAKEET_V3_ANE),
             alternative: GROQ,
             reason: Reason::NeuralEngine,
         };
     }
-    if probe.gpu.status == gpu::GpuStatus::NeedsDriver {
-        return cloud(Reason::NeedsDriver);
-    }
-    match probe.gpu_api {
-        GpuApi::None => return cloud(Reason::NoGpu),
-        GpuApi::Software => return cloud(Reason::SoftwareGpu),
-        GpuApi::Vulkan | GpuApi::Metal => {}
-    }
-    if probe.ram_gb > 0.0 && probe.ram_gb < MIN_LOCAL_RAM_GB {
+    if low_ram {
         return cloud(Reason::LowMemory);
     }
-    Recommendation {
-        primary: LOCAL,
-        alternative: GROQ,
-        reason: Reason::FitsLocal,
+    let gpu_usable = matches!(probe.gpu_api, GpuApi::Vulkan | GpuApi::Metal)
+        && probe.gpu.status != gpu::GpuStatus::NeedsDriver;
+    if gpu_usable {
+        return local(Reason::FitsLocal);
+    }
+    if probe.cpu_cores > 0 && probe.cpu_cores < MIN_CPU_ONLY_CORES {
+        return cloud(Reason::WeakCpu);
+    }
+    // The CPU carries it; the reason still tells a missing GPU driver apart.
+    local(match (probe.gpu.status, probe.gpu_api) {
+        (gpu::GpuStatus::NeedsDriver, _) => Reason::NeedsDriver,
+        (_, GpuApi::Software) => Reason::SoftwareGpu,
+        (_, GpuApi::None) => Reason::NoGpu,
+        _ => Reason::CpuOnly,
+    })
+}
+
+/// The cloud retry for a failed local dictation: Groq first for speed, then
+/// OpenRouter, and off (audio never leaves the computer) with no key.
+pub fn fallback_for_keys(has_groq: bool, has_openrouter: bool) -> LocalFallback {
+    if has_groq {
+        LocalFallback::Groq
+    } else if has_openrouter {
+        LocalFallback::Openrouter
+    } else {
+        LocalFallback::None
     }
 }
+
+/// The meeting engine WordInk offers (never forces) once OpenRouter is
+/// connected: NVIDIA Nemotron 3.5 Transcribe, about 6-7% WER on meetings.
+pub const MEETING_OFFER_MODEL: &str = "nvidia/nemotron-3.5-transcribe";
 
 /// What the probe found, with whether a Groq key is already set and which
 /// other dictation tools are installed.
@@ -202,12 +234,18 @@ pub fn recommend(probe: &Probe, has_groq_key: bool) -> Recommendation {
 pub struct Probed {
     pub probe: Probe,
     pub has_groq_key: bool,
+    pub has_openrouter_key: bool,
     pub other_tools: Vec<tools::OtherTool>,
 }
 
 impl Probed {
     pub fn recommendation(&self) -> Recommendation {
-        recommend(&self.probe, self.has_groq_key)
+        recommend(&self.probe)
+    }
+
+    /// The cloud fallback new installs start with, from the keys present.
+    pub fn default_fallback(&self) -> LocalFallback {
+        fallback_for_keys(self.has_groq_key, self.has_openrouter_key)
     }
 }
 
@@ -282,6 +320,7 @@ pub fn probe() -> Probe {
             #[cfg(not(target_arch = "x86_64"))]
             avx2: false,
         },
+        cpu_cores: std::thread::available_parallelism().map_or(0, usize::from),
         neural_engine: neural_engine_ready(),
     }
 }
@@ -341,6 +380,9 @@ pub fn start() {
                 let probe = probe();
                 let has_groq_key =
                     crate::keys::status(Provider::Groq.id(), Provider::Groq.key_env()).is_some();
+                let has_openrouter_key =
+                    crate::keys::status(Provider::OpenRouter.id(), Provider::OpenRouter.key_env())
+                        .is_some();
                 let other_tools = tools::assess(&tools::observe());
                 tracing::info!(?probe, has_groq_key, ?other_tools, "hardware probe");
                 *PROBED
@@ -348,6 +390,7 @@ pub fn start() {
                     .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Probed {
                     probe,
                     has_groq_key,
+                    has_openrouter_key,
                     other_tools,
                 });
             });
@@ -388,6 +431,7 @@ mod tests {
             vram_or_unified_gb: vram,
             ram_gb: ram,
             cpu_features: CpuFeatures { x86, avx2 },
+            cpu_cores: 8,
             neural_engine: false,
         }
     }
@@ -395,127 +439,157 @@ mod tests {
     #[test]
     fn recommend_table() {
         use GpuApi::{Metal, None as NoGpu, Software, Vulkan};
-        // (name, probe, has key, primary, alternative, reason)
+        const CLOUD: bool = false;
+        // (name, probe, local?, reason)
+        let mut needs_driver = probe(NoGpu, 0.0, 32.0, true, true);
+        needs_driver.gpu.status = gpu::GpuStatus::NeedsDriver;
+        let mut driver_found = probe(Vulkan, 0.0, 16.0, true, true);
+        driver_found.gpu.status = gpu::GpuStatus::DriverFound;
         let cases = [
             (
-                "no GPU",
+                "no GPU, strong CPU",
                 probe(NoGpu, 0.0, 32.0, true, true),
-                false,
-                GROQ,
-                LOCAL,
+                true,
                 Reason::NoGpu,
             ),
             (
                 "software Vulkan",
                 probe(Software, 0.0, 32.0, true, true),
-                false,
-                GROQ,
-                LOCAL,
+                true,
                 Reason::SoftwareGpu,
             ),
             (
                 "Vulkan with 16 GB",
                 probe(Vulkan, 8.0, 16.0, true, true),
-                false,
-                LOCAL,
-                GROQ,
+                true,
                 Reason::FitsLocal,
             ),
             (
                 "Vulkan with exactly 8 GB",
                 probe(Vulkan, 4.0, 8.0, true, true),
-                false,
-                LOCAL,
-                GROQ,
+                true,
                 Reason::FitsLocal,
             ),
             (
                 "Vulkan with 4 GB",
                 probe(Vulkan, 2.0, 4.0, true, true),
-                false,
-                GROQ,
-                LOCAL,
+                CLOUD,
                 Reason::LowMemory,
             ),
             (
                 "Metal, 64 GB unified",
                 probe(Metal, 64.0, 64.0, false, false),
-                false,
-                LOCAL,
-                GROQ,
+                true,
                 Reason::FitsLocal,
             ),
             (
                 "x86 without AVX2",
                 probe(Vulkan, 8.0, 32.0, true, false),
-                false,
-                GROQ,
-                LOCAL,
+                CLOUD,
                 Reason::NoAvx2,
             ),
             (
                 "arm64 needs no AVX2",
                 probe(Vulkan, 8.0, 32.0, false, false),
-                false,
-                LOCAL,
-                GROQ,
+                true,
                 Reason::FitsLocal,
-            ),
-            (
-                "a key beats a fitting GPU",
-                probe(Vulkan, 8.0, 32.0, true, true),
-                true,
-                GROQ,
-                LOCAL,
-                Reason::HasKey,
-            ),
-            (
-                "a key on a machine with no GPU",
-                probe(NoGpu, 0.0, 32.0, true, true),
-                true,
-                GROQ,
-                LOCAL,
-                Reason::HasKey,
             ),
             (
                 "unknown RAM does not rule local out",
                 probe(Vulkan, 8.0, 0.0, true, true),
-                false,
-                LOCAL,
-                GROQ,
+                true,
                 Reason::FitsLocal,
             ),
-        ];
-        let mut needs_driver = probe(NoGpu, 0.0, 32.0, true, true);
-        needs_driver.gpu.status = gpu::GpuStatus::NeedsDriver;
-        let mut driver_found = probe(Vulkan, 0.0, 16.0, true, true);
-        driver_found.gpu.status = gpu::GpuStatus::DriverFound;
-        let cases = cases.into_iter().chain([
             (
-                "a GPU without a Vulkan driver",
+                "a GPU without a Vulkan driver runs on the CPU",
                 needs_driver,
-                false,
-                GROQ,
-                LOCAL,
+                true,
                 Reason::NeedsDriver,
             ),
             (
-                "a GPU whose driver is installed but ggml did not list",
+                "a driver installed but not listed by ggml",
                 driver_found,
-                false,
-                LOCAL,
-                GROQ,
+                true,
                 Reason::FitsLocal,
             ),
-        ]);
-        for (name, probe, key, primary, alternative, reason) in cases {
-            let got = recommend(&probe, key);
+        ];
+        for (name, probe, local, reason) in cases {
+            let got = recommend(&probe);
+            let (primary, alternative) = if local { (LOCAL, GROQ) } else { (GROQ, LOCAL) };
             assert_eq!(
                 (got.primary, got.alternative, got.reason),
                 (primary, alternative, reason),
                 "{name}"
             );
         }
+    }
+
+    /// Fake machines, one per hardware profile the defaults must serve.
+    #[test]
+    fn hardware_profiles_pick_the_local_chain() {
+        use GpuApi::{Metal, None as NoGpu, Vulkan};
+        const ANE: Choice = Choice::Local(PARAKEET_V3_ANE);
+        // Asahi: Neural Engine ready (the GPU also answers; the ANE wins).
+        let mut asahi = probe(Vulkan, 0.0, 64.0, false, false);
+        asahi.neural_engine = true;
+        assert_eq!(recommend(&asahi).primary, ANE);
+        // NVIDIA on Windows: Vulkan GPU.
+        let mut nvidia = probe(Vulkan, 12.0, 32.0, true, true);
+        nvidia.gpu.vendor = gpu::Vendor::Other;
+        let got = recommend(&nvidia);
+        assert_eq!((got.primary, got.reason), (LOCAL, Reason::FitsLocal));
+        // Apple silicon Mac: Metal.
+        assert_eq!(
+            recommend(&probe(Metal, 16.0, 16.0, false, false)).primary,
+            LOCAL
+        );
+        // Intel Mac / no GPU, 8 cores: local on the CPU.
+        let mut intel = probe(NoGpu, 0.0, 16.0, true, true);
+        intel.cpu_cores = 8;
+        let got = recommend(&intel);
+        assert_eq!((got.primary, got.reason), (LOCAL, Reason::NoGpu));
+        // Weak CPU: two cores, no GPU -> cloud; enough RAM does not save it.
+        let mut weak = probe(NoGpu, 0.0, 16.0, true, true);
+        weak.cpu_cores = 2;
+        let got = recommend(&weak);
+        assert_eq!(
+            (got.primary, got.alternative, got.reason),
+            (GROQ, LOCAL, Reason::WeakCpu)
+        );
+        // ...but a fast GPU rescues a two-core machine.
+        let mut gpu_two_cores = probe(Vulkan, 8.0, 16.0, true, true);
+        gpu_two_cores.cpu_cores = 2;
+        assert_eq!(recommend(&gpu_two_cores).primary, LOCAL);
+        // Unknown core count does not rule local out.
+        let mut unknown = probe(NoGpu, 0.0, 16.0, true, true);
+        unknown.cpu_cores = 0;
+        assert_eq!(recommend(&unknown).primary, LOCAL);
+        // A key never displaces a machine that runs local well.
+        let probed = Probed {
+            probe: nvidia_probe(),
+            has_groq_key: true,
+            has_openrouter_key: true,
+            other_tools: Vec::new(),
+        };
+        assert_eq!(probed.recommendation().primary, LOCAL);
+    }
+
+    fn nvidia_probe() -> Probe {
+        probe(GpuApi::Vulkan, 12.0, 32.0, true, true)
+    }
+
+    #[test]
+    fn the_cloud_fallback_follows_the_keys_groq_first() {
+        assert_eq!(fallback_for_keys(true, true), LocalFallback::Groq);
+        assert_eq!(fallback_for_keys(true, false), LocalFallback::Groq);
+        assert_eq!(fallback_for_keys(false, true), LocalFallback::Openrouter);
+        assert_eq!(fallback_for_keys(false, false), LocalFallback::None);
+    }
+
+    #[test]
+    fn the_meeting_offer_is_nemotron_on_openrouter() {
+        assert!(Provider::OpenRouter.accepts_model(MEETING_OFFER_MODEL));
+        assert_eq!(MEETING_OFFER_MODEL, "nvidia/nemotron-3.5-transcribe");
     }
 
     #[test]
@@ -597,25 +671,21 @@ mod tests {
             probe.neural_engine = true;
             probe
         };
-        let ready = recommend(&with_ane(probe(Vulkan, 0.0, 64.0, false, false)), false);
+        let ready = recommend(&with_ane(probe(Vulkan, 0.0, 64.0, false, false)));
         assert_eq!(ready.primary, ANE);
         assert_eq!(ready.alternative, GROQ);
         assert_eq!(ready.reason, Reason::NeuralEngine);
         // The Neural Engine needs no Vulkan driver of its own.
-        let no_gpu = recommend(&with_ane(probe(NoGpu, 0.0, 16.0, false, false)), false);
+        let no_gpu = recommend(&with_ane(probe(NoGpu, 0.0, 16.0, false, false)));
         assert_eq!(no_gpu.primary, ANE);
-        // A key already set and too little memory still win.
+        // Too little memory still wins.
         assert_eq!(
-            recommend(&with_ane(probe(Vulkan, 0.0, 64.0, false, false)), true).reason,
-            Reason::HasKey
-        );
-        assert_eq!(
-            recommend(&with_ane(probe(Vulkan, 0.0, 4.0, false, false)), false).reason,
+            recommend(&with_ane(probe(Vulkan, 0.0, 4.0, false, false))).reason,
             Reason::LowMemory
         );
         // Without it, the same machine gets Parakeet v3 on the GPU.
         assert_eq!(
-            recommend(&probe(Vulkan, 0.0, 64.0, false, false), false).primary,
+            recommend(&probe(Vulkan, 0.0, 64.0, false, false)).primary,
             LOCAL
         );
     }

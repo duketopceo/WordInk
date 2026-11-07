@@ -103,6 +103,7 @@ pub(super) fn rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     if matches!(choice, EngineChoice::Local | EngineChoice::Auto) {
         rows.push(fallback_row(ui, p, layer).into());
     }
+    rows.push(super::openrouter_connect::settings_row(ui, p).into());
     if let Some(provider) = choice.provider() {
         let models = cloud::models_for(provider);
         if models.len() > 1 {
@@ -213,7 +214,10 @@ fn meeting_models(provider: Provider) -> Vec<(String, String)> {
 /// models to choose between. Meetings use the local model unless a cloud
 /// engine is chosen here, whatever dictation uses.
 fn meeting_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
-    let choice = ui.settings.meeting_engine.filter(|c| c.provider().is_some());
+    let choice = ui
+        .settings
+        .meeting_engine
+        .filter(|c| c.provider().is_some());
     let labels: Vec<&'static str> = MEETING_ENGINES
         .iter()
         .map(|c| tr(c.unwrap_or(EngineChoice::Local).label()))
@@ -259,10 +263,14 @@ fn meeting_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         )
         .into(),
     ];
+    if choice != Some(EngineChoice::Openrouter) {
+        rows.push(super::openrouter_connect::meeting_offer_row(ui, p).into());
+    }
     if let Some(provider) = choice.and_then(EngineChoice::provider) {
         let models = meeting_models(provider);
         if models.len() > 1 {
-            let current = cloud::meeting_model_for(provider, ui.settings.meeting_engine_model.as_deref());
+            let current =
+                cloud::meeting_model_for(provider, ui.settings.meeting_engine_model.as_deref());
             let labels: Vec<&'static str> = models.iter().map(|(_, name)| interned(name)).collect();
             let selected = models
                 .iter()
@@ -284,9 +292,7 @@ fn meeting_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
                 },
                 layer,
             );
-            rows.push(
-                icon_row(p, "meeting-model", &WAVE, tr("Meeting model"), None, model).into(),
-            );
+            rows.push(icon_row(p, "meeting-model", &WAVE, tr("Meeting model"), None, model).into());
         }
     }
     rows
