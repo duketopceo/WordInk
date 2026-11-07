@@ -8,6 +8,24 @@ when the section is missing. See [`docs/releasing.md`](../../docs/releasing.md).
 
 ## Unreleased
 
+## 1.0.2
+
+- **Meeting button in the window.** The sidebar always shows "Start meeting";
+  while recording it reads "In a meeting" with "Stop & transcribe" and the
+  elapsed time. Pressing it turns meetings on if they were off.
+- **Connect OpenRouter.** A button in Settings and onboarding (and
+  `wordink keys connect openrouter`) opens OpenRouter in the browser, mints a
+  key named WordInk and saves it to the system keyring.
+- **Better meeting accuracy, optional.** With OpenRouter connected, onboarding
+  offers Nemotron 3.5 Transcribe as the meeting engine. If a cloud meeting
+  request fails or the key is missing, that meeting is transcribed locally
+  instead, so a recording is never lost.
+- **Defaults that fit the machine (new installs).** WordInk picks Parakeet v3
+  on the Apple Neural Engine when available, then a usable GPU, then the CPU,
+  and recommends a cloud engine only on low-powered machines. The cloud
+  fallback uses whichever key is set. Existing settings are kept.
+- `wordink transcribe-file` help now says it uses the cloud engine.
+
 ## 1.0.1
 
 - **Installers on every release.** Alongside the one-line installers, each
