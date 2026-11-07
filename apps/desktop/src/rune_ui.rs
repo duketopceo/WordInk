@@ -47,6 +47,7 @@ mod models;
 mod modes;
 mod onboarding;
 mod onboarding_kit;
+mod openrouter_connect;
 mod output;
 mod paste_access;
 mod picker;
@@ -711,6 +712,8 @@ pub(crate) struct Ui {
     first_run: Option<onboarding_kit::Onboard>,
     /// The first run's engine step: the pasted key, the probe, the choice.
     engine_setup: onboarding_kit::EngineSetup,
+    /// The Connect OpenRouter sign-in.
+    openrouter: openrouter_connect::Connect,
     /// The OS's capabilities and the OS-only state its panes show.
     platform: platform::PlatformState,
     host: platform::PlatformHost,
@@ -825,6 +828,7 @@ impl Ui {
             deferred: None,
             first_run: None,
             engine_setup: onboarding_kit::EngineSetup::default(),
+            openrouter: openrouter_connect::Connect::default(),
             platform: platform::PlatformState::new(platform::Capabilities::current()),
             host: platform::PlatformHost::Local(Default::default()),
             meetings: meetings::MeetingsPane::default(),
@@ -1271,6 +1275,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     let now = Instant::now();
     let mut changed = ui.save_drafts(now);
     changed |= paste_access::poll(ui);
+    changed |= openrouter_connect::poll(ui);
     changed |= labs::poll_flash(ui, now);
     changed |= ui.log_view.poll();
     // The OpenCode catalog is read only while the pane that uses it shows.

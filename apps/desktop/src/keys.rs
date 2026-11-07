@@ -139,6 +139,21 @@ pub fn store(account: &str, key: &str) -> Result<KeySource> {
     Ok(KeySource::File)
 }
 
+/// Removes a stored key (keyring and key file), for Disconnect. An
+/// environment variable is not ours to unset, so a key from one remains.
+pub fn remove(account: &str) {
+    if system_keys_allowed() {
+        let owned = account.to_string();
+        let _ = bounded(move || {
+            let entry = keyring::Entry::new(SERVICE, &owned).ok()?;
+            entry.delete_credential().ok()
+        });
+    }
+    if let Ok(path) = file_path(account) {
+        let _ = fs::remove_file(path);
+    }
+}
+
 /// `groq.key` beside `settings.json`.
 pub fn file_path(account: &str) -> Result<PathBuf> {
     Ok(crate::app_paths::support_dir()?.join(format!("{account}.key")))
@@ -328,6 +343,23 @@ pub fn run_cli(command: &KeysCommand) -> i32 {
                 }
             }
         }
+        KeysCommand::Connect { provider } => {
+            if provider != "openrouter" {
+                eprintln!("wordink: only `openrouter` can be connected in the browser");
+                return 1;
+            }
+            println!("Opening OpenRouter in your browser; approve WordInk there.");
+            match crate::openrouter_oauth::connect(store) {
+                Ok(source) => {
+                    println!("openrouter: connected ({})", source.label());
+                    0
+                }
+                Err(error) => {
+                    eprintln!("wordink: {error:#}");
+                    1
+                }
+            }
+        }
         KeysCommand::Status => {
             for line in status_lines(|provider| {
                 env_var(provider).is_some_and(|env| status(provider, env).is_some())
@@ -345,6 +377,12 @@ pub enum KeysCommand {
     /// Save a provider's API key, read from stdin (never from an argument).
     Set {
         /// `groq`, `openrouter`, `openai`, `deepgram` or `gateway`.
+        provider: String,
+    },
+    /// Sign in to a provider in the browser and save the key it issues
+    /// (`openrouter` only).
+    Connect {
+        /// `openrouter`.
         provider: String,
     },
     /// Show whether each provider's key is set. Never prints a key.

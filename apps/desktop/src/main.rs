@@ -27,6 +27,7 @@ mod diagnostics;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod dictation;
 mod durable;
+mod escape_cancel;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod feedback;
 mod hardware;
@@ -37,7 +38,6 @@ mod keyboard;
 #[cfg_attr(target_os = "windows", path = "keyboard_input_sources/windows.rs")]
 #[cfg_attr(target_os = "linux", path = "keyboard_input_sources/x11.rs")]
 mod keyboard_input_sources;
-mod escape_cancel;
 mod keyboard_kind;
 mod keys;
 mod labs;
@@ -51,6 +51,7 @@ mod meeting;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod microphone_activity;
 mod net;
+mod openrouter_oauth;
 #[cfg(target_os = "macos")]
 mod parakeet;
 #[cfg(target_os = "macos")]

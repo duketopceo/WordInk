@@ -98,7 +98,7 @@ enum Command {
         #[command(subcommand)]
         command: crate::voxtype_import::ImportCommand,
     },
-    /// Transcribe a WAV file with the current engine and print the text.
+    /// Transcribe a WAV file with the cloud engine (needs a key) and print the text.
     #[command(hide = true)]
     TranscribeFile {
         /// A WAV file; it is resampled to 16 kHz mono.
