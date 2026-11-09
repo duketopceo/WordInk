@@ -1,5 +1,11 @@
 # @wordink/web
 
+## 0.1.1
+
+### Patch Changes
+
+- 80deed5: Apply the Pen and Signal design system: shared `--wi-*` tokens, state glyphs on `<wordink-mic>`, and gateway token mint copy hints with TTY accent.
+
 ## 0.1.0
 
 ### Minor Changes
