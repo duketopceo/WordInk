@@ -500,7 +500,7 @@ fn refuse_unless(
         return Ok(());
     }
     tracing::warn!(
-        target: "hex_config",
+        target: "wordink::config",
         capability,
         "a transformation needs permission; allow it in WordInk's Output pane"
     );

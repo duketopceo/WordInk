@@ -430,7 +430,7 @@ impl Host for HexHost {
     }
 
     fn metric(&self, name: &str, ms: f64) {
-        tracing::debug!(target: "hex::capture", name, ms, "capture metric");
+        tracing::debug!(target: "wordink::capture", name, ms, "capture metric");
     }
 
     fn own_windows(&self) -> OwnWindows {

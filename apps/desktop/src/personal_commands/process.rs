@@ -111,7 +111,7 @@ pub fn start(
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
-            tracing::warn!(target: "hex_config", program, error = %error, "exec could not start");
+            tracing::warn!(target: "wordink::config", program, error = %error, "exec could not start");
             done(ExecResult {
                 spawn_error: Some(error_code(&error).into()),
                 ..ExecResult::default()
@@ -124,7 +124,7 @@ pub fn start(
         Err(error) => {
             let _ = child.kill();
             let _ = child.wait();
-            tracing::warn!(target: "hex_config", program, error = %error, "exec could not own its process tree");
+            tracing::warn!(target: "wordink::config", program, error = %error, "exec could not own its process tree");
             done(ExecResult {
                 spawn_error: Some(error_code(&error).into()),
                 ..ExecResult::default()
@@ -141,7 +141,7 @@ pub fn start(
             let started = Instant::now();
             let result = wait(&mut child, input, limit, &waiter);
             tracing::info!(
-                target: "hex_config",
+                target: "wordink::config",
                 program,
                 code = result.code,
                 signal = result.signal,
@@ -154,7 +154,7 @@ pub fn start(
         });
     if let Err(error) = spawned {
         tree.kill();
-        tracing::warn!(target: "hex_config", error = %error, "exec could not start its waiter");
+        tracing::warn!(target: "wordink::config", error = %error, "exec could not start its waiter");
         return None;
     }
     Some(tree)

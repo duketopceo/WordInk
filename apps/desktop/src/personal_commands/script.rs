@@ -277,10 +277,10 @@ fn evaluate<'js>(
 fn log(level: &str, message: &str) {
     let message = &message[..message.floor_char_boundary(MAX_LOG_BYTES)];
     match level {
-        "error" => tracing::error!(target: "hex_config", "{message}"),
-        "warn" => tracing::warn!(target: "hex_config", "{message}"),
-        "debug" => tracing::debug!(target: "hex_config", "{message}"),
-        _ => tracing::info!(target: "hex_config", "{message}"),
+        "error" => tracing::error!(target: "wordink::config", "{message}"),
+        "warn" => tracing::warn!(target: "wordink::config", "{message}"),
+        "debug" => tracing::debug!(target: "wordink::config", "{message}"),
+        _ => tracing::info!(target: "wordink::config", "{message}"),
     }
 }
 

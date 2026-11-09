@@ -402,6 +402,45 @@ fn the_bridge_wants_this_binarys_own_events() {
         module_of(module_path!()).split("::").next(),
         Some("debug_log")
     );
-    assert_eq!(module_of("wordink::windows::dictation"), "windows::dictation");
+    assert_eq!(
+        module_of("wordink::windows::dictation"),
+        "windows::dictation"
+    );
     assert_eq!(module_of("hex::linux::paste"), "linux::paste");
+}
+
+#[test]
+fn the_log_filter_keeps_wordink_targets_and_drops_legacy_hex_ones() {
+    // The process log filter (app_paths) keys on the crate root, so events under the
+    // wordink:: targets used by capture and personal commands must pass it.
+    #[derive(Clone, Default)]
+    struct Targets(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Targets {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(event.metadata().target().to_owned());
+        }
+    }
+    use tracing_subscriber::layer::SubscriberExt;
+    let targets = Targets::default();
+    let filter =
+        tracing_subscriber::EnvFilter::new(format!("{}=info", crate::app_paths::crate_root()));
+    let subscriber = tracing_subscriber::registry()
+        .with(filter)
+        .with(targets.clone());
+    tracing::subscriber::with_default(subscriber, || {
+        tracing::info!(target: "wordink::capture", "kept");
+        tracing::warn!(target: "wordink::config", "kept");
+        tracing::info!(target: "hex::capture", "dropped");
+    });
+    assert_eq!(
+        *targets.0.lock().unwrap(),
+        vec!["wordink::capture".to_owned(), "wordink::config".to_owned()]
+    );
 }
