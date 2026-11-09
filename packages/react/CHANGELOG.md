@@ -1,5 +1,12 @@
 # @wordink/react
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [80deed5]
+  - @wordink/web@0.1.1
+
 ## 0.1.0
 
 ### Minor Changes

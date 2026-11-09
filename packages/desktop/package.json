@@ -1,6 +1,6 @@
 {
   "name": "@wordink/desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Typed Node client for the WordInk desktop app's local API: transcribe audio, start a dictation, and run control commands.",
   "license": "MIT",
   "homepage": "https://duketopceo.github.io/WordInk/",
