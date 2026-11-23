@@ -14,7 +14,6 @@ pub(crate) mod developer_control;
 pub(crate) mod host;
 pub mod settings;
 pub(crate) mod transcript_cli;
-pub(crate) mod usage_cli;
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 use std::time::Duration;
@@ -39,29 +38,9 @@ pub enum CaptureAction {
     Stop,
     /// Start when idle, otherwise stop.
     Toggle,
-}
-
-/// The `action` of a `dictation` request: a [`CaptureAction`], or the
-/// `cancel` older clients still send. [`check_flags`] answers that with
-/// [`cancel_removed`].
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(untagged)]
-pub enum RequestedCapture {
-    Action(CaptureAction),
-    Removed(RemovedCaptureAction),
-}
-
-/// Capture actions Hex no longer has (#786).
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum RemovedCaptureAction {
+    /// Discard the recording: nothing is transcribed, pasted, or saved.
+    /// Dictations already transcribing finish.
     Cancel,
-}
-
-impl From<CaptureAction> for RequestedCapture {
-    fn from(action: CaptureAction) -> Self {
-        Self::Action(action)
-    }
 }
 
 /// What `hex capture` does (the `capture` experiment).
@@ -78,6 +57,9 @@ pub enum ScrawlCaptureAction {
     /// fire on the press only (GNOME's custom shortcuts, #781).
     Toggle,
     Status,
+    /// Export the last 15 s from the rolling clip buffer into a capture bundle
+    /// (`labs.annotate_replay`, macOS 27+).
+    Replay,
 }
 
 /// The window's panes, by the names `hex window show` takes.
@@ -93,10 +75,6 @@ pub enum Pane {
     Meetings,
 }
 
-fn debug_log_limit() -> usize {
-    1_000
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "command", rename_all = "kebab-case")]
 pub enum ControlCommand {
@@ -110,7 +88,7 @@ pub enum ControlCommand {
         force: bool,
     },
     Dictation {
-        action: RequestedCapture,
+        action: CaptureAction,
         /// `stop` only: answer with the transcript instead of pasting it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         print: bool,
@@ -120,6 +98,15 @@ pub enum ControlCommand {
         raw: bool,
     },
     PasteLast,
+    /// Labs › Transform typed text (Linux): runs the focused field's text
+    /// through its Output steps and replaces it, as its shortcut does.
+    TypedText,
+    /// Labs › Screenshots (macOS): the display under the pointer, or with
+    /// `pick` the picker its shortcut opens.
+    Screenshot {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        pick: bool,
+    },
     MeetingRecord {
         #[serde(default)]
         title: Option<String>,
@@ -167,16 +154,6 @@ pub enum ControlCommand {
         play: bool,
     },
     HistoryClear,
-    /// `wordink logs --debug`: the buffered debug events after `after` (0
-    /// for the history), as `filter` shows them, at most `limit`.
-    DebugLogs {
-        #[serde(default)]
-        after: u64,
-        #[serde(default)]
-        filter: crate::debug_log::Filter,
-        #[serde(default = "debug_log_limit")]
-        limit: usize,
-    },
     CheckForUpdates,
     /// Report Launch at Login, or turn it on or off.
     LaunchAtLogin {
@@ -270,12 +247,7 @@ pub enum ControlReply {
     ScrawlCaptureRoute {
         explanation: String,
     },
-    /// `wordink logs --debug`: debug events, and the cursor to ask from next.
-    DebugLogs {
-        events: Vec<crate::debug_log::Event>,
-        next: u64,
-    },
-    /// `hex dictation stop --print`: the processed transcript.
+    /// `hex dictation stop --print` or `hex transcribe`: the transcript.
     Transcript {
         text: String,
     },
@@ -509,33 +481,22 @@ pub fn await_printed(receiver: &Receiver<PrintedTranscript>, wait: Duration) -> 
     }
 }
 
-/// The reply to a `cancel` from an older client: dictations always finish.
-pub fn cancel_removed() -> ControlError {
-    ControlError::new(
-        "removed",
-        "cancel was removed: dictations always finish and paste; `wordink dictation stop` finishes one",
-    )
-}
-
 /// The action a request asks for; `print` applies only to `stop`.
 pub fn check_flags(
-    action: RequestedCapture,
+    action: CaptureAction,
     print: bool,
     raw: bool,
 ) -> Result<CaptureAction, ControlError> {
-    let RequestedCapture::Action(action) = action else {
-        return Err(cancel_removed());
-    };
     if print && action != CaptureAction::Stop {
         return Err(ControlError::new(
             "invalid-value",
-            "--print works only with `wordink dictation stop`",
+            "--print works only with `hex dictation stop`",
         ));
     }
     if raw && !matches!(action, CaptureAction::Start | CaptureAction::Toggle) {
         return Err(ControlError::new(
             "invalid-value",
-            "--raw works only with `wordink dictation start` and `wordink dictation toggle`",
+            "--raw works only with `hex dictation start` and `hex dictation toggle`",
         ));
     }
     Ok(action)
@@ -559,8 +520,8 @@ pub fn version_mismatch(version: u64) -> ControlError {
     ControlError::new(
         "version-mismatch",
         format!(
-            "this wordink speaks control version {version}, but the running WordInk speaks \
-             {CONTROL_VERSION}; use the wordink inside the running app or restart WordInk"
+            "this hex speaks control version {version}, but the running Hex speaks \
+             {CONTROL_VERSION}; use the hex inside the running app or restart Hex"
         ),
     )
 }
@@ -758,7 +719,7 @@ pub fn model_source(
         .filter(|_| installed)
         .and_then(|path| describe(&path));
     match (model.id.is_custom(), here) {
-        (true, Some(origin)) => format!("found: {origin} (not tested by WordInk)"),
+        (true, Some(origin)) => format!("found: {origin} (not tested by Hex)"),
         (false, Some(origin)) => format!("found: {origin}"),
         (true, None) => "imported".into(),
         (false, None) if installed => "hex".into(),
@@ -824,7 +785,7 @@ pub fn model_infos(
                 model.architecture.as_str(),
                 "whisper" | "qwen3_asr"
             ),
-            source: format!("found: {} (not tested by WordInk)", model.source()),
+            source: format!("found: {} (not tested by Hex)", model.source()),
         });
     }
     infos
@@ -885,15 +846,7 @@ pub fn model_selection(
         return Err(ControlError::new(
             "model-unavailable",
             format!(
-                "`{model}` can't be used: turn on Labs › Parakeet Ultra: wordink labs on parakeet-ultra"
-            ),
-        ));
-    }
-    if parsed == Some(TranscriptionModelId::ParakeetV3Ane) && !crate::labs::neural_engine() {
-        return Err(ControlError::new(
-            "model-unavailable",
-            format!(
-                "`{model}` can't be used: turn on Labs › Neural Engine: wordink labs on neural-engine"
+                "`{model}` can't be used: turn on Labs › Parakeet Ultra: hex labs on parakeet-ultra"
             ),
         ));
     }
@@ -902,7 +855,7 @@ pub fn model_selection(
         .ok_or_else(|| {
             ControlError::new(
                 "unknown-model",
-                format!("unknown model `{model}`; run `wordink model list` for the ids"),
+                format!("unknown model `{model}`; run `hex model list` for the ids"),
             )
         })?;
     // The model's own remembered language, as the menu bar picks it; only
@@ -914,7 +867,7 @@ pub fn model_selection(
     let definition = crate::transcription::models::definition(id);
     crate::transcription::models::validate(&selection).map_err(|error| {
         let supported = if definition.languages.contains(&"*") {
-            "any language code WordInk knows (en, de, fr, ja, …)".to_owned()
+            "any language code Hex knows (en, de, fr, ja, …)".to_owned()
         } else {
             definition.languages.join(", ")
         };
@@ -941,7 +894,7 @@ pub fn check_quit(
         return Err(ControlError::new(
             "meeting-active",
             format!(
-                "a meeting is {}; stop it first (`wordink meetings stop`) or pass --force",
+                "a meeting is {}; stop it first (`hex meetings stop`) or pass --force",
                 meeting.state
             ),
         ));
@@ -1056,10 +1009,10 @@ mod tests {
             ControlReply::Error { code, .. } if code == "failed"
         ));
         // Only `stop` prints, and older requests without the field still parse.
-        assert!(check_flags(CaptureAction::Start.into(), true, false).is_err());
-        assert!(check_flags(CaptureAction::Stop.into(), true, false).is_ok());
-        assert!(check_flags(CaptureAction::Toggle.into(), false, true).is_ok());
-        assert!(check_flags(CaptureAction::Stop.into(), false, true).is_err());
+        assert!(check_flags(CaptureAction::Start, true, false).is_err());
+        assert!(check_flags(CaptureAction::Stop, true, false).is_ok());
+        assert!(check_flags(CaptureAction::Toggle, false, true).is_ok());
+        assert!(check_flags(CaptureAction::Stop, false, true).is_err());
         assert_eq!(
             serde_json::from_str::<ControlRequest>(
                 r#"{"version":4,"command":"dictation","action":"stop"}"#
@@ -1067,16 +1020,16 @@ mod tests {
             .unwrap()
             .command,
             ControlCommand::Dictation {
-                action: CaptureAction::Stop.into(),
+                action: CaptureAction::Stop,
                 print: false,
                 raw: false,
             }
         );
     }
 
-    /// #786: an older client's `cancel` parses and gets a clear answer.
+    /// `cancel` discards the recording, and takes neither flag.
     #[test]
-    fn an_older_cancel_gets_removed() {
+    fn cancel_parses_and_takes_no_flags() {
         let cancel = serde_json::from_str::<ControlRequest>(
             r#"{"version":4,"command":"dictation","action":"cancel"}"#,
         )
@@ -1084,10 +1037,10 @@ mod tests {
         let ControlCommand::Dictation { action, .. } = cancel.command else {
             panic!("a dictation command");
         };
-        assert_eq!(
-            check_flags(action, false, false).unwrap_err().code,
-            "removed"
-        );
+        assert_eq!(action, CaptureAction::Cancel);
+        assert_eq!(check_flags(action, false, false), Ok(CaptureAction::Cancel));
+        assert!(check_flags(action, true, false).is_err());
+        assert!(check_flags(action, false, true).is_err());
     }
 
     fn round_trip_request(command: ControlCommand) {
@@ -1106,21 +1059,24 @@ mod tests {
             ControlCommand::Quit { force: true },
             ControlCommand::Restart { force: false },
             ControlCommand::Dictation {
-                action: CaptureAction::Toggle.into(),
+                action: CaptureAction::Toggle,
                 print: false,
                 raw: false,
             },
             ControlCommand::Dictation {
-                action: CaptureAction::Stop.into(),
+                action: CaptureAction::Stop,
                 print: true,
                 raw: false,
             },
             ControlCommand::Dictation {
-                action: CaptureAction::Start.into(),
+                action: CaptureAction::Start,
                 print: false,
                 raw: true,
             },
             ControlCommand::PasteLast,
+            ControlCommand::TypedText,
+            ControlCommand::Screenshot { pick: false },
+            ControlCommand::Screenshot { pick: true },
             ControlCommand::MeetingRecord {
                 title: Some("Design sync".into()),
             },
@@ -1299,7 +1255,7 @@ mod tests {
                     id: "1.scrawl".into(),
                     sent_to: Some(ScrawlCaptureSession {
                         session: "ses_1".into(),
-                        title: "WordInk".into(),
+                        title: "Hex".into(),
                     }),
                     ..ScrawlCaptureSummary::default()
                 }],
@@ -1320,7 +1276,7 @@ mod tests {
             ControlReply::Transcript {
                 text: "Ship it.".into(),
             },
-            ControlReply::error("busy", "WordInk is busy"),
+            ControlReply::error("busy", "Hex is busy"),
         ] {
             let response = ControlResponse::from(reply);
             let json = serde_json::to_string(&response).unwrap();

@@ -23,7 +23,7 @@ impl LinuxControl {
     fn published(&self) -> std::result::Result<Arc<Published>, ControlError> {
         self.published
             .upgrade()
-            .ok_or_else(|| ControlError::new("unavailable", "WordInk is quitting"))
+            .ok_or_else(|| ControlError::new("unavailable", "Hex is quitting"))
     }
 
     fn route(&self) -> std::result::Result<ShortcutRoute, ControlError> {
@@ -35,7 +35,7 @@ impl LinuxControl {
             .ok_or_else(|| {
                 ControlError::new(
                     "not-ready",
-                    "WordInk is not listening; enable it in Settings or run `wordink start`",
+                    "Hex is not listening; enable it in Settings or run `hex start`",
                 )
             })
     }
@@ -48,7 +48,7 @@ impl LinuxControl {
     fn window(&self, control: Control) -> std::result::Result<(), ControlError> {
         self.window
             .try_send(control)
-            .map_err(|_| ControlError::new("busy", "WordInk is busy; try again"))
+            .map_err(|_| ControlError::new("busy", "Hex is busy; try again"))
     }
 }
 
@@ -60,10 +60,16 @@ impl crate::control::host::Host for LinuxControl {
             .lock()
             .unwrap()
             .clone()
-            .ok_or_else(|| ControlError::new("not-ready", "WordInk is starting; try again"))?;
+            .ok_or_else(|| ControlError::new("not-ready", "Hex is starting; try again"))?;
+        let mut listener = status.desktop.listener;
+        // A listener that couldn't start says why, as the window does
+        // ("Alt+Space is already in use by another X11 client").
+        if !listener.running && listener.warning.is_none() {
+            listener.warning = status.desktop.operation_error.clone();
+        }
         Ok(crate::control::host::HostState {
             capture: crate::control::host::capture_from_state(status.desktop.activity.state),
-            listener: status.desktop.listener,
+            listener,
             transcription: status.desktop.transcription,
             update: status.desktop.update_status,
             settings: status.settings,
@@ -82,7 +88,7 @@ impl crate::control::host::Host for LinuxControl {
                 .route()?
                 .commands
                 .try_send(ListenerCommand::StopAndPrint(print))
-                .map_err(|_| ControlError::new("busy", "WordInk is busy; try again"));
+                .map_err(|_| ControlError::new("busy", "Hex is busy; try again"));
         }
         self.shortcut(match (action, raw) {
             (CaptureAction::Start, false) => ShortcutCommand::DictationStart,
@@ -90,11 +96,30 @@ impl crate::control::host::Host for LinuxControl {
             (CaptureAction::Toggle, false) => ShortcutCommand::DictationToggle,
             (CaptureAction::Toggle, true) => ShortcutCommand::DictationToggleRaw,
             (CaptureAction::Stop, _) => ShortcutCommand::DictationStop,
+            (CaptureAction::Cancel, _) => ShortcutCommand::DictationCancel,
         })
     }
 
     fn paste_last(&self) -> std::result::Result<(), ControlError> {
         self.shortcut(ShortcutCommand::PasteLast)
+    }
+
+    fn typed_text(&self) -> std::result::Result<(), ControlError> {
+        let settings = self.state()?.settings;
+        if !settings.labs.typed_text {
+            return Err(ControlError::new(
+                "disabled",
+                "Labs › Transform typed text is off; turn it on with `hex labs on typed-text`",
+            ));
+        }
+        if settings.terminal_paste != crate::app_settings::TerminalPaste::Never {
+            return Err(ControlError::new(
+                "disabled",
+                "Terminal paste is on, so typed text would send Ctrl+Shift+V; set Terminal \
+                 paste to Never in Settings › General first",
+            ));
+        }
+        self.shortcut(ShortcutCommand::TypedText)
     }
 
     fn save(&self, settings: AppSettings) -> std::result::Result<(), ControlError> {
@@ -185,16 +210,19 @@ impl crate::control::host::Host for LinuxControl {
             crate::control::ControlCommand::ScrawlCapture {
                 action: crate::control::ScrawlCaptureAction::Status,
             } => linux_service::capture_status(),
+            crate::control::ControlCommand::ScrawlCapture {
+                action: crate::control::ScrawlCaptureAction::Replay,
+            } => crate::control::host::unsupported("Annotate replay requires macOS 27 or later"),
             crate::control::ControlCommand::ScrawlCapture { action } => {
                 match crate::capture_host::send_to_listener(
                     crate::capture_host::CaptureControl::Scrawl(action),
                 ) {
-                    Ok(()) => ControlReply::done("Sent to WordInk"),
+                    Ok(()) => ControlReply::done("Sent to Hex"),
                     Err(error) => ControlReply::error("failed", format!("{error:#}")),
                 }
             }
             _ => crate::control::host::unsupported(
-                "run this `wordink annotate` command directly; it reads the captures folder itself",
+                "run this `hex annotate` command directly; it reads the captures folder itself",
             ),
         }
     }

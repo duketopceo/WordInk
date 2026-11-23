@@ -16,12 +16,6 @@ use transcribe_cpp::{Backend, Device, DeviceType};
 /// At most this many remembered failures; the oldest go first.
 const KEPT: usize = 16;
 
-/// How long a "slower than the CPU" verdict keeps a GPU off. A failure (a hang
-/// or device loss) stays until the driver changes; a speed verdict is a
-/// measurement, and a measurement taken on a busy machine must not decide
-/// for good, so Auto tries the GPU again after this.
-pub(crate) const SLOW_TTL_SECS: u64 = 7 * 24 * 60 * 60;
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub(crate) struct Failure {
     /// The device: its description, kind, and hardware id.
@@ -84,27 +78,13 @@ pub(crate) fn device_key(device: &Device) -> String {
     )
 }
 
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs())
-}
-
-/// Whether `failure` keeps `key` off under `driver` at `now`: a failure
-/// always does; a slow verdict only until [`SLOW_TTL_SECS`] pass.
-fn keeps_off(failure: &Failure, key: &str, driver: &str, now: u64) -> bool {
-    failure.device == key
-        && failure.driver == driver
-        && (!failure.slow || now.saturating_sub(failure.at) < SLOW_TTL_SECS)
-}
-
 /// Whether `device` failed under the driver installed now.
 pub(crate) fn failed(device: &Device) -> bool {
-    let (key, driver, now) = (device_key(device), driver(), now_secs());
+    let (key, driver) = (device_key(device), driver());
     with_failures(|failures| {
         failures
             .iter()
-            .any(|failure| keeps_off(failure, &key, &driver, now))
+            .any(|failure| failure.device == key && failure.driver == driver)
     })
 }
 
@@ -183,15 +163,12 @@ pub(crate) fn current() -> Option<Failure> {
     if !AUTO_ON_CPU.load(Ordering::Relaxed) {
         return None;
     }
-    let (driver, now) = (driver(), now_secs());
+    let driver = driver();
     with_failures(|failures| {
         failures
             .iter()
             .rev()
-            .find(|failure| {
-                failure.driver == driver
-                    && (!failure.slow || now.saturating_sub(failure.at) < SLOW_TTL_SECS)
-            })
+            .find(|failure| failure.driver == driver)
             .cloned()
     })
 }
@@ -228,6 +205,26 @@ pub(crate) fn device_error(error: &color_eyre::eyre::Report) -> bool {
                 Error::Backend(_) | Error::OutOfMemory(_) | Error::ModelLoad(_) | Error::Other(_)
             )
         })
+    })
+}
+
+/// Whether `error` says the GPU ran out of memory. That is not a driver
+/// fault: another copy of a model (a model switch loading beside the running
+/// one, or a CLI check while Hex holds the model) can fill a small GPU, so
+/// the GPU is not remembered as failed for it (#1165).
+pub(crate) fn out_of_memory(error: &color_eyre::eyre::Report) -> bool {
+    error.chain().any(|cause| {
+        if matches!(
+            cause.downcast_ref::<transcribe_cpp::Error>(),
+            Some(transcribe_cpp::Error::OutOfMemory(_))
+        ) {
+            return true;
+        }
+        let message = cause.to_string().to_ascii_lowercase();
+        message.contains("out of memory")
+            || message.contains("outofdevicememory")
+            || message.contains("out_of_device_memory")
+            || message.contains("failed to allocate")
     })
 }
 
@@ -320,23 +317,16 @@ mod tests {
     }
 
     #[test]
-    fn a_slow_verdict_expires_but_a_failure_does_not() {
-        let failure = |slow| Failure {
-            device: "GPU".into(),
-            driver: "d1".into(),
-            reason: String::new(),
-            at: 1_000,
-            slow,
-        };
-        let day = 24 * 60 * 60;
-        let fresh = 1_000 + day;
-        let stale = 1_000 + SLOW_TTL_SECS + 1;
-        assert!(keeps_off(&failure(true), "GPU", "d1", fresh));
-        assert!(!keeps_off(&failure(true), "GPU", "d1", stale));
-        assert!(keeps_off(&failure(false), "GPU", "d1", stale));
-        // Another device or driver is never kept off by it.
-        assert!(!keeps_off(&failure(false), "Other", "d1", fresh));
-        assert!(!keeps_off(&failure(false), "GPU", "d2", fresh));
+    fn out_of_memory_is_not_a_driver_fault() {
+        use color_eyre::eyre::WrapErr;
+        let vulkan: color_eyre::Result<()> = Err(transcribe_cpp::Error::Backend(
+            "vk::Device::allocateMemory: ErrorOutOfDeviceMemory".into(),
+        ))
+        .wrap_err("could not load");
+        assert!(out_of_memory(&vulkan.unwrap_err()));
+        let lost: color_eyre::Result<()> =
+            Err(transcribe_cpp::Error::Backend("device lost".into())).wrap_err("failed");
+        assert!(!out_of_memory(&lost.unwrap_err()));
     }
 
     #[test]

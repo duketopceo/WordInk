@@ -1287,7 +1287,11 @@ pub fn status_with_transcription_model(transcription_model: bool) -> SetupStatus
 pub fn status_with_transcription_model(transcription_model: bool) -> SetupStatus {
     SetupStatus {
         #[cfg(target_os = "windows")]
-        microphone: windows_microphone_state(),
+        microphone: if crate::audio::uses_fixture() {
+            PermissionState::Ready
+        } else {
+            windows_microphone_state()
+        },
         #[cfg(not(target_os = "windows"))]
         microphone: PermissionState::Ready,
         accessibility: PermissionState::Ready,
@@ -1420,6 +1424,10 @@ pub fn open_env_arguments(
 
 #[cfg(target_os = "macos")]
 fn microphone_state() -> PermissionState {
+    // A WAV fixture stands in for the microphone, which is never opened.
+    if crate::audio::uses_fixture() {
+        return PermissionState::Ready;
+    }
     let Some(class) = AnyClass::get(c"AVCaptureDevice") else {
         return PermissionState::NeedsRequest;
     };

@@ -13,8 +13,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::artifacts::{
-    COHERE_ARTIFACT, COHERE_LANGUAGES, GIGAAM_V3_E2E_RNNT_ARTIFACT, IVRIT_WHISPER_ARTIFACT,
-    NEMOTRON_3_5_ASR_ARTIFACT, NEMOTRON_3_5_LANGUAGES, NEMOTRON_3_5_LOCALES,
+    COHERE_ARTIFACT, COHERE_LANGUAGES, GIGAAM_V3_E2E_RNNT_ARTIFACT, GRANITE_SPEECH_5_ARTIFACT,
+    GRANITE_SPEECH_5_LANGUAGES, IVRIT_WHISPER_ARTIFACT, NB_WHISPER_MEDIUM_ARTIFACT,
+    NEMOTRON_3_5_ASR_ARTIFACT, NEMOTRON_3_5_LANGUAGES, NEMOTRON_3_5_LOCALES, ORUKEET_ARTIFACT,
     PARAKEET_ULTRA_ARTIFACT, PARAKEET_UNIFIED_ENGLISH_ARTIFACT, PARAKEET_V2_ARTIFACT,
     PARAKEET_V3_ARTIFACT, PARAKEET_V3_LANGUAGES, QWEN_ARTIFACT, QWEN_LANGUAGES, QWENCLEO_ARTIFACT,
     SENSEVOICE_ARTIFACT, UNDERDOG_BARK_3_CLEAN_ARTIFACT, UNDERDOG_BARK_3_PRO_ARTIFACT,
@@ -31,10 +32,11 @@ pub use super::model_benchmarks::{BenchmarkRecord, benchmark};
 /// keeps the default for it without rewriting the file (#744).
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum TranscriptionModelId {
+    #[default]
     ParakeetUnifiedEnglish,
     ParakeetV2,
-    #[default]
     ParakeetV3,
+    Orukeet,
     WhisperLargeV3Turbo,
     Qwen3Asr06B,
     QwenCleoAsr17B,
@@ -44,10 +46,10 @@ pub enum TranscriptionModelId {
     UnderdogBark3Pro,
     UnderdogBark3Clean,
     ParakeetUltra,
-    /// Parakeet v3 on the Apple Neural Engine (Linux on Apple silicon).
-    ParakeetV3Ane,
     Nemotron35Asr,
     GigaAmV3,
+    NbWhisperMedium,
+    GraniteSpeech5,
     AppleSpeech,
     Custom(CustomModelId),
 }
@@ -71,6 +73,7 @@ impl TranscriptionModelId {
             Self::ParakeetUnifiedEnglish => "parakeet_unified_en",
             Self::ParakeetV2 => "parakeet_v2",
             Self::ParakeetV3 => "parakeet_v3",
+            Self::Orukeet => "orukeet",
             Self::WhisperLargeV3Turbo => "whisper_large_v3_turbo",
             Self::Qwen3Asr06B => "qwen3_asr06_b",
             Self::QwenCleoAsr17B => "qwencleo_asr_1_7b",
@@ -80,9 +83,10 @@ impl TranscriptionModelId {
             Self::UnderdogBark3Pro => "underdog_bark_3_pro",
             Self::UnderdogBark3Clean => "underdog_bark_3_clean",
             Self::ParakeetUltra => "parakeet_ultra",
-            Self::ParakeetV3Ane => "parakeet_v3_ane",
             Self::Nemotron35Asr => "nemotron_3_5_asr",
             Self::GigaAmV3 => "gigaam_v3",
+            Self::NbWhisperMedium => "nb_whisper_medium",
+            Self::GraniteSpeech5 => "granite_speech_5",
             Self::AppleSpeech => "apple_speech",
             Self::Custom(id) => id.as_str(),
         }
@@ -92,14 +96,11 @@ impl TranscriptionModelId {
         matches!(self, Self::Custom(_))
     }
 
-    /// A model behind its own Labs toggle: an import, Parakeet Ultra, or the
-    /// Neural Engine model. A saved choice of one stays saved while it can't
-    /// run, and the listener runs a fallback (`custom_models::runnable`).
+    /// A model behind its own Labs toggle: an import, or Parakeet Ultra. A
+    /// saved choice of one stays saved while it can't run, and the listener
+    /// runs a fallback (`custom_models::runnable`).
     pub const fn is_labs_gated(self) -> bool {
-        matches!(
-            self,
-            Self::Custom(_) | Self::ParakeetUltra | Self::ParakeetV3Ane
-        )
+        matches!(self, Self::Custom(_) | Self::ParakeetUltra)
     }
 }
 
@@ -111,6 +112,7 @@ impl FromStr for TranscriptionModelId {
             "parakeet_unified_en" => Ok(Self::ParakeetUnifiedEnglish),
             "parakeet_v2" => Ok(Self::ParakeetV2),
             "parakeet_v3" => Ok(Self::ParakeetV3),
+            "orukeet" => Ok(Self::Orukeet),
             "whisper_large_v3_turbo" => Ok(Self::WhisperLargeV3Turbo),
             "qwen3_asr06_b" => Ok(Self::Qwen3Asr06B),
             "qwencleo_asr_1_7b" => Ok(Self::QwenCleoAsr17B),
@@ -120,9 +122,10 @@ impl FromStr for TranscriptionModelId {
             "underdog_bark_3_pro" => Ok(Self::UnderdogBark3Pro),
             "underdog_bark_3_clean" => Ok(Self::UnderdogBark3Clean),
             "parakeet_ultra" => Ok(Self::ParakeetUltra),
-            "parakeet_v3_ane" => Ok(Self::ParakeetV3Ane),
             "nemotron_3_5_asr" => Ok(Self::Nemotron35Asr),
             "gigaam_v3" => Ok(Self::GigaAmV3),
+            "nb_whisper_medium" => Ok(Self::NbWhisperMedium),
+            "granite_speech_5" => Ok(Self::GraniteSpeech5),
             "apple_speech" => Ok(Self::AppleSpeech),
             _ => CustomModelId::parse(value)
                 .map(Self::Custom)
@@ -206,8 +209,6 @@ pub struct ModelDefinition {
     pub languages: &'static [&'static str],
     pub accepts_language_hint: bool,
     pub supports_language_detection: bool,
-    /// The licence the weights are published under (SPDX id where one exists).
-    pub license: &'static str,
 }
 
 /// How a model's transcription takes the vocabulary.
@@ -257,21 +258,8 @@ impl ModelDefinition {
             (ModelRuntime::Gguf(_), TranscriptionModelId::ParakeetUltra) => {
                 crate::labs::parakeet_ultra()
             }
-            (ModelRuntime::Gguf(_), TranscriptionModelId::ParakeetV3Ane) => {
-                crate::transcription::ane::offer() == crate::transcription::ane::Offer::Ready
-            }
             (ModelRuntime::Gguf(_), _) => true,
         }
-    }
-
-    /// Whether the picker lists this model: every available one, and the
-    /// Neural Engine model while its reference model still needs downloading
-    /// (its card says so and offers no Use).
-    pub fn listed(&self) -> bool {
-        self.available()
-            || (self.id == TranscriptionModelId::ParakeetV3Ane
-                && crate::transcription::ane::offer()
-                    == crate::transcription::ane::Offer::NotPrepared)
     }
 
     pub fn supports_language(&self, language: &str) -> bool {
@@ -300,12 +288,19 @@ impl ModelDefinition {
     }
 
     /// The languages Settings offers for this model, in [`LANGUAGES`] order,
-    /// Auto first when the model detects the language.
+    /// Auto first when the model detects the language, then the other
+    /// languages the model declares (an import's Norwegian, #1148).
     pub fn language_choices(&self) -> Vec<&'static str> {
         LANGUAGES
             .iter()
             .map(|(code, _)| *code)
             .filter(|code| self.supports_language(code))
+            .chain(
+                self.languages
+                    .iter()
+                    .copied()
+                    .filter(|code| *code != "*" && !super::languages::is_listed(code)),
+            )
             .collect()
     }
 
@@ -351,10 +346,6 @@ impl ModelDefinition {
     /// checks the model itself before it adds the list to a run). Rewriting
     /// and search use the vocabulary with every model.
     pub fn vocabulary_use(&self) -> VocabularyUse {
-        // The Neural Engine runtime has no biasing input.
-        if self.id == TranscriptionModelId::ParakeetV3Ane {
-            return VocabularyUse::None;
-        }
         match self.runtime {
             ModelRuntime::Gguf(artifact) if artifact.architecture == "parakeet" => {
                 VocabularyUse::Bias
@@ -365,6 +356,20 @@ impl ModelDefinition {
                 VocabularyUse::Prompt
             }
             _ => VocabularyUse::None,
+        }
+    }
+
+    /// How many of `entries`, first in list order, this model's
+    /// transcription reads (`dictation::vocabulary::terms_read`).
+    pub fn vocabulary_terms_read(
+        &self,
+        entries: &[crate::dictation::vocabulary::VocabularyEntry],
+    ) -> usize {
+        match self.runtime {
+            ModelRuntime::Gguf(artifact) => {
+                crate::dictation::vocabulary::terms_read(entries, artifact.architecture)
+            }
+            _ => 0,
         }
     }
 
@@ -406,7 +411,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["en"],
         accepts_language_hint: true,
         supports_language_detection: false,
-        license: "NVIDIA Open Model License",
     },
     ModelDefinition {
         id: TranscriptionModelId::ParakeetV2,
@@ -418,7 +422,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["en"],
         accepts_language_hint: true,
         supports_language_detection: false,
-        license: "CC-BY-4.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::ParakeetV3,
@@ -428,10 +431,28 @@ pub const MODELS: &[ModelDefinition] = &[
         streams: false,
         runtime: ModelRuntime::Gguf(&PARAKEET_V3_ARTIFACT),
         languages: PARAKEET_V3_LANGUAGES,
-        // The pinned v3 artifact detects language from audio and has no prompt input.
+        // The pinned v3 artifact detects the language from audio and has no
+        // prompt input, so it is offered under Auto.
         accepts_language_hint: false,
-        supports_language_detection: false,
-        license: "CC-BY-4.0",
+        supports_language_detection: true,
+    },
+    ModelDefinition {
+        id: TranscriptionModelId::Orukeet,
+        name: "Orukeet",
+        // The card says it runs as fast as Parakeet v3, and transcribe.cpp's
+        // catalog puts its Q8_0 file beside v3's on the same machines, so it
+        // keeps v3's figure.
+        realtime: "~33x",
+        // LibriSpeech test-clean, transcribe.cpp's published conversion
+        // benchmark (`catalog/orukeet.json`); not measured in Hex.
+        word_error_rate: Some(1.86),
+        streams: false,
+        runtime: ModelRuntime::Gguf(&ORUKEET_ARTIFACT),
+        languages: PARAKEET_V3_LANGUAGES,
+        // Like v3, its base: it detects the language from the audio and has
+        // no language input, so it is offered under Auto.
+        accepts_language_hint: false,
+        supports_language_detection: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::WhisperLargeV3Turbo,
@@ -443,7 +464,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["*"],
         accepts_language_hint: true,
         supports_language_detection: true,
-        license: "MIT",
     },
     ModelDefinition {
         id: TranscriptionModelId::Qwen3Asr06B,
@@ -455,7 +475,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: QWEN_LANGUAGES,
         accepts_language_hint: true,
         supports_language_detection: true,
-        license: "Apache-2.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::QwenCleoAsr17B,
@@ -469,7 +488,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["ar"],
         accepts_language_hint: true,
         supports_language_detection: false,
-        license: "Apache-2.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::IvritWhisperLargeV3Turbo,
@@ -485,7 +503,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["he"],
         accepts_language_hint: true,
         supports_language_detection: false,
-        license: "Apache-2.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::SenseVoiceSmall,
@@ -497,7 +514,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["zh", "yue", "en", "ja", "ko"],
         accepts_language_hint: true,
         supports_language_detection: true,
-        license: "FunASR Model License",
     },
     ModelDefinition {
         id: TranscriptionModelId::CohereTranscribe,
@@ -509,7 +525,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: COHERE_LANGUAGES,
         accepts_language_hint: true,
         supports_language_detection: false,
-        license: "Apache-2.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::UnderdogBark3Pro,
@@ -522,7 +537,6 @@ pub const MODELS: &[ModelDefinition] = &[
         // Like Parakeet v3, its base, the artifact has no language input.
         accepts_language_hint: false,
         supports_language_detection: false,
-        license: "CC-BY-4.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::UnderdogBark3Clean,
@@ -534,7 +548,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["en"],
         accepts_language_hint: false,
         supports_language_detection: false,
-        license: "CC-BY-4.0",
     },
     ModelDefinition {
         id: TranscriptionModelId::ParakeetUltra,
@@ -549,28 +562,9 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::Gguf(&PARAKEET_ULTRA_ARTIFACT),
         languages: PARAKEET_V3_LANGUAGES,
         // Like v3, its base: it detects the language from the audio and has
-        // no language input.
+        // no language input, so it is offered under Auto.
         accepts_language_hint: false,
-        supports_language_detection: false,
-        license: "CC-BY-4.0",
-    },
-    ModelDefinition {
-        id: TranscriptionModelId::ParakeetV3Ane,
-        name: "Parakeet v3 (Neural Engine)",
-        // Warm, on a 127 s clip on an Apple M1 Max: the Neural Engine ran it
-        // 43x against the GPU's ~34x on a 40 s clip. On a 3 s dictation the
-        // GPU is faster, so it keeps v3's figure for the label.
-        realtime: "~43x",
-        // The same model and weights as Parakeet v3.
-        word_error_rate: Some(1.94),
-        streams: false,
-        // Shares Parakeet v3's artifact: it is the GPU fallback's model, and
-        // the Neural Engine runtime brings its own reference model.
-        runtime: ModelRuntime::Gguf(&PARAKEET_V3_ARTIFACT),
-        languages: PARAKEET_V3_LANGUAGES,
-        accepts_language_hint: false,
-        supports_language_detection: false,
-        license: "CC-BY-4.0",
+        supports_language_detection: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::Nemotron35Asr,
@@ -590,7 +584,6 @@ pub const MODELS: &[ModelDefinition] = &[
         // it to the model.
         accepts_language_hint: true,
         supports_language_detection: true,
-        license: "OpenMDW-1.1",
     },
     ModelDefinition {
         id: TranscriptionModelId::GigaAmV3,
@@ -607,7 +600,40 @@ pub const MODELS: &[ModelDefinition] = &[
         // Russian only: it has no language input.
         accepts_language_hint: false,
         supports_language_detection: false,
-        license: "MIT",
+    },
+    ModelDefinition {
+        id: TranscriptionModelId::NbWhisperMedium,
+        name: "NB-Whisper Medium",
+        // On apollo's Vulkan GPU it ran FLEURS Norwegian at 0.89 times
+        // Whisper large-v3-turbo's speed (37x and 41x real time).
+        realtime: "~17x",
+        // FLEURS Norwegian test, Hex's run (`model_benchmarks`): Whisper
+        // large-v3-turbo scored 8.94% on the same run.
+        word_error_rate: Some(6.68),
+        streams: false,
+        runtime: ModelRuntime::Gguf(&NB_WHISPER_MEDIUM_ARTIFACT),
+        // Measured only for Bokmål with the `no` hint, which it always gets.
+        languages: &["no"],
+        accepts_language_hint: true,
+        supports_language_detection: false,
+    },
+    ModelDefinition {
+        id: TranscriptionModelId::GraniteSpeech5,
+        name: "Granite Speech 5.0",
+        // On apollo's Vulkan GPU it ran 2.1 to 2.4 times as fast as Whisper
+        // large-v3-turbo and 0.4 to 0.64 times Parakeet v3's speed (an 11 s
+        // clip, and the FLEURS English and Japanese test splits).
+        realtime: "~25x",
+        // FLEURS English test, Hex's run (`model_benchmarks`).
+        word_error_rate: Some(4.77),
+        streams: false,
+        runtime: ModelRuntime::Gguf(&GRANITE_SPEECH_5_ARTIFACT),
+        languages: GRANITE_SPEECH_5_LANGUAGES,
+        // A CTC head with no language input: it transcribes whichever of
+        // its seven languages it hears, so it is offered under Auto even
+        // though its pinned file leaves stt.capability.lang_detect off.
+        accepts_language_hint: false,
+        supports_language_detection: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::AppleSpeech,
@@ -619,7 +645,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["*"],
         accepts_language_hint: true,
         supports_language_detection: false,
-        license: "Apple system model",
     },
 ];
 
@@ -650,16 +675,13 @@ pub fn all_models() -> Vec<&'static ModelDefinition> {
 pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
     use Recommendation::{Fastest, MostAccurate, Recommended, Vocabulary};
     use TranscriptionModelId::{
-        CohereTranscribe, GigaAmV3, IvritWhisperLargeV3Turbo, ParakeetUnifiedEnglish, ParakeetV3,
-        Qwen3Asr06B, SenseVoiceSmall, WhisperLargeV3Turbo,
+        CohereTranscribe, GigaAmV3, IvritWhisperLargeV3Turbo, NbWhisperMedium,
+        ParakeetUnifiedEnglish, ParakeetV3, Qwen3Asr06B, SenseVoiceSmall, WhisperLargeV3Turbo,
     };
     let choices: &[(TranscriptionModelId, Recommendation)] = match language {
         AUTO_LANGUAGE => &[(WhisperLargeV3Turbo, Recommended), (Qwen3Asr06B, Fastest)],
-        // Parakeet v3 is the default for its open licence; Unified streams
-        // but is under NVIDIA's own licence, so it is offered, not chosen.
         "en" => &[
-            (ParakeetV3, Recommended),
-            (ParakeetUnifiedEnglish, Fastest),
+            (ParakeetUnifiedEnglish, Recommended),
             (CohereTranscribe, MostAccurate),
             (WhisperLargeV3Turbo, Vocabulary),
         ],
@@ -672,6 +694,9 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
             (Qwen3Asr06B, Recommended),
             (WhisperLargeV3Turbo, Vocabulary),
         ],
+        // FLEURS Japanese test: Granite Speech 5.0 tied Whisper turbo
+        // (5.04% CER against 5.02%) at 2.4 times its speed, without
+        // vocabulary, so it stays unbadged (Hex's run).
         "ja" => &[
             (WhisperLargeV3Turbo, Recommended),
             (SenseVoiceSmall, Fastest),
@@ -695,6 +720,12 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
         // FLEURS Russian test: 5.37% WER against Parakeet v3's 6.52%, and
         // Whisper turbo's 5.36% at a fifth of its speed (Hex's run).
         "ru" => &[(GigaAmV3, Recommended), (WhisperLargeV3Turbo, Vocabulary)],
+        // FLEURS Norwegian test: 6.68% WER against Whisper turbo's 8.94%, at
+        // 0.89 times its speed and 60% of its download (Hex's run).
+        "no" => &[
+            (NbWhisperMedium, Recommended),
+            (WhisperLargeV3Turbo, Vocabulary),
+        ],
         "vi" => &[
             (Qwen3Asr06B, Recommended),
             (CohereTranscribe, MostAccurate),
@@ -727,7 +758,7 @@ pub(crate) fn picker_models(
     let recommended = choices_for_runtime(language);
     let others = MODELS
         .iter()
-        .filter(|model| model.listed())
+        .filter(|model| model.available())
         .filter(|model| recommended.iter().all(|choice| choice.model.id != model.id));
     let (supporting, switching): (Vec<_>, Vec<_>) =
         others.partition(|model| model.supports_language(language));
@@ -811,7 +842,7 @@ pub fn models_dir() -> Result<PathBuf> {
     if let Some(directory) = TEST_MODELS_DIR.with(|directory| directory.borrow().clone()) {
         return Ok(directory);
     }
-    Ok(crate::app_paths::support_dir()?.join("models"))
+    crate::app_paths::models_dir()
 }
 
 #[cfg(test)]
@@ -1260,7 +1291,7 @@ fn verification_receipt_path(model_path: &Path) -> PathBuf {
 
 /// The best starting selection for a dictation language: its first
 /// recommended runtime model. Unknown languages fall back to English, so an
-/// English system starts with Parakeet v3.
+/// English system starts with Parakeet Unified English.
 pub fn recommended_selection(language: &str) -> TranscriptionSelection {
     let language = LANGUAGES
         .iter()
@@ -1271,7 +1302,9 @@ pub fn recommended_selection(language: &str) -> TranscriptionSelection {
         .iter()
         .find(|choice| choice.recommendation == Recommendation::Recommended)
         .or_else(|| choices.first())
-        .map_or(TranscriptionModelId::ParakeetV3, |choice| choice.model.id);
+        .map_or(TranscriptionModelId::ParakeetUnifiedEnglish, |choice| {
+            choice.model.id
+        });
     TranscriptionSelection {
         model,
         language: language.into(),
@@ -1408,6 +1441,28 @@ mod tests {
     }
 
     #[test]
+    fn orukeet_is_offered_for_exactly_parakeet_v3s_languages_and_never_badged() {
+        let orukeet = definition(TranscriptionModelId::Orukeet);
+        let v3 = definition(TranscriptionModelId::ParakeetV3);
+        assert_eq!(orukeet.languages, PARAKEET_V3_LANGUAGES);
+        assert_eq!(orukeet.language_choices(), v3.language_choices());
+        assert!(!orukeet.streams);
+        assert!(!orukeet.accepts_language_hint);
+        assert!(orukeet.supports_language_detection);
+        assert!(!orukeet.id.is_labs_gated());
+        assert!(orukeet.available());
+        assert!(super::super::model_details::details(orukeet.id).is_some());
+        for language in v3.languages.iter().copied().chain([AUTO_LANGUAGE]) {
+            assert!(
+                choices_for_runtime(language)
+                    .iter()
+                    .all(|choice| choice.model.id != orukeet.id),
+                "Orukeet is never recommended ({language})"
+            );
+        }
+    }
+
+    #[test]
     fn parakeet_ultra_is_offered_only_with_its_lab_and_a_saved_choice_survives() {
         let ultra = definition(TranscriptionModelId::ParakeetUltra);
         assert_eq!(ultra.available(), crate::labs::parakeet_ultra());
@@ -1453,58 +1508,6 @@ mod tests {
     }
 
     #[test]
-    fn the_neural_engine_model_is_offered_only_with_its_lab_and_a_ready_runtime() {
-        use crate::transcription::ane::{Offer, offer};
-        let ane = definition(TranscriptionModelId::ParakeetV3Ane);
-        assert_eq!(ane.available(), offer() == Offer::Ready);
-        assert_eq!(ane.listed(), offer() != Offer::Hidden);
-        assert!(!ane.streams && !ane.accepts_language_hint);
-        assert_eq!(ane.languages, PARAKEET_V3_LANGUAGES);
-        assert!(TranscriptionModelId::ParakeetV3Ane.is_labs_gated());
-        for language in [AUTO_LANGUAGE, "en", "de"] {
-            assert!(
-                choices_for_runtime(language)
-                    .iter()
-                    .all(|choice| choice.model.id != ane.id),
-                "the Neural Engine model is never recommended ({language})"
-            );
-        }
-        // Off, or without a runtime, it is not in the picker at all; a saved
-        // choice of it survives and the listener runs the fallback.
-        let saved = TranscriptionSelection {
-            model: ane.id,
-            language: "de".into(),
-        };
-        assert!(validate_saved(&saved).is_ok());
-        if !ane.available() {
-            assert!(validate(&saved).is_err());
-            assert_eq!(
-                super::super::custom_models::runnable(&saved),
-                super::super::custom_models::fallback()
-            );
-        }
-        if offer() == Offer::Hidden {
-            assert!(
-                picker_models("en")
-                    .iter()
-                    .all(|(model, _)| model.id != ane.id)
-            );
-        }
-        let mut settings = crate::app_settings::AppSettings::default();
-        assert!(
-            crate::labs::Feature::NeuralEngine
-                .off_refusal(&settings)
-                .is_none()
-        );
-        settings.transcription = saved;
-        assert!(
-            crate::labs::Feature::NeuralEngine
-                .off_refusal(&settings)
-                .is_some()
-        );
-    }
-
-    #[test]
     fn hebrew_recommends_the_ivrit_fine_tune_with_its_hint() {
         use Recommendation::{Recommended, Vocabulary};
         use TranscriptionModelId::{IvritWhisperLargeV3Turbo, WhisperLargeV3Turbo};
@@ -1527,79 +1530,46 @@ mod tests {
     }
 
     #[test]
-    fn parakeet_v3_is_the_default_local_model() {
-        assert_eq!(
-            TranscriptionModelId::default(),
-            TranscriptionModelId::ParakeetV3
-        );
-        assert_eq!(
-            TranscriptionSelection::default().model,
-            TranscriptionModelId::ParakeetV3
-        );
-        assert_eq!(
-            recommended_selection("en").model,
-            TranscriptionModelId::ParakeetV3
-        );
-        // Unified stays offered, but never as the recommended model.
+    fn an_import_offers_every_language_it_declares_by_name() {
+        let import = ModelDefinition {
+            languages: &["en", "nn", "no"],
+            supports_language_detection: true,
+            ..*definition(TranscriptionModelId::WhisperLargeV3Turbo)
+        };
+        assert_eq!(import.language_choices(), [AUTO_LANGUAGE, "en", "no", "nn"]);
+        assert_eq!(language_name("nn"), "Norwegian Nynorsk");
         assert!(
-            choices_for_runtime("en")
-                .iter()
-                .any(
-                    |choice| choice.model.id == TranscriptionModelId::ParakeetUnifiedEnglish
-                        && choice.recommendation != Recommendation::Recommended
-                )
-        );
-    }
-
-    /// The licences a model may carry and still be recommended or default.
-    const OPEN_LICENSES: [&str; 3] = ["MIT", "Apache-2.0", "CC-BY-4.0"];
-
-    #[test]
-    fn every_catalog_entry_names_its_license() {
-        for model in MODELS {
-            assert!(!model.license.trim().is_empty(), "{}", model.name);
-        }
-        let license = |id| definition(id).license;
-        // Each value is the source repository's own licence tag.
-        assert_eq!(license(TranscriptionModelId::ParakeetV3), "CC-BY-4.0");
-        assert_eq!(license(TranscriptionModelId::ParakeetV2), "CC-BY-4.0");
-        assert_eq!(
-            license(TranscriptionModelId::ParakeetUnifiedEnglish),
-            "NVIDIA Open Model License"
-        );
-        assert_eq!(license(TranscriptionModelId::WhisperLargeV3Turbo), "MIT");
-        assert_eq!(license(TranscriptionModelId::Qwen3Asr06B), "Apache-2.0");
-        assert_eq!(
-            license(TranscriptionModelId::SenseVoiceSmall),
-            "FunASR Model License"
-        );
-        assert_eq!(license(TranscriptionModelId::Nemotron35Asr), "OpenMDW-1.1");
-        assert_eq!(
-            license(TranscriptionModelId::CohereTranscribe),
-            "Apache-2.0"
+            !definition(TranscriptionModelId::WhisperLargeV3Turbo)
+                .language_choices()
+                .contains(&"nn")
         );
     }
 
     #[test]
-    fn the_default_and_every_recommended_model_carry_an_open_license() {
-        let default = definition(TranscriptionModelId::default());
-        assert!(
-            OPEN_LICENSES.contains(&default.license),
-            "{}",
-            default.license
+    fn norwegian_recommends_nb_whisper_with_its_hint() {
+        use Recommendation::{Recommended, Vocabulary};
+        use TranscriptionModelId::{NbWhisperMedium, WhisperLargeV3Turbo};
+        let norwegian: Vec<_> = choices_for_runtime("no")
+            .into_iter()
+            .map(|choice| (choice.model.id, choice.recommendation))
+            .collect();
+        assert_eq!(
+            norwegian,
+            [
+                (NbWhisperMedium, Recommended),
+                (WhisperLargeV3Turbo, Vocabulary)
+            ]
         );
-        for (language, _) in LANGUAGES {
-            for choice in choices_for_runtime(language) {
-                if choice.recommendation == Recommendation::Recommended {
-                    assert!(
-                        OPEN_LICENSES.contains(&choice.model.license),
-                        "{language}: {} is {}",
-                        choice.model.name,
-                        choice.model.license
-                    );
-                }
-            }
-        }
+        let nb = definition(NbWhisperMedium);
+        assert_eq!(nb.language_choices(), ["no"]);
+        assert_eq!(nb.runtime_language_hint("no"), Some("no"));
+        assert!(!nb.supports_language(AUTO_LANGUAGE));
+        assert!(
+            definition(WhisperLargeV3Turbo)
+                .language_choices()
+                .contains(&"no")
+        );
+        assert_eq!(language_name("no"), "Norwegian");
     }
 
     #[test]
@@ -1623,14 +1593,13 @@ mod tests {
     #[test]
     fn recommendations_are_language_specific() {
         let english = choices_for_runtime("en");
-        assert_eq!(english[0].model.id, TranscriptionModelId::ParakeetV3);
-        assert_eq!(english[0].recommendation, Recommendation::Recommended);
         assert_eq!(
-            english[1].model.id,
+            english[0].model.id,
             TranscriptionModelId::ParakeetUnifiedEnglish
         );
-        assert_eq!(english[2].model.id, TranscriptionModelId::CohereTranscribe);
-        assert_eq!(english[2].recommendation, Recommendation::MostAccurate);
+        assert_eq!(english[0].recommendation, Recommendation::Recommended);
+        assert_eq!(english[1].model.id, TranscriptionModelId::CohereTranscribe);
+        assert_eq!(english[1].recommendation, Recommendation::MostAccurate);
         let mandarin = choices_for_runtime("zh");
         assert_eq!(mandarin[0].model.id, TranscriptionModelId::Qwen3Asr06B);
         assert_eq!(mandarin[1].model.id, TranscriptionModelId::SenseVoiceSmall);
@@ -1712,13 +1681,15 @@ mod tests {
 
     #[test]
     fn gguf_artifacts_are_q8_0_for_the_vulkan_shader_subset() {
-        // Q8_0 GGUFs hold only f32, f16, and q8_0 tensors, the types the
-        // Vulkan backend is built for (`CMAKE_ARGS` in .cargo/config.toml).
-        // Another quantization needs its type added there, or Vulkan aborts.
+        // Q8_0 GGUFs hold only f32, f16, and q8_0 tensors, and NB-Whisper's
+        // whisper.cpp file q5_0 too: the types the Vulkan backend is built
+        // for (`CMAKE_ARGS` in .cargo/config.toml). Another quantization
+        // needs its type added there, or Vulkan aborts.
         for model in MODELS {
             if let ModelRuntime::Gguf(artifact) = model.runtime {
                 assert!(
-                    artifact.filename.ends_with("-Q8_0.gguf"),
+                    artifact.filename.ends_with("-Q8_0.gguf")
+                        || artifact.filename == "ggml-model-q5_0.bin",
                     "{} needs its tensor types in GGML_VULKAN_SHADER_TYPES",
                     artifact.filename
                 );
@@ -1778,6 +1749,7 @@ mod tests {
             ),
             (TranscriptionModelId::ParakeetV2, "parakeet_v2"),
             (TranscriptionModelId::ParakeetV3, "parakeet_v3"),
+            (TranscriptionModelId::Orukeet, "orukeet"),
             (
                 TranscriptionModelId::WhisperLargeV3Turbo,
                 "whisper_large_v3_turbo",
@@ -1799,9 +1771,9 @@ mod tests {
                 "underdog_bark_3_clean",
             ),
             (TranscriptionModelId::ParakeetUltra, "parakeet_ultra"),
-            (TranscriptionModelId::ParakeetV3Ane, "parakeet_v3_ane"),
             (TranscriptionModelId::Nemotron35Asr, "nemotron_3_5_asr"),
             (TranscriptionModelId::GigaAmV3, "gigaam_v3"),
+            (TranscriptionModelId::NbWhisperMedium, "nb_whisper_medium"),
             (TranscriptionModelId::AppleSpeech, "apple_speech"),
         ] {
             assert_eq!(id.as_str(), name);
@@ -1856,6 +1828,24 @@ mod tests {
             })
             .is_ok()
         );
+    }
+
+    #[test]
+    fn models_that_detect_language_without_a_hint_offer_auto() {
+        for model in [
+            TranscriptionModelId::ParakeetV3,
+            TranscriptionModelId::GraniteSpeech5,
+        ] {
+            let definition = definition(model);
+            assert!(!definition.accepts_language_hint, "{model:?}");
+            assert!(definition.supports_language_detection, "{model:?}");
+            assert!(definition.language_choices().contains(&AUTO_LANGUAGE));
+            assert_eq!(definition.language_for(AUTO_LANGUAGE), AUTO_LANGUAGE);
+        }
+        let v2 = definition(TranscriptionModelId::ParakeetV2);
+        assert!(!v2.supports_language_detection);
+        assert!(!v2.language_choices().contains(&AUTO_LANGUAGE));
+        assert_eq!(v2.language_for(AUTO_LANGUAGE), "en");
     }
 
     #[test]
@@ -2130,7 +2120,8 @@ mod tests {
                 WhisperLargeV3Turbo,
                 Qwen3Asr06B,
                 QwenCleoAsr17B,
-                IvritWhisperLargeV3Turbo
+                IvritWhisperLargeV3Turbo,
+                NbWhisperMedium
             ]
         );
         assert_eq!(
@@ -2139,6 +2130,7 @@ mod tests {
                 ParakeetUnifiedEnglish,
                 ParakeetV2,
                 ParakeetV3,
+                Orukeet,
                 UnderdogBark3Pro,
                 UnderdogBark3Clean,
                 ParakeetUltra,
@@ -2241,58 +2233,6 @@ mod tests {
             requests + 1
         );
         assert!(!detector_touched);
-    }
-
-    #[test]
-    fn a_download_cut_short_is_not_installed_until_its_checksum_verifies() {
-        let model = fixture_model();
-        let ModelRuntime::Gguf(artifact) = model.runtime else {
-            unreachable!("the fixture is a GGUF model");
-        };
-        let directory = std::env::temp_dir().join(format!(
-            "hex-interrupted-download-{}-{}",
-            std::process::id(),
-            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed),
-        ));
-        fs::create_dir(&directory).unwrap();
-        let destination = directory.join("fixture.gguf");
-        let partial = destination.with_extension("gguf.partial");
-        TEST_MODELS_DIR.with(|models| *models.borrow_mut() = Some(directory.clone()));
-
-        // Cut off mid-file: only the partial exists, so nothing is installed
-        // or verified, and the next run keeps its bytes to resume from.
-        fs::write(&partial, b"hel").unwrap();
-        assert!(!is_installed(&model, "en"));
-        assert!(!is_verified(&model));
-
-        // Every byte arrived but they are wrong: the checksum refuses to
-        // promote them, so the model still is not installed.
-        fs::write(&partial, b"world").unwrap();
-        let refused = verify_and_promote_partial(
-            &partial,
-            &destination,
-            &directory,
-            artifact,
-            "the fixture",
-            &AtomicBool::new(false),
-            &AtomicU64::new(0),
-            &AtomicU8::new(0),
-        );
-        assert!(refused.is_err());
-        assert!(!is_installed(&model, "en") && !is_verified(&model));
-
-        // A complete partial with the right checksum is promoted by the next
-        // run without fetching anything, and only then counts.
-        fs::write(&partial, b"hello").unwrap();
-        let downloaded =
-            download_with_progress(&model, &AtomicBool::new(false), &AtomicU64::new(0));
-        let installed = is_installed(&model, "en");
-        let verified = is_verified(&model);
-        TEST_MODELS_DIR.with(|models| *models.borrow_mut() = None);
-        let promoted = !partial.exists();
-        fs::remove_dir_all(&directory).unwrap();
-        assert_eq!(downloaded.unwrap(), destination);
-        assert!(installed && verified && promoted);
     }
 
     #[test]

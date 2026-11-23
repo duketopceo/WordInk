@@ -37,20 +37,24 @@ pub(crate) struct OpenCodeUnavailableCopy {
 #[derive(Clone, Copy)]
 pub(crate) enum OpenCodeFeature {
     Transformation,
+    /// Meetings › Settings › Summaries' model picker.
+    MeetingSummary,
 }
 
 pub(crate) fn opencode_unavailable_copy(
     state: &ModelCatalogState,
     feature: OpenCodeFeature,
 ) -> Option<OpenCodeUnavailableCopy> {
-    let OpenCodeFeature::Transformation = feature;
+    let meeting = matches!(feature, OpenCodeFeature::MeetingSummary);
     match state {
         ModelCatalogState::Loading => Some(OpenCodeUnavailableCopy {
             reason: tr("Checking for OpenCode"),
             title: tr("Checking for OpenCode"),
-            description: tr(
-                "OpenCode transformation will be available after WordInk connects to OpenCode.",
-            ),
+            description: if meeting {
+                tr("Summary models show once Hex connects to OpenCode.")
+            } else {
+                tr("OpenCode transformation will be available after Hex connects to OpenCode.")
+            },
             error: None,
             can_retry: false,
             retry_label: tr("Retry"),
@@ -59,7 +63,11 @@ pub(crate) fn opencode_unavailable_copy(
         ModelCatalogState::NotRunning => Some(OpenCodeUnavailableCopy {
             reason: tr("OpenCode isn't running"),
             title: tr("OpenCode isn't running"),
-            description: tr("Install or start OpenCode to transform dictated text."),
+            description: if meeting {
+                tr("Start OpenCode to choose a summary model. Hex keeps the saved one.")
+            } else {
+                tr("Install or start OpenCode to transform dictated text.")
+            },
             error: None,
             can_retry: true,
             retry_label: tr("Check again"),
@@ -68,7 +76,7 @@ pub(crate) fn opencode_unavailable_copy(
         ModelCatalogState::Failed(error) => Some(OpenCodeUnavailableCopy {
             reason: tr("OpenCode is unavailable"),
             title: tr("OpenCode is unavailable"),
-            description: tr("WordInk could not load the OpenCode model catalog."),
+            description: tr("Hex could not load the OpenCode model catalog."),
             error: Some(error.clone()),
             can_retry: true,
             retry_label: tr("Retry"),
@@ -247,7 +255,7 @@ mod tests {
         assert_eq!(copy.title, "OpenCode is unavailable");
         assert_eq!(
             copy.description,
-            "WordInk could not load the OpenCode model catalog."
+            "Hex could not load the OpenCode model catalog."
         );
         assert_eq!(
             copy.error.as_deref(),
@@ -265,7 +273,7 @@ mod tests {
         assert_eq!(loading.title, "Checking for OpenCode");
         assert_eq!(
             loading.description,
-            "OpenCode transformation will be available after WordInk connects to OpenCode."
+            "OpenCode transformation will be available after Hex connects to OpenCode."
         );
         assert!(!loading.can_retry);
         assert!(!loading.can_open_setup);

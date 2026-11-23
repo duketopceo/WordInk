@@ -15,47 +15,6 @@ use super::gpu_stage::KEY_COUNT;
 
 struct Cap(&'static str, &'static str, f32);
 
-/// Which keyboard's modifier legends the deck shows: the Mac's glyphs, or a
-/// PC's words in a PC's order (Ctrl, Fn, Win or Super, Alt). The geometry
-/// stays the same; only the bottom row's ids and legends move.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Legends {
-    Mac,
-    Windows,
-    Linux,
-}
-
-impl Legends {
-    /// The keyboard of the computer the first run is on, by where WordInk
-    /// lives once it closes.
-    pub(crate) fn for_home(home: super::landing::Home) -> Self {
-        match home {
-            super::landing::Home::MenuBar => Self::Mac,
-            super::landing::Home::Tray => Self::Windows,
-            super::landing::Home::Launcher => Self::Linux,
-        }
-    }
-
-    /// The bottom row's `(id, legend)` at `index`, left to right, where it
-    /// differs from the Mac's.
-    fn bottom(self, index: usize) -> Option<(&'static str, &'static str)> {
-        let system = match self {
-            Self::Mac => return None,
-            Self::Windows => "Win",
-            Self::Linux => "Super",
-        };
-        Some(match index {
-            0 => ("control", "Ctrl"),
-            1 => ("fn", "Fn"),
-            2 => ("command", system),
-            3 => ("option", "Alt"),
-            5 => ("option-right", "Alt"),
-            6 => ("control-right", "Ctrl"),
-            _ => return None,
-        })
-    }
-}
-
 const fn k(id: &'static str) -> Cap {
     Cap(id, id, 1.0)
 }
@@ -168,8 +127,6 @@ pub(crate) fn modifier(cap: &str) -> Option<&'static str> {
         ("⌘", "command"),
         ("⌃", "control"),
         ("Ctrl", "control"),
-        ("Win", "command"),
-        ("Super", "command"),
         ("⇧", "shift"),
         ("Shift", "shift"),
         ("fn", "fn"),
@@ -180,7 +137,6 @@ pub(crate) fn modifier(cap: &str) -> Option<&'static str> {
     Some(match (key, right) {
         ("option", true) => "option-right",
         ("command", true) => "command-right",
-        ("control", true) => "control-right",
         ("shift", true) => "shift-right",
         (key, _) => key,
     })
@@ -194,12 +150,7 @@ pub(crate) struct KeySlot {
     pub(crate) rect: [f32; 4],
 }
 
-#[cfg(test)]
-fn key_slots() -> [KeySlot; KEY_COUNT] {
-    key_slots_for(Legends::Mac)
-}
-
-pub(crate) fn key_slots_for(legends: Legends) -> [KeySlot; KEY_COUNT] {
+pub(crate) fn key_slots() -> [KeySlot; KEY_COUNT] {
     let dummy = KeySlot {
         id: "",
         legend: "",
@@ -211,11 +162,7 @@ pub(crate) fn key_slots_for(legends: Legends) -> [KeySlot; KEY_COUNT] {
     for (r, row_caps) in ROWS.iter().enumerate() {
         let y = KEY_INSET + r as f32 * (ROW_H + ROW_GAP);
         let mut u_acc = 0.0;
-        for (i, cap) in row_caps.iter().enumerate() {
-            let (id, legend) = (r == ROWS.len() - 1)
-                .then(|| legends.bottom(i))
-                .flatten()
-                .unwrap_or((cap.0, cap.1));
+        for cap in *row_caps {
             let x = KEY_INSET + u_acc * PITCH;
             let w = cap.2 * PITCH - GAP;
             if cap.0 == "updown" {
@@ -235,8 +182,8 @@ pub(crate) fn key_slots_for(legends: Legends) -> [KeySlot; KEY_COUNT] {
                 idx += 1;
             } else {
                 slots[idx] = KeySlot {
-                    id,
-                    legend,
+                    id: cap.0,
+                    legend: cap.1,
                     rect: [x, y, w, ROW_H],
                 };
                 idx += 1;
@@ -249,26 +196,45 @@ pub(crate) fn key_slots_for(legends: Legends) -> [KeySlot; KEY_COUNT] {
 }
 
 pub(crate) fn ember(p: Paint) -> Color {
-    super::super::brand::ember(p.k.dark, 9)
+    rune_theme_opencode::ember(p.k.dark, 9)
+}
+
+/// How [`keyboard_lit`] lights the deck. Every amount is `0..=1`.
+pub(crate) struct Lighting<'a> {
+    /// How far the deck has arrived.
+    pub(crate) enter: f32,
+    /// How bright every key that isn't lit is, as the eye sees it.
+    pub(crate) level: f32,
+    /// How far each key is pressed.
+    pub(crate) depth: &'a dyn Fn(&str) -> f32,
+    /// How warmly each key is lit.
+    pub(crate) glow: &'a dyn Fn(&str) -> f32,
+    /// How red each key flashes.
+    pub(crate) flash: &'a dyn Fn(&str) -> f32,
+    /// How far each unlit key, by its `[x, y, w, h]` on the deck, is taken
+    /// out entirely, such as behind the HUD.
+    pub(crate) hollow: &'a dyn Fn([f32; 4]) -> f32,
 }
 
 /// Renders the crisp 2D 14.5u Apple Magic Keyboard `El`.
-pub(crate) fn keyboard_lit(
-    p: Paint,
-    key: &str,
-    legends: Legends,
-    enter_u: f32,
-    dim: f32,
-    depth: impl Fn(&str) -> f32,
-    glow: impl Fn(&str) -> f32,
-) -> El {
+pub(crate) fn keyboard_lit(p: Paint, key: &str, light: Lighting<'_>) -> El {
     let k = p.k;
     let c = &k.c;
     let m = KeyMaterial::new(k);
     let bg = c.bg_deep;
     let warm = ember(p);
-    let dim = dim.clamp(0.0, 1.0);
-    let enter = enter_u.clamp(0.0, 1.0);
+    let level = light.level.clamp(0.0, 1.0);
+    let enter = light.enter.clamp(0.0, 1.0);
+    // Colours mix in linear light, so a level as the eye sees it needs a
+    // curve: toward a dark ground less ink, toward a light one more.
+    let seen = |v: f32| {
+        let v = v.clamp(0.0, 1.0);
+        if k.dark {
+            v * v
+        } else {
+            1.0 - (1.0 - v) * (1.0 - v)
+        }
+    };
 
     let deck_fill = if k.dark {
         c.layer_01.mix(c.layer_02, 0.55)
@@ -290,14 +256,20 @@ pub(crate) fn keyboard_lit(
     } else {
         c.white.mix(c.bg_base, 0.06)
     };
-    let cap_pressed = if k.dark { c.bg_deep } else { c.layer_01 };
+    // A pressed key lights up rather than sinking into the dark, so it reads
+    // in peripheral vision.
+    let cap_pressed = if k.dark {
+        c.surface_raised.mix(c.border_strong, 0.55)
+    } else {
+        c.layer_02.mix(c.border_base, 0.6)
+    };
     let cap_rim = if k.dark {
         c.border_weak.mix(c.white, 0.05)
     } else {
         c.border_weak
     };
 
-    let slots = key_slots_for(legends);
+    let slots = key_slots();
     let mut key_els = Vec::with_capacity(KEY_COUNT);
 
     for slot in slots.iter() {
@@ -310,18 +282,25 @@ pub(crate) fn keyboard_lit(
             let local = ((enter * 1.32 - diag * 0.32) / 1.0).clamp(0.0, 1.0);
             local * local * (3.0 - 2.0 * local)
         };
-        let down = depth(slot.id).clamp(0.0, 1.0);
-        let lit = glow(slot.id).clamp(0.0, 1.0);
+        let down = (light.depth)(slot.id).clamp(0.0, 1.0);
+        let lit = (light.glow)(slot.id).clamp(0.0, 1.0);
+        let red = (light.flash)(slot.id).clamp(0.0, 1.0);
 
-        let vis = (dim + (1.0 - dim) * lit).clamp(0.0, 1.0) * rise;
+        let base = level * (1.0 - (light.hollow)(slot.rect).clamp(0.0, 1.0));
+        let vis = seen((base + (1.0 - base) * lit).max(red)) * rise;
         let lit_cap = warm.mix(c.white, if k.dark { 0.30 } else { 0.42 });
         let fill_raw = cap_base
-            .mix(cap_pressed, down * 0.55)
-            .mix(lit_cap, lit * if k.dark { 0.72 } else { 0.62 });
+            .mix(cap_pressed, down)
+            .mix(lit_cap, lit * if k.dark { 0.72 } else { 0.62 })
+            .mix(c.bg_deep.mix(c.danger.fg, 0.30), red);
         let fill = bg.mix(fill_raw, vis);
-        let border = bg.mix(cap_rim.mix(lit_cap, lit * 0.82), vis);
+        let rim = cap_rim
+            .mix(c.border_strong, down)
+            .mix(lit_cap, lit * 0.82)
+            .mix(c.danger.fg, red);
+        let border = bg.mix(rim, vis);
 
-        let press_dy = 1.15 * down + (1.0 - rise) * 1.5;
+        let press_dy = 2.2 * down + (1.0 - rise) * 1.5;
         let radius = if slot.id == "up" || slot.id == "down" {
             3.5
         } else {
@@ -356,6 +335,16 @@ pub(crate) fn keyboard_lit(
             })
             .offset_motion(Anim::INSTANT);
 
+        if red > 0.02 {
+            cap_el = cap_el.box_shadow(Shadow {
+                x: 0.0,
+                y: 0.0,
+                blur: 10.0,
+                spread: 0.0,
+                color: c.danger.fg.alpha(0.35 * red * rise),
+                inset: false,
+            });
+        }
         if lit > 0.02 {
             cap_el = cap_el.box_shadow(Shadow {
                 x: 0.0,
@@ -374,29 +363,23 @@ pub(crate) fn keyboard_lit(
                 m.ink
             };
             let lit_ink = if k.dark { c.bg_deep } else { c.text_strong };
-            let ink = bg.mix(base_ink.mix(lit_ink, lit * 0.88), vis);
+            let ink = base_ink
+                .mix(c.text_strong, down)
+                .mix(lit_ink, lit * 0.88)
+                .mix(c.danger.fg, red);
+            let ink = bg.mix(ink, vis);
 
+            let left_word = matches!(slot.id, "tab" | "caps" | "shift" | "fn");
             let right_word = matches!(slot.id, "delete" | "return" | "shift-right");
-            // Word legends ("tab", "fn", a PC's "Ctrl" or "Alt") sit small in
-            // a corner; glyphs and single characters sit centred.
-            let word = slot.legend.chars().count() > 1
-                && slot.legend.chars().all(|c| c.is_ascii_alphabetic());
-            let left_word = word && !right_word;
             let half_arrow = matches!(slot.id, "up" | "down");
 
             if left_word || right_word {
-                // A long word on a one-unit key (a PC's "Super") shrinks to fit.
-                let narrow = w < PITCH * 1.1 && slot.legend.len() >= 5;
-                let font = if narrow {
-                    TextStyle::new(7.0, 470.0).lh(9.0)
-                } else {
-                    TextStyle::new(8.2, 470.0).lh(10.0)
-                };
+                let font = TextStyle::new(8.2, 470.0).lh(10.0);
                 let mut r = row()
                     .key("lbl-row")
                     .w_full()
                     .h_full()
-                    .px(if narrow { 3.0 } else { 4.5 })
+                    .px(4.5)
                     .pb(3.0)
                     .items_end();
                 if right_word {
@@ -424,7 +407,7 @@ pub(crate) fn keyboard_lit(
         key_els.push(cap_el);
     }
 
-    let deck_vis = (0.42 + 0.58 * dim) * enter;
+    let deck_vis = (0.12 + 0.88 * seen(level)) * enter;
     el().key(key)
         .size(DECK_W, DECK_H)
         .radius(12.0)
@@ -499,42 +482,6 @@ mod tests {
                 "key {} out of well: {:?}",
                 slot.id,
                 slot.rect
-            );
-        }
-    }
-
-    #[test]
-    fn pc_keyboards_show_pc_modifiers_where_a_pc_has_them() {
-        let bottom = |legends| {
-            key_slots_for(legends)
-                .into_iter()
-                .filter(|slot| slot.rect[1] > DECK_H * 0.7)
-                .map(|slot| slot.legend)
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            &bottom(Legends::Windows)[..7],
-            ["Ctrl", "Fn", "Win", "Alt", "", "Alt", "Ctrl"]
-        );
-        assert_eq!(bottom(Legends::Linux)[2], "Super");
-        assert_eq!(&bottom(Legends::Mac)[..4], ["fn", "⌃", "⌥", "⌘"]);
-        // A PC shortcut's caps light the key that carries their legend.
-        let id_of = |legends, legend| {
-            key_slots_for(legends)
-                .into_iter()
-                .find(|slot| slot.legend == legend)
-                .map(|slot| slot.id)
-        };
-        assert_eq!(modifier("Alt"), id_of(Legends::Windows, "Alt"));
-        assert_eq!(modifier("Ctrl"), id_of(Legends::Windows, "Ctrl"));
-        assert_eq!(modifier("Super"), id_of(Legends::Linux, "Super"));
-        // Nothing on a PC deck is drawn with a Mac glyph.
-        for legends in [Legends::Windows, Legends::Linux] {
-            assert!(
-                key_slots_for(legends)
-                    .iter()
-                    .all(|slot| !["⌘", "⌥", "⌃"].contains(&slot.legend)),
-                "{legends:?}"
             );
         }
     }

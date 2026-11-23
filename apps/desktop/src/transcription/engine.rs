@@ -129,6 +129,10 @@ pub(crate) enum Command {
     /// Work that needs the model itself, such as loading or switching it.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Run(Box<dyn FnOnce(&mut Model) + Send>),
+    /// Drops the model, then loads `selection` in its place, for a GPU with
+    /// no room for both (#1170).
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    Reload(crate::transcription::models::TranscriptionSelection),
     Background {
         /// The dictation generation when the work was submitted.
         generation: u64,
@@ -327,30 +331,12 @@ pub struct Transcribed {
     pub source: Source,
     /// Time from the finish request to the final text.
     pub finish_ms: u64,
-    /// What a cloud engine used and cost; `None` for a local model.
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
-    pub usage: Option<crate::history::UsageRecord>,
-    /// Which local model actually produced the text, when it can differ from
-    /// the saved selection (the Neural Engine model hands a dictation to the
-    /// GPU model when its worker cannot take it).
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    pub served: Option<ServedBy>,
-}
-
-/// The local model that answered a dictation and that attempt's own time.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub struct ServedBy {
-    pub model: crate::transcription::models::TranscriptionModelId,
-    pub inference_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
     Stream,
     Offline,
-    /// The clip went to a cloud provider whole.
-    Cloud,
     /// The stream could not be used; the reason is logged with the result.
     Fallback(String),
 }
@@ -360,7 +346,6 @@ impl Source {
         match self {
             Self::Stream => "stream",
             Self::Offline => "offline",
-            Self::Cloud => "cloud",
             Self::Fallback(_) => "fallback",
         }
     }
@@ -395,9 +380,6 @@ impl Running {
     }
 }
 
-/// What a local transcription says when the engine started with no model.
-pub(crate) const NO_LOCAL_MODEL: &str = "no local model installed \u{2014} install one in Settings";
-
 pub struct TranscriptionEngine {
     commands: Sender<Command>,
     running: Running,
@@ -407,7 +389,8 @@ pub struct TranscriptionEngine {
     /// Dictation requests sent so far. Background work submitted before a
     /// newer request yields to it.
     requests: Arc<AtomicU64>,
-    /// Whether the loaded model can stream on its device.
+    /// Whether the loaded model can stream on its device; while it is parked,
+    /// whether its definition advertises streaming.
     streams: Arc<AtomicBool>,
     /// Whether dictation streams publish their text as they go, asked as
     /// each stream begins: Labs › Live text, or a
@@ -419,21 +402,10 @@ pub struct TranscriptionEngine {
     next_stream: AtomicU64,
     deadlines: Deadlines,
     thread: Option<JoinHandle<()>>,
-    /// Whether this engine was started with no local model: it can only run
-    /// cloud dictation.
-    cloud_only: bool,
-    /// The route [`Self::begin`] chose for the capture now recording, taken
-    /// by the finish that follows so both use one decision.
-    routed: Mutex<Option<Option<crate::transcription::cloud::Provider>>>,
 }
 
 /// The GGUF selection the engine's model held after its last command.
 type Held = Arc<Mutex<Option<crate::transcription::models::TranscriptionSelection>>>;
-
-/// A cloud transcription of one clip: its text and usage, or the text for
-/// the pill.
-pub(crate) type CloudRun =
-    Box<dyn FnOnce(&[f32]) -> Result<(String, crate::history::UsageRecord), String> + Send>;
 
 /// A live stream for one capture. Feed it the capture's 16 kHz audio in order,
 /// then either [`TranscriptionEngine::finish`] or drop it to cancel.
@@ -494,60 +466,10 @@ pub struct PendingTranscript {
     /// How long the job may run once started: its allowance plus the clip's.
     job: Duration,
     stream_finish: Duration,
-    /// The opt-in cloud retry for a local dictation that fails.
-    fallback: Option<CloudFallback>,
 }
-
-/// One cloud retry of the same clip, held for a local dictation. Present only
-/// when the setting is on and the provider's key resolved.
-struct CloudFallback {
-    provider: crate::transcription::cloud::Provider,
-    clip: Vec<f32>,
-    run: CloudRun,
-}
-
-/// A cloud transcription of a clip, as [`crate::transcription::cloud::run`].
-type CloudRunner = fn(
-    crate::transcription::cloud::Provider,
-    &[f32],
-    Option<&str>,
-) -> Result<(String, crate::history::UsageRecord), String>;
 
 impl PendingTranscript {
-    /// Waits for the transcript. A local dictation that errors or times out
-    /// is retried once on its fallback provider, when one was configured; the
-    /// result then carries that provider's usage, which is what history
-    /// records as having served it.
-    pub fn wait(mut self) -> Result<Transcribed, String> {
-        let fallback = self.fallback.take();
-        let local = self.wait_local();
-        let (Err(reason), Some(fallback)) = (&local, fallback) else {
-            return local;
-        };
-        // The reason is the local path's own error text: no audio, no transcript.
-        tracing::info!(
-            provider = fallback.provider.id(),
-            reason = %reason,
-            "local transcription failed; retrying once on the cloud fallback"
-        );
-        let started = Instant::now();
-        let result = (fallback.run)(&fallback.clip).map(|(text, usage)| Transcribed {
-            text: text.trim().to_string(),
-            source: Source::Cloud,
-            finish_ms: started.elapsed().as_millis() as u64,
-            usage: Some(usage),
-            served: None,
-        });
-        tracing::info!(
-            provider = fallback.provider.id(),
-            ok = result.is_ok(),
-            "cloud fallback finished"
-        );
-        // A failed retry surfaces the local error, as without the setting.
-        result.or(local)
-    }
-
-    fn wait_local(self) -> Result<Transcribed, String> {
+    pub fn wait(self) -> Result<Transcribed, String> {
         let mut stream_deadline = self
             .stream_cancel
             .as_ref()
@@ -607,23 +529,33 @@ impl PendingTranscript {
 
 impl TranscriptionEngine {
     pub fn start(model: Model) -> Result<Self> {
-        Self::start_with(Some(model))
+        let streams = model.stream_options().is_some();
+        Self::with_model(Some(model), None, streams)
     }
 
-    /// An engine with no local model, for dictation that runs on a cloud
-    /// provider. Anything that needs the model fails until one is loaded.
-    #[cfg(target_os = "linux")]
-    pub fn start_without_model() -> Result<Self> {
-        Self::start_with(None)
+    /// Starts with no model loaded, remembering `selection` to reload on the
+    /// first command that needs it, as [`Worker::park`] leaves the engine.
+    /// Labs › Unload model when idle uses this so a launch stays unloaded
+    /// until the first dictation. Whether it can stream is seeded from the
+    /// model's definition, not measured on this device: the first capture
+    /// either streams after the reload or falls back to its whole clip.
+    pub fn start_parked(
+        selection: crate::transcription::models::TranscriptionSelection,
+    ) -> Result<Self> {
+        let streams = crate::transcription::models::validate(&selection)
+            .is_ok_and(|definition| definition.streams);
+        Self::with_model(None, Some(selection), streams)
     }
 
-    fn start_with(model: Option<Model>) -> Result<Self> {
-        let cloud_only = model.is_none();
-        let streams = Arc::new(AtomicBool::new(
-            model
-                .as_ref()
-                .is_some_and(|model| model.stream_options().is_some()),
-        ));
+    /// The engine and its worker thread: `model` loaded, or `parked` waiting
+    /// for the first command that needs it. `streams` is what the thread
+    /// publishes until the model loads.
+    fn with_model(
+        model: Option<Model>,
+        parked: Option<crate::transcription::models::TranscriptionSelection>,
+        streams: bool,
+    ) -> Result<Self> {
+        let streams = Arc::new(AtomicBool::new(streams));
         let (commands, receiver) = mpsc::channel();
         let requests = Arc::new(AtomicU64::new(0));
         let running = Running::default();
@@ -631,12 +563,14 @@ impl TranscriptionEngine {
         let held = Held::new(Mutex::new(
             model
                 .as_ref()
-                .and_then(|model| model.gguf_selection().cloned()),
+                .and_then(|model| model.gguf_selection().cloned())
+                .or_else(|| parked.clone()),
         ));
         let dictating = Arc::new(AtomicBool::new(false));
         let worker = Worker {
             model,
-            parked: None,
+            parked,
+            reload_error: None,
             idle_since: Instant::now(),
             running: running.clone(),
             stalled: stalled.clone(),
@@ -660,8 +594,6 @@ impl TranscriptionEngine {
             next_stream: AtomicU64::new(0),
             deadlines: Deadlines::PRODUCTION,
             thread: Some(thread),
-            cloud_only,
-            routed: Mutex::new(None),
         })
     }
 
@@ -682,8 +614,6 @@ impl TranscriptionEngine {
             next_stream: AtomicU64::new(0),
             deadlines: Deadlines::PRODUCTION,
             thread: None,
-            cloud_only: false,
-            routed: Mutex::new(None),
         };
         (engine, receiver)
     }
@@ -709,41 +639,9 @@ impl TranscriptionEngine {
         self
     }
 
-    /// The route for a capture, from the cached key; never waits on the
-    /// keyring.
-    fn decide(&self) -> Option<crate::transcription::cloud::Provider> {
-        crate::transcription::cloud::route_with(self.cloud_only)
-    }
-
-    /// The route [`Self::begin`] chose for this capture, or a fresh decision
-    /// when no capture began.
-    fn take_route(&self) -> Option<crate::transcription::cloud::Provider> {
-        let decided = self
-            .routed
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .take();
-        decided.unwrap_or_else(|| self.decide())
-    }
-
     /// Opens a live stream when the loaded model can stream on this device.
-    /// Decides the capture's route once: the finish that follows uses it.
     pub fn begin(&self) -> Option<LiveStream> {
-        let route = self.decide();
-        *self
-            .routed
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(route);
-        self.begin_routed(route)
-    }
-
-    /// [`Self::begin`] for a dictation routed to `cloud`: a cloud engine
-    /// takes the whole clip, so it never streams.
-    pub(crate) fn begin_routed(
-        &self,
-        cloud: Option<crate::transcription::cloud::Provider>,
-    ) -> Option<LiveStream> {
-        if !self.streams_routed(cloud) {
+        if !self.streams.load(Ordering::Acquire) {
             return None;
         }
         let id = self.next_stream.fetch_add(1, Ordering::Relaxed) + 1;
@@ -770,7 +668,7 @@ impl TranscriptionEngine {
     /// Opens a stream that gives way to dictation, when the loaded model can
     /// stream on this device. See [`YieldingStream`].
     pub(crate) fn begin_yielding(&self) -> Option<YieldingStream> {
-        if !self.streams() {
+        if !self.streams.load(Ordering::Acquire) {
             return None;
         }
         let id = self.next_stream.fetch_add(1, Ordering::Relaxed) + 1;
@@ -795,61 +693,7 @@ impl TranscriptionEngine {
 
     /// Whether the loaded model can stream on its device.
     pub(crate) fn streams(&self) -> bool {
-        self.streams_routed(self.decide())
-    }
-
-    fn streams_routed(&self, cloud: Option<crate::transcription::cloud::Provider>) -> bool {
-        cloud.is_none_or(|provider| provider.streams()) && self.streams.load(Ordering::Acquire)
-    }
-
-    /// Finishes a capture on a cloud provider: the clip goes whole to `run`
-    /// on its own thread, never to the model, and the transcript carries its
-    /// usage. The pill gets `run`'s error text as it is.
-    pub(crate) fn finish_cloud(
-        &self,
-        provider: crate::transcription::cloud::Provider,
-        clip: Vec<f32>,
-        run: CloudRun,
-    ) -> Result<PendingTranscript> {
-        let (reply, receiver) = mpsc::channel();
-        let cancel = CancelToken::new();
-        let job = self.deadlines.job_for(clip.len());
-        let thread_cancel = cancel.clone();
-        thread::Builder::new()
-            .name("cloud-transcription".into())
-            .spawn(move || {
-                let _ = reply.send(Reply::Started);
-                let started = Instant::now();
-                let result = run(&clip).map(|(text, usage)| Transcribed {
-                    text: text.trim().to_string(),
-                    source: Source::Cloud,
-                    finish_ms: started.elapsed().as_millis() as u64,
-                    usage: Some(usage),
-                    served: None,
-                });
-                if thread_cancel.is_cancelled() {
-                    // The waiter gave up; its answer is no longer wanted.
-                    return;
-                }
-                tracing::info!(
-                    provider = provider.id(),
-                    finish_ms = started.elapsed().as_millis() as u64,
-                    ok = result.is_ok(),
-                    "cloud transcription finished"
-                );
-                let _ = reply.send(Reply::Done(result));
-            })
-            .map_err(|error| eyre!("could not start the cloud transcription: {error}"))?;
-        self.requests.fetch_add(1, Ordering::AcqRel);
-        Ok(PendingTranscript {
-            reply: receiver,
-            cancel,
-            stream_cancel: None,
-            stalled: self.stalled.clone(),
-            job,
-            stream_finish: self.deadlines.stream_finish,
-            fallback: None,
-        })
+        self.streams.load(Ordering::Acquire)
     }
 
     /// Finishes a capture with its complete 16 kHz clip. Without a stream,
@@ -860,9 +704,11 @@ impl TranscriptionEngine {
             stream,
             clip,
             Box::new(|model, clip| {
-                // Labs › Skip long pauses, asked as the run starts.
-                let mut clip = whole_clip(clip, crate::labs::skip_pauses());
-                crate::dictation::pad_for_parakeet(&mut clip);
+                // Labs › Skip long pauses, asked as the run starts, then
+                // padding that follows the cut rather than being trimmed by
+                // a trailing pause (#1629).
+                let clip =
+                    padded_whole_clip(clip, crate::labs::skip_pauses(), Some(model.model_id()));
                 model
                     .transcribe(&clip)
                     .map_err(|error| format!("{error:#}"))
@@ -877,55 +723,6 @@ impl TranscriptionEngine {
         clip: Vec<f32>,
         offline: Offline,
     ) -> Result<PendingTranscript> {
-        self.finish_routed(stream, clip, offline, crate::transcription::cloud::run)
-    }
-
-    /// [`Self::finish_with`] with the cloud transcription named, so tests
-    /// never make a live call.
-    fn finish_routed(
-        &self,
-        stream: Option<LiveStream>,
-        clip: Vec<f32>,
-        offline: Offline,
-        cloud: CloudRunner,
-    ) -> Result<PendingTranscript> {
-        let routed = self.take_route();
-        crate::debug_log::dlog!(
-            Info,
-            "engine.route",
-            "transcription route chosen",
-            route = routed.map_or("local", |provider| provider.id()),
-            local_model = routed.is_none().then(|| format!(
-                "{:?}",
-                crate::app_settings::transcription_selection().1.model
-            )),
-            streamed = stream.is_some(),
-            samples = clip.len(),
-        );
-        if let Some(provider) = routed {
-            // A stream opened before the engine changed ends unused.
-            drop(stream);
-            let language = crate::transcription::cloud::language_hint(
-                &crate::app_settings::transcription_selection().1.language,
-            );
-            return self.finish_cloud(
-                provider,
-                clip,
-                Box::new(move |samples| cloud(provider, samples, language.as_deref())),
-            );
-        }
-        // Opt-in: a local failure retries this clip once on the configured
-        // provider. Never set when the setting is off or no key resolves.
-        let fallback = crate::transcription::cloud::fallback_provider().map(|provider| {
-            let language = crate::transcription::cloud::language_hint(
-                &crate::app_settings::transcription_selection().1.language,
-            );
-            CloudFallback {
-                provider,
-                clip: clip.clone(),
-                run: Box::new(move |samples| cloud(provider, samples, language.as_deref())),
-            }
-        });
         let (stream, stream_cancel) = match stream {
             Some(mut stream) => {
                 stream.finished = true;
@@ -933,14 +730,12 @@ impl TranscriptionEngine {
             }
             None => (None, None),
         };
-        let mut pending = self.request(clip.len(), stream_cancel, |job| Command::Finish {
+        self.request(clip.len(), stream_cancel, |job| Command::Finish {
             stream,
             clip,
             offline,
             job,
-        })?;
-        pending.fallback = fallback;
-        Ok(pending)
+        })
     }
 
     /// Transcribes `clip` offline after every command already sent, without
@@ -977,7 +772,6 @@ impl TranscriptionEngine {
             stalled: self.stalled.clone(),
             job,
             stream_finish: self.deadlines.stream_finish,
-            fallback: None,
         })
     }
 
@@ -1009,6 +803,19 @@ impl TranscriptionEngine {
             .map_err(|_| eyre!("transcription engine stopped"))?;
         receiver
             .recv()
+            .map_err(|_| eyre!("transcription engine stopped"))
+    }
+
+    /// Replaces the model with `selection` after every command already sent:
+    /// the old one is dropped first, so its memory is free for the new one.
+    /// Commands sent meanwhile wait for the load.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub fn reload(
+        &self,
+        selection: crate::transcription::models::TranscriptionSelection,
+    ) -> Result<()> {
+        self.commands
+            .send(Command::Reload(selection))
             .map_err(|_| eyre!("transcription engine stopped"))
     }
 
@@ -1119,18 +926,6 @@ pub(crate) fn held<'a>(
     model.matches_selection(selection).then_some(model)
 }
 
-/// The model that answered the last clip, when it may not be the one the
-/// engine holds (Linux: the Neural Engine model's GPU fallback).
-fn take_served(model: &mut Model) -> Option<ServedBy> {
-    #[cfg(target_os = "linux")]
-    return model.take_served();
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = model;
-        None
-    }
-}
-
 /// Transcribes a complete 16 kHz clip with a held model, padded as a
 /// dictation's clip is.
 pub(crate) fn transcribe_clip(model: &mut HeldModel, samples: Vec<f32>) -> Result<String> {
@@ -1138,6 +933,39 @@ pub(crate) fn transcribe_clip(model: &mut HeldModel, samples: Vec<f32>) -> Resul
     return model.transcribe(samples);
     #[cfg(not(target_os = "macos"))]
     model.transcribe_clip(samples)
+}
+
+/// Transcribes a complete 16 kHz clip with a held model and its own native
+/// timings, never estimated ones.
+pub(crate) fn transcribe_clip_timed(
+    model: &mut HeldModel,
+    samples: Vec<f32>,
+) -> Result<crate::transcription::transcript::Transcript, String> {
+    model
+        .transcribe_timed(samples)
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// The finest native timings a held model gives. Dictation never asks; the
+/// local API answers `422` for a level the model cannot produce.
+pub(crate) fn timestamp_level(
+    model: &HeldModel,
+) -> crate::transcription::transcript::TimestampLevel {
+    model.timestamps()
+}
+
+/// A whole clip as a non-macOS dictation run transcribes it: long pauses cut
+/// first, then the minimum duration and the model's trailing silence, so a
+/// trailing pause cannot trim Unified English's closing context (#1629).
+#[cfg(not(target_os = "macos"))]
+fn padded_whole_clip(
+    clip: Vec<f32>,
+    skip_pauses: bool,
+    model: Option<crate::transcription::models::TranscriptionModelId>,
+) -> Vec<f32> {
+    let mut clip = whole_clip(clip, skip_pauses);
+    crate::transcription::pad_gguf_samples(&mut clip, model);
+    clip
 }
 
 impl Drop for TranscriptionEngine {
@@ -1166,6 +994,8 @@ struct Worker {
     model: Option<Model>,
     /// What an unloaded model reloads, before the next command that needs it.
     parked: Option<crate::transcription::models::TranscriptionSelection>,
+    /// Why the last reload failed, so the job it failed can name it.
+    reload_error: Option<String>,
     /// When the last command ended.
     idle_since: Instant,
     running: Running,
@@ -1251,7 +1081,13 @@ impl Worker {
                     if let Some(model) = self.model() {
                         work(model);
                     }
-                    self.publish_streams();
+                }
+                Command::Reload(selection) => {
+                    tracing::info!(model = ?selection.model, "replacing the speech model in place");
+                    self.model = None;
+                    self.parked = Some(selection);
+                    // A failed load stays parked; the next command tries again.
+                    let _ = self.model();
                 }
                 Command::Background { generation, work } => {
                     let current = self.requests.load(Ordering::Acquire) == generation;
@@ -1261,6 +1097,8 @@ impl Worker {
                 // Stale input for a stream that already ended.
                 Command::Feed { .. } | Command::Cancel { .. } => {}
             }
+            // Any command may load or switch the model.
+            self.publish_streams();
             self.publish_selection();
             self.idle_since = Instant::now();
         }
@@ -1327,8 +1165,15 @@ impl Worker {
                     );
                     self.model = Some(model);
                     self.parked = None;
+                    self.reload_error = None;
                 }
-                Err(error) => tracing::warn!(%error, "could not reload the speech model"),
+                Err(error) => {
+                    tracing::warn!(
+                        error = format!("{error:#}"),
+                        "could not reload the speech model"
+                    );
+                    self.reload_error = Some(error.to_string());
+                }
             }
         }
         self.model.as_mut()
@@ -1361,10 +1206,6 @@ impl Worker {
         if job.cancel.is_cancelled() {
             // Its waiter already gave up on it.
             job.finish(Err("transcription was abandoned".into()));
-            return;
-        }
-        if self.model.is_none() && self.parked.is_none() {
-            job.finish(Err(NO_LOCAL_MODEL.into()));
             return;
         }
         let started = Instant::now();
@@ -1446,8 +1287,6 @@ impl Worker {
                         text,
                         source: Source::Stream,
                         finish_ms: started.elapsed().as_millis() as u64,
-                        usage: None,
-                        served: None,
                     })),
                     Err(_) if job.cancel.is_cancelled() => {
                         job.finish(Err("transcription was abandoned".into()));
@@ -1515,7 +1354,11 @@ impl Worker {
     ) {
         self.running.enter(&job.cancel);
         let Some(model) = self.model() else {
-            job.finish(Err("the speech model could not be reloaded".into()));
+            let reason = match &self.reload_error {
+                Some(error) => format!("the speech model could not be reloaded: {error}"),
+                None => "the speech model could not be reloaded".into(),
+            };
+            job.finish(Err(reason));
             return;
         };
         let result = crate::transcription::gguf_session::with_job_cancel(&job.cancel, || {
@@ -1525,8 +1368,6 @@ impl Worker {
             text: text.trim().to_string(),
             source,
             finish_ms: started.elapsed().as_millis() as u64,
-            usage: None,
-            served: take_served(model),
         });
         // An offline run may switch the model (macOS activates a selection).
         self.publish_streams();
@@ -1537,249 +1378,6 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_capture_finishes_on_the_route_its_begin_chose() {
-        use crate::transcription::cloud::{Provider, force_route};
-        let (engine, commands) = TranscriptionEngine::for_test();
-        force_route(None);
-        let stream = engine.begin();
-        assert!(stream.is_some(), "begin chose local, and opened a stream");
-        // The key resolves mid-recording: the finish still goes local.
-        force_route(Some(Provider::Groq));
-        let _pending = engine
-            .finish_with(stream, vec![0.0; 100], Box::new(|_, _| Ok(String::new())))
-            .unwrap();
-        let mut saw_finish = false;
-        while let Ok(command) = commands.try_recv() {
-            saw_finish |= matches!(command, Command::Finish { .. });
-        }
-        assert!(
-            saw_finish,
-            "the finish used begin's decision, not a fresh one"
-        );
-        // The decision is spent: the next capture decides again.
-        assert_eq!(engine.take_route(), Some(Provider::Groq));
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn a_model_less_engine_says_no_local_model_instead_of_a_reload_failure() {
-        let engine = TranscriptionEngine::start_without_model().unwrap();
-        let error = engine
-            .foreground(vec![0.0; 100], Box::new(|_, _| Ok("x".into())))
-            .unwrap()
-            .wait()
-            .unwrap_err();
-        assert_eq!(
-            error,
-            "no local model installed \u{2014} install one in Settings"
-        );
-    }
-
-    #[test]
-    fn a_cloud_routed_capture_opens_no_stream_even_when_the_model_streams() {
-        use crate::transcription::cloud::Provider;
-        let (engine, _commands) = TranscriptionEngine::for_test();
-        assert!(engine.begin_routed(None).is_some());
-        assert!(engine.begin_routed(Some(Provider::Groq)).is_none());
-        assert!(engine.streams_routed(None));
-        assert!(!engine.streams_routed(Some(Provider::Groq)));
-    }
-
-    #[test]
-    fn a_cloud_finish_returns_the_text_and_usage_without_touching_the_model() {
-        use crate::transcription::cloud::Provider;
-        let (engine, commands) = TranscriptionEngine::for_test();
-        let usage = crate::history::UsageRecord {
-            provider: "groq".into(),
-            model: "whisper-large-v3-turbo".into(),
-            audio_seconds: 0.5,
-            words: 2,
-            cost_usd: 0.1,
-        };
-        let expected = usage.clone();
-        let done = engine
-            .finish_cloud(
-                Provider::Groq,
-                vec![0.0; 8_000],
-                Box::new(move |clip| {
-                    assert_eq!(clip.len(), 8_000);
-                    Ok(("hello world".into(), usage))
-                }),
-            )
-            .unwrap()
-            .wait()
-            .unwrap();
-        assert_eq!(done.text, "hello world");
-        assert_eq!(done.source, Source::Cloud);
-        assert_eq!(done.usage, Some(expected));
-        assert!(
-            commands.try_recv().is_err(),
-            "the model's queue saw nothing"
-        );
-    }
-
-    #[test]
-    fn a_failed_cloud_finish_carries_the_pill_text() {
-        use crate::transcription::cloud::Provider;
-        let (engine, _commands) = TranscriptionEngine::for_test();
-        let error = engine
-            .finish_cloud(
-                Provider::Groq,
-                vec![0.0; 100],
-                Box::new(|_| Err("Groq key rejected".into())),
-            )
-            .unwrap()
-            .wait()
-            .unwrap_err();
-        assert_eq!(error, "Groq key rejected");
-    }
-
-    thread_local! {
-        static CLOUD_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    }
-
-    fn fake_cloud(
-        provider: crate::transcription::cloud::Provider,
-        clip: &[f32],
-        _language: Option<&str>,
-    ) -> Result<(String, crate::history::UsageRecord), String> {
-        CLOUD_CALLS.with(|calls| calls.set(calls.get() + 1));
-        Ok((
-            " from the cloud ".into(),
-            crate::history::UsageRecord {
-                provider: provider.id().into(),
-                model: "fake".into(),
-                audio_seconds: clip.len() as f64 / 16_000.0,
-                words: 3,
-                cost_usd: 0.0,
-            },
-        ))
-    }
-
-    /// Finishes a local clip, answers it with `local`, and returns the wait.
-    fn local_finish(
-        fallback: Option<crate::transcription::cloud::Provider>,
-        keys: &'static [crate::transcription::cloud::Provider],
-        local: Result<Transcribed, String>,
-    ) -> Result<Transcribed, String> {
-        use crate::transcription::cloud::{force_fallback, force_keys, force_route};
-        let (engine, commands) = TranscriptionEngine::for_test();
-        force_route(None);
-        force_fallback(fallback);
-        force_keys(keys);
-        CLOUD_CALLS.with(|calls| calls.set(0));
-        let pending = engine
-            .finish_routed(
-                None,
-                vec![0.0; 16_000],
-                Box::new(|_, _| Ok(String::new())),
-                fake_cloud,
-            )
-            .unwrap();
-        let Ok(Command::Finish { job, .. }) = commands.try_recv() else {
-            panic!("the clip went to the local model first");
-        };
-        job.reply.send(Reply::Done(local)).unwrap();
-        pending.wait()
-    }
-
-    #[test]
-    fn a_local_failure_makes_no_cloud_call_while_the_fallback_is_off() {
-        use crate::transcription::cloud::Provider;
-        let result = local_finish(None, &[Provider::Groq], Err("model crashed".into()));
-        assert_eq!(result.unwrap_err(), "model crashed");
-        assert_eq!(CLOUD_CALLS.with(std::cell::Cell::get), 0);
-    }
-
-    #[test]
-    fn a_local_failure_retries_once_on_the_cloud_when_on_with_a_key() {
-        use crate::transcription::cloud::Provider;
-        let done = local_finish(
-            Some(Provider::Groq),
-            &[Provider::Groq],
-            Err("transcription timed out".into()),
-        )
-        .unwrap();
-        assert_eq!(CLOUD_CALLS.with(std::cell::Cell::get), 1);
-        assert_eq!(done.text, "from the cloud");
-        assert_eq!(done.source, Source::Cloud);
-        assert_eq!(done.usage.map(|usage| usage.provider), Some("groq".into()));
-        assert!(done.served.is_none());
-    }
-
-    #[test]
-    fn a_local_failure_without_a_key_surfaces_the_error_and_sends_nothing() {
-        use crate::transcription::cloud::Provider;
-        let result = local_finish(Some(Provider::Groq), &[], Err("model crashed".into()));
-        assert_eq!(result.unwrap_err(), "model crashed");
-        assert_eq!(CLOUD_CALLS.with(std::cell::Cell::get), 0);
-        // A key for some other provider does not stand in for the chosen one.
-        let result = local_finish(
-            Some(Provider::OpenRouter),
-            &[Provider::Groq],
-            Err("model crashed".into()),
-        );
-        assert!(result.is_err());
-        assert_eq!(CLOUD_CALLS.with(std::cell::Cell::get), 0);
-    }
-
-    #[test]
-    fn a_neural_engine_to_gpu_handoff_is_a_local_success_and_stays_local() {
-        use crate::transcription::cloud::Provider;
-        use crate::transcription::models::TranscriptionModelId;
-        let gpu = ServedBy {
-            model: TranscriptionModelId::ParakeetV3,
-            inference_ms: 40,
-        };
-        let done = local_finish(
-            Some(Provider::Groq),
-            &[Provider::Groq],
-            Ok(Transcribed {
-                text: "gpu text".into(),
-                source: Source::Offline,
-                finish_ms: 40,
-                usage: None,
-                served: Some(gpu.clone()),
-            }),
-        )
-        .unwrap();
-        assert_eq!(CLOUD_CALLS.with(std::cell::Cell::get), 0);
-        assert_eq!(done.served, Some(gpu));
-        assert_eq!(done.text, "gpu text");
-    }
-
-    #[test]
-    fn a_failed_cloud_retry_surfaces_the_local_error() {
-        use crate::transcription::cloud::{Provider, force_fallback, force_keys, force_route};
-        fn failing(
-            _: Provider,
-            _: &[f32],
-            _: Option<&str>,
-        ) -> Result<(String, crate::history::UsageRecord), String> {
-            Err("Groq key rejected".into())
-        }
-        let (engine, commands) = TranscriptionEngine::for_test();
-        force_route(None);
-        force_fallback(Some(Provider::Groq));
-        force_keys(&[Provider::Groq]);
-        let pending = engine
-            .finish_routed(
-                None,
-                vec![0.0; 100],
-                Box::new(|_, _| Ok(String::new())),
-                failing,
-            )
-            .unwrap();
-        let Ok(Command::Finish { job, .. }) = commands.try_recv() else {
-            panic!("the clip went to the local model first");
-        };
-        job.reply
-            .send(Reply::Done(Err("model crashed".into())))
-            .unwrap();
-        assert_eq!(pending.wait().unwrap_err(), "model crashed");
-    }
 
     #[test]
     fn source_labels_distinguish_fallbacks() {
@@ -1826,6 +1424,12 @@ mod tests {
         /// Fail every feed once this many samples are in, as a native
         /// stream error would.
         fail_after: Option<usize>,
+        /// Where its finalized text starts, in milliseconds.
+        text_start_ms: Option<u64>,
+        /// Where its finalized text ends, in milliseconds.
+        text_end_ms: Option<u64>,
+        /// Language tags its raw decode carries.
+        tags: Vec<String>,
     }
 
     impl StreamFeed for FakeStream {
@@ -1846,6 +1450,18 @@ mod tests {
                 stable: format!("heard {}", self.fed.len()),
                 tentative: String::new(),
             }
+        }
+
+        fn text_start_ms(&self) -> Option<u64> {
+            self.text_start_ms
+        }
+
+        fn text_end_ms(&self) -> Option<u64> {
+            self.text_end_ms
+        }
+
+        fn language_tags(&self) -> Vec<String> {
+            self.tags.clone()
         }
     }
 
@@ -1891,8 +1507,6 @@ mod tests {
             text: "streamed 8".into(),
             source: Source::Stream,
             finish_ms: 0,
-            usage: None,
-            served: None,
         }));
         assert_eq!(dictation.wait().unwrap().source, Source::Stream);
         // The chunk waits to run after the stream.
@@ -1965,6 +1579,178 @@ mod tests {
         assert!(result.is_err(), "{result:?}");
     }
 
+    /// Quiet pre-roll, 2 s of speech, a 1 s pause, `phrase` samples of
+    /// speech, then the 200 ms tail after the stop.
+    fn speech_pause_phrase(phrase: usize) -> Vec<f32> {
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(32_000));
+        clip.extend(vec![0.0; 16_000]);
+        clip.extend(tone(phrase));
+        clip.extend(vec![0.0; 3_200]);
+        clip
+    }
+
+    fn finish_with_text_end(clip: &[f32], text_end_ms: u64) -> Result<String, String> {
+        finish_with_text_bounds(clip, None, text_end_ms)
+    }
+
+    fn finish_with_text_bounds(
+        clip: &[f32],
+        text_start_ms: Option<u64>,
+        text_end_ms: u64,
+    ) -> Result<String, String> {
+        let mut fake = FakeStream {
+            text_start_ms,
+            text_end_ms: Some(text_end_ms),
+            ..FakeStream::default()
+        };
+        let mut capped = PauseCap::new(&mut fake, 0);
+        for chunk in clip.chunks(1_600) {
+            capped.feed(chunk).unwrap();
+        }
+        let result = finish_stream(&mut capped, clip, clip.len());
+        assert_eq!(fake.fed, clip);
+        result
+    }
+
+    fn finish_with_tags(clip: &[f32], tags: Vec<String>) -> Result<String, String> {
+        let mut fake = FakeStream {
+            text_start_ms: Some(500),
+            text_end_ms: Some(4_200),
+            tags,
+            ..FakeStream::default()
+        };
+        let mut capped = PauseCap::new(&mut fake, 0);
+        for chunk in clip.chunks(1_600) {
+            capped.feed(chunk).unwrap();
+        }
+        let result = finish_stream(&mut capped, clip, clip.len());
+        assert_eq!(fake.fed, clip);
+        result
+    }
+
+    #[test]
+    fn a_stream_that_dropped_a_phrase_after_a_pause_falls_back_to_the_whole_clip() {
+        // #1101: speech, a 1 s pause, a short last phrase, then stop. The
+        // stream heard it all, but its text ended with the first speech.
+        let clip = speech_pause_phrase(12_800);
+        let result = finish_with_text_end(&clip, 2_500);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|reason| reason.contains("speech follows")),
+            "{result:?}"
+        );
+        // Text that reaches the phrase is the stream's to keep.
+        assert_eq!(
+            finish_with_text_end(&clip, 4_200),
+            Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn a_closing_full_stop_at_the_clips_end_does_not_cover_a_dropped_phrase() {
+        // Nemotron 3.5 ASR puts its final full stop on the clip's last frame
+        // (apollo, FLEURS: the last word ended at 8.8 s, the stop at 10.16 s).
+        let token = |text: &str, t1_ms| transcribe_cpp::Token {
+            text: text.into(),
+            t1_ms,
+            ..Default::default()
+        };
+        let tokens = [
+            token(" channels", 2_480),
+            token(",", 2_500),
+            token(".", 4_400),
+            token(" ", 4_400),
+        ];
+        assert_eq!(spoken_text_end_ms(&tokens), Some(2_480));
+        assert_eq!(spoken_text_end_ms(&[token(".", 4_400)]), None);
+    }
+
+    #[test]
+    fn a_short_sound_after_the_text_does_not_discard_the_stream() {
+        // A key click or the stop tone in the tail is not a dropped phrase.
+        let clip = speech_pause_phrase(2_400);
+        assert_eq!(
+            finish_with_text_end(&clip, 2_500),
+            Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn a_stream_that_lost_the_opening_phrase_falls_back_to_the_whole_clip() {
+        // Speech opens at 500 ms; text that starts at 3 s lost its opening.
+        let clip = speech_pause_phrase(12_800);
+        let result = finish_with_text_bounds(&clip, Some(3_000), 4_200);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|reason| reason.contains("precedes")),
+            "{result:?}"
+        );
+        // Text that starts with the speech is the stream's to keep.
+        assert_eq!(
+            finish_with_text_bounds(&clip, Some(500), 4_200),
+            Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn a_short_click_before_the_text_does_not_discard_the_stream() {
+        // A 150 ms click before the speech is not a lost opening.
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(2_400));
+        clip.extend(vec![0.0; 16_000]);
+        clip.extend(tone(12_800));
+        clip.extend(vec![0.0; 3_200]);
+        assert_eq!(
+            finish_with_text_bounds(&clip, Some(1_600), 2_500),
+            Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn a_punctuation_token_does_not_start_the_streams_text() {
+        let token = |text: &str, t0_ms| transcribe_cpp::Token {
+            text: text.into(),
+            t0_ms,
+            ..Default::default()
+        };
+        let tokens = [
+            token(".", 40),
+            token(" channels", 2_480),
+            token(" later", 3_000),
+        ];
+        assert_eq!(spoken_text_start_ms(&tokens), Some(2_480));
+        assert_eq!(spoken_text_start_ms(&[token(".", 40)]), None);
+    }
+
+    #[test]
+    fn a_stream_that_switched_language_falls_back_to_the_whole_clip() {
+        assert_eq!(language_tags("<en-US> hello <en-US> there"), ["<en-US>"]);
+        assert_eq!(
+            language_tags("<en-US> hello <de-DE>"),
+            ["<en-US>", "<de-DE>"]
+        );
+        let clip = speech_pause_phrase(12_800);
+        // One tag repeated, as one per segment, is not a switch.
+        let tags = |raw: &str| {
+            language_tags(raw)
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        let same = finish_with_tags(&clip, tags("<en-US> hello <en-US>"));
+        assert_eq!(same, Ok(format!("streamed {}", clip.len())));
+        let switched = finish_with_tags(&clip, tags("<en-US> hello <de-DE>"));
+        assert!(
+            switched
+                .as_ref()
+                .is_err_and(|reason| reason.contains("switched language from <en-US> to <de-DE>")),
+            "{switched:?}"
+        );
+    }
+
     #[test]
     fn skipping_pauses_cuts_a_whole_clips_long_pauses_to_their_ends() {
         // #899: quiet pre-roll, speech, a 1 s pause, speech, a 10 s pause,
@@ -2018,6 +1804,36 @@ mod tests {
             clip.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
         );
         assert!(whole_clip(clip.clone(), true).len() < clip.len());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn a_whole_clip_is_padded_after_cutting_its_trailing_pause() {
+        use crate::transcription::UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES;
+        use crate::transcription::models::TranscriptionModelId;
+
+        // #1629: quiet pre-roll, speech, then a 5 s trailing pause. Cutting
+        // the pause must leave the 400 ms of Unified English silence after
+        // the cut, where nothing can trim it.
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 80_000]);
+        let cut = whole_clip(clip.clone(), true);
+        let cut_len = cut.len();
+        assert_eq!(cut_len, 8_000 + 16_000 + PAUSE_HEAD_SAMPLES);
+
+        let padded = padded_whole_clip(
+            clip,
+            true,
+            Some(TranscriptionModelId::ParakeetUnifiedEnglish),
+        );
+
+        assert_eq!(
+            padded.len(),
+            cut_len + UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES
+        );
+        assert_eq!(padded[..cut_len], cut[..]);
+        assert!(padded[cut_len..].iter().all(|&sample| sample == 0.0));
     }
 
     fn assert_quiet_speech_is_kept(speech_db: f32, noise_db: f32, dc_offset: f32) {
@@ -2352,8 +2168,6 @@ mod tests {
                 text: "late but fine".into(),
                 source: Source::Offline,
                 finish_ms: 0,
-                usage: None,
-                served: None,
             }));
         });
         assert_eq!(pending.wait().unwrap().text, "late but fine");
@@ -2409,6 +2223,33 @@ mod tests {
         assert_eq!(
             pending.job,
             JOB_DEADLINE + Duration::from_secs(30 * u64::from(JOB_SECONDS_PER_AUDIO_SECOND))
+        );
+    }
+
+    #[test]
+    fn a_parked_engine_holds_its_selection_and_reloads_it_before_the_first_job() {
+        // A language no model supports fails the reload deterministically,
+        // without depending on a model installed on the test machine.
+        let selection = crate::transcription::models::TranscriptionSelection {
+            language: "zz".into(),
+            ..Default::default()
+        };
+        let engine = TranscriptionEngine::start_parked(selection.clone()).unwrap();
+        assert!(engine.holds(&selection), "the parked model counts as held");
+        assert!(!engine.streams(), "an unusable selection cannot stream");
+        let transcribed = engine
+            .finish_with(
+                None,
+                Vec::new(),
+                Box::new(|_, _| panic!("a parked engine must reload its model first")),
+            )
+            .unwrap()
+            .wait();
+        assert!(
+            transcribed
+                .unwrap_err()
+                .starts_with("the speech model could not be reloaded"),
+            "the failure names why the reload failed"
         );
     }
 

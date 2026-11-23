@@ -1,4 +1,5 @@
-//! Permissions step for `"Prototypes/Onboarding/First run"`:
+//! The permission steps of `"Prototypes/Onboarding/First run"`: the
+//! microphone before the practice and Accessibility after it, featuring:
 //!
 //! - One `440 pt` column shared by Hex's setup card, System Settings, and the
 //!   floating drag guide, with every app icon aligned on one vertical spine
@@ -11,7 +12,9 @@
 //!   Settings. Then the Hex row lifts cleanly out of that guide into an
 //!   expanding slot in System Settings' Accessibility list.
 
-use rune::{Anim, Color, El, Spring, TextStyle, Transition, col, el, icon, row, text};
+use rune::{
+    Anim, Color, El, MotionIntent, Spring, TextStyle, Transition, col, el, icon, row, text,
+};
 use rune_kit::{Button, ButtonVariant, glyphs};
 
 use super::super::controls::{Paint, PushSize};
@@ -20,12 +23,24 @@ use super::flows::continue_button;
 use super::hex_meter::hex_meter;
 use super::landing::{LEAD, Motion, arrives, title_font};
 use super::live::Live;
-use super::stories::Onboard;
+use super::stories::{Onboard, Step};
 use crate::desktop::i18n::tr;
 use crate::desktop::onboarding::{ItemStatus, SetupItem};
 
 /// Total duration of the automated permissions step.
 pub(crate) const PERMISSIONS_SECS: f64 = 7.2;
+/// The automated microphone step.
+pub(crate) const MIC_SECS: f64 = MIC_FLOAT + FLOAT_OFF + 0.05;
+/// An allowed permission's check holds this long; then its card lets go
+/// and floats off upward for this long before the next page comes in.
+pub(crate) const GRANTED_BEAT: f64 = 0.6;
+pub(crate) const FLOAT_OFF: f64 = 0.7;
+const MIC_FLOAT: f64 = MIC_GRANT + GRANTED_BEAT;
+const AX_FLOAT: f64 = SETTINGS_CLOSE + 0.2;
+/// Where the Accessibility step starts on the shared timeline, and how
+/// long it then runs.
+pub(crate) const AX_SHIFT: f64 = AX_TRAY_OPEN - 0.6;
+pub(crate) const AX_SECS: f64 = PERMISSIONS_SECS - AX_SHIFT;
 
 const COL_W: f32 = 440.0;
 const STAGE_H: f32 = 424.0;
@@ -43,6 +58,7 @@ const SWITCH_ON: f64 = 4.90;
 pub(crate) const AX_GRANT: f64 = 5.15;
 const SETTINGS_CLOSE: f64 = 5.80;
 const CONTINUE_AT: f64 = 6.00;
+const MIC_CONTINUE: f64 = 2.45;
 
 // Unified geometry inside the `440 pt` stage.
 const ROW_H: f32 = 58.0;
@@ -58,6 +74,7 @@ const ROW_PX: f32 = 10.0; // App icons sit at `16.0 + 10.0 = 26.0` everywhere!
 const GUIDE_Y: f32 = SETTINGS_Y + SETTINGS_H + 10.0; // 344.0
 const GUIDE_H: f32 = 70.0;
 const PROMPT_W: f32 = 276.0;
+const MIC_STAGE_H: f32 = ROW_H + 18.0 + 214.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PermState {
@@ -76,6 +93,41 @@ pub(crate) fn state_at(e: f64, ask: f64, grant: f64, primary: bool) -> PermState
     }
 }
 
+/// How far an allowed card has floated off, `e` seconds into its page.
+fn float_u(e: f64, from: f64) -> f32 {
+    ((e - from) / FLOAT_OFF).clamp(0.0, 1.0) as f32
+}
+
+/// An allowed card letting go: a small dip as it detaches, then up and
+/// away, faster as it goes, shrinking and fading into the void.
+fn float_off(card: El, u: f32, reduced: bool) -> El {
+    if u <= 0.0 {
+        return card;
+    }
+    if reduced {
+        return card.opacity(1.0 - u).opacity_motion(Anim::INSTANT);
+    }
+    const DIP: f32 = 0.16;
+    let (y, scale) = if u < DIP {
+        let d = (std::f32::consts::PI * u / DIP).sin();
+        (5.0 * d, 1.0 + 0.025 * d)
+    } else {
+        let v = (u - DIP) / (1.0 - DIP);
+        (-460.0 * v * v - 40.0 * v, 1.0 - 0.14 * v)
+    };
+    let v = ((u - DIP) / (1.0 - DIP)).max(0.0);
+    card.offset(0.0, y)
+        .offset_motion(Anim::INSTANT)
+        .scale(scale)
+        .scale_motion(Anim::INSTANT)
+        .rotate(-0.05 * v * v)
+        .rotate_motion(Anim::INSTANT)
+        .blur(6.0 * v * v)
+        .blur_motion(Anim::INSTANT)
+        .opacity(1.0 - smoothstep((v - 0.25) / 0.75))
+        .opacity_motion(Anim::INSTANT)
+}
+
 fn smoothstep(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
@@ -86,33 +138,43 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 }
 
 pub(super) fn page(p: Paint, s: &Onboard) -> El {
+    let which = if s.step == Step::Accessibility {
+        Perm::Accessibility
+    } else {
+        Perm::Microphone
+    };
     if let Some(live) = &s.live {
-        return live_page(p, live, s.motion);
+        return live_page(p, live, s, which);
     }
     let e = s.permissions_from.map_or(0.0, |from| s.now - from);
     let reduced = s.reduced.get();
-    let mic = state_at(e, MIC_ASK, MIC_GRANT, true);
-    let ax = state_at(e, AX_ESCAPE, AX_GRANT, mic == PermState::Allowed);
-
-    let head = heading(
-        p,
-        s.motion,
-        "Let WordInk hear you and type for you",
-        "macOS asks once. You can change these any time in System Settings.",
-    );
-
+    let (stage, continue_at) = match which {
+        Perm::Microphone => (
+            microphone_stage(p, e, state_at(e, MIC_ASK, MIC_GRANT, true), reduced),
+            MIC_CONTINUE,
+        ),
+        // Accessibility joins the shared timeline where its tray opens.
+        Perm::Accessibility => {
+            let e = e + AX_SHIFT;
+            let ax = state_at(e, AX_ESCAPE, AX_GRANT, true);
+            (
+                stage(p, e, PermState::Allowed, ax, reduced),
+                CONTINUE_AT - AX_SHIFT,
+            )
+        }
+    };
     col()
         .key("permissions")
         .gap(22.0)
         .items_center()
-        .child(head)
-        .child(s.motion.staggered(stage(p, e, mic, ax, reduced), 1.0, 8.0))
+        .child(heading(p, s.motion, which))
+        .child(s.motion.staggered(stage, 1.0, 8.0))
         .child(
             row()
                 .key("action")
                 .h(ACTION_H)
                 .center()
-                .child(if e >= CONTINUE_AT {
+                .child(if e >= continue_at {
                     continue_button(p, s)
                 } else {
                     el().key("none")
@@ -120,10 +182,36 @@ pub(super) fn page(p: Paint, s: &Onboard) -> El {
         )
 }
 
-fn heading(p: Paint, motion: Motion, title: &str, lead: &str) -> El {
+/// Which permission a page asks for: the microphone before the practice,
+/// Accessibility after it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Perm {
+    Microphone,
+    Accessibility,
+}
+
+fn heading(p: Paint, motion: Motion, which: Perm) -> El {
+    let (title, lead) = match which {
+        Perm::Microphone => (
+            tr("Let Hex hear you"),
+            tr("Hex listens only while you hold your shortcut."),
+        ),
+        Perm::Accessibility => (
+            tr("Make it work everywhere"),
+            tr("Let Hex notice your shortcut and type your words in any app."),
+        ),
+    };
+    heading_with(p, motion, which, title, lead)
+}
+
+fn heading_with(p: Paint, motion: Motion, which: Perm, title: &str, lead: &str) -> El {
+    let key = match which {
+        Perm::Microphone => "microphone-head",
+        Perm::Accessibility => "accessibility-head",
+    };
     motion.heading(
         col()
-            .key("permissions-head")
+            .key(key)
             .gap(8.0)
             .items_center()
             .child(text(title).key("title").font(title_font(p)).color(p.text()))
@@ -137,11 +225,47 @@ fn heading(p: Paint, motion: Motion, title: &str, lead: &str) -> El {
     )
 }
 
-/// The real first run's permissions, following what the OS reports. macOS:
-/// its own prompt and System Settings with Hex's guide, for Microphone and
-/// Accessibility. Windows asks nothing, so this page shows only while its
-/// microphone privacy switch is off, with the one row that opens Settings.
-fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
+/// The microphone alone: Hex's row, then macOS's prompt under it.
+fn microphone_stage(p: Paint, e: f64, mic: PermState, reduced: bool) -> El {
+    let k = p.k;
+    let card = col()
+        .key("setup-card")
+        .motion_intent(MotionIntent::BOUNCE)
+        .absolute(0.0, 0.0)
+        .w(COL_W)
+        .radius(k.radius.lg)
+        .fill(k.c.bg_base)
+        .border(p.hair, k.c.border_weak)
+        .child(perm_row(
+            p,
+            "mic-row",
+            &glyphs::MIC,
+            "Microphone",
+            "Hears you while you hold the shortcut",
+            perm_pill(p, "mic-pill", mic),
+        ));
+    let mut stage = el()
+        .key("microphone-stage")
+        .size(COL_W, MIC_STAGE_H)
+        .child(float_off(
+            k.elevate(card, &k.elevation.raised),
+            float_u(e, MIC_FLOAT),
+            reduced,
+        ));
+    if (MIC_ASK..MIC_GRANT).contains(&e) {
+        stage = stage.child(
+            microphone_prompt(p, e >= MIC_PRESS)
+                .absolute((COL_W - PROMPT_W) * 0.5, ROW_H + 18.0)
+                .transition(arrives()),
+        );
+    }
+    stage
+}
+
+/// The real first run's permissions: macOS's own prompt and System Settings
+/// with Hex's guide, and the rows follow what macOS reports.
+fn live_page(p: Paint, live: &Live, s: &Onboard, which: Perm) -> El {
+    let motion = s.motion;
     if let Some(paste) = live.paste {
         return paste_page(p, paste, motion);
     }
@@ -152,55 +276,63 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
         ItemStatus::Denied | ItemStatus::Waiting if windows => {
             tr("Turn on “Let desktop apps access your microphone” in Windows Settings.")
         }
-        ItemStatus::Denied => tr("Switch on WordInk in System Settings"),
-        _ => tr("Hears you only while you hold the shortcut"),
+        ItemStatus::Denied => tr("Switch on Hex in System Settings"),
+        _ if live.release_microphone => tr("Opens only while you dictate"),
+        _ if windows => tr("Ready the moment you press the shortcut"),
+        _ => tr(
+            "Ready the moment you press the shortcut. macOS shows the mic in use while Hex runs; you can change that in Settings",
+        ),
     };
-    let mut card = col()
-        .key("setup-card")
-        .w(COL_W)
-        .radius(k.radius.lg)
-        .fill(k.c.bg_base)
-        .border(p.hair, k.c.border_weak)
-        .child(perm_row(
+    let mic_row = perm_row(
+        p,
+        "mic-row",
+        &glyphs::MIC,
+        tr("Microphone"),
+        mic_desc,
+        live_pill(
             p,
-            "mic-row",
-            &glyphs::MIC,
-            tr("Microphone"),
-            mic_desc,
-            live_pill(
-                p,
-                "mic-pill",
-                live,
-                live.microphone,
-                true,
-                SetupItem::Microphone,
-            ),
-        ));
-    if live.accessibility_row {
-        let ax_desc = match live.accessibility {
-            ItemStatus::Stale => tr("An older WordInk entry can keep this off"),
-            ItemStatus::Waiting => tr("Switch on WordInk in System Settings"),
-            ItemStatus::Restart => tr("Turns on when WordInk restarts"),
-            _ => tr("Notices the shortcut and pastes your words in any app"),
-        };
-        card = card.child(separator(p, "sep0")).child(perm_row(
-            p,
-            "ax-row",
-            &glyphs::CURSOR_TEXT,
-            super::super::platform_settings::accessibility_name(live.accessibility_renamed),
-            ax_desc,
-            live_pill(
-                p,
-                "ax-pill",
-                live,
-                live.accessibility,
-                mic_ready,
-                SetupItem::Accessibility,
-            ),
-        ));
-    }
+            "mic-pill",
+            live,
+            live.microphone,
+            true,
+            SetupItem::Microphone,
+        ),
+    );
+    let card = card(p);
+    // An allowed microphone has already floated off by Accessibility.
+    let card = match which {
+        Perm::Accessibility if mic_ready => card,
+        _ => card.child(mic_row),
+    };
+    let card = match which {
+        Perm::Accessibility if live.accessibility_row => {
+            let ax_desc = match live.accessibility {
+                ItemStatus::Stale => tr("An older Hex entry can keep this off"),
+                ItemStatus::Waiting => tr("Switch on Hex in System Settings"),
+                ItemStatus::Restart => tr("Turns on when Hex restarts"),
+                _ => tr("Notices the shortcut and pastes your words"),
+            };
+            card.children((!mic_ready).then(|| separator(p, "sep0")))
+                .child(perm_row(
+                    p,
+                    "ax-row",
+                    &glyphs::CURSOR_TEXT,
+                    super::super::platform_settings::accessibility_name(live.accessibility_renamed),
+                    ax_desc,
+                    live_pill(
+                        p,
+                        "ax-pill",
+                        live,
+                        live.accessibility,
+                        mic_ready,
+                        SetupItem::Accessibility,
+                    ),
+                ))
+        }
+        _ => card,
+    };
     let action = if live.restart {
-        Button::new(tr("Restart WordInk"))
+        Button::new(tr("Restart Hex"))
             .variant(ButtonVariant::Contrast)
             .on_press(super::live::restart_hex)
             .build_push(k)
@@ -210,20 +342,20 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
     } else {
         el().key("none")
     };
-    let (title, lead) = if windows {
-        (
-            tr("Let WordInk hear you"),
+    let head = if windows {
+        heading_with(
+            p,
+            motion,
+            which,
+            tr("Let Hex hear you"),
             tr("Windows has the microphone turned off for desktop apps."),
         )
     } else {
-        (
-            tr("Let WordInk hear you and type for you"),
-            tr("macOS asks once. You can change these any time in System Settings."),
-        )
+        heading(p, motion, which)
     };
     let relaunch = live.relaunch_failed.then(|| {
         text(tr(
-            "Quit and reopen WordInk to finish setup. macOS applies some permissions only after a restart.",
+            "Quit and reopen Hex to finish setup. macOS applies some permissions only after a restart.",
         ))
         .key("relaunch-notice")
         .font(LEAD)
@@ -237,30 +369,14 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
         .key("permissions")
         .gap(22.0)
         .items_center()
-        .child(heading(p, motion, title, lead))
-        .child(motion.staggered(k.elevate(card, &k.elevation.raised), 1.0, 8.0))
+        .child(head)
+        .child(float_off(
+            motion.staggered(k.elevate(card, &k.elevation.raised), 1.0, 8.0),
+            live.floated(which == Perm::Accessibility, s.now),
+            s.reduced.get(),
+        ))
         .children(relaunch)
-        .child(
-            row()
-                .key("action")
-                .h(ACTION_H)
-                .gap(10.0)
-                .center()
-                .child(action)
-                .children(finish_later(p, live)),
-        )
-}
-
-/// "Finish later" on the short first run's permissions: on to the app,
-/// which keeps a "Set up dictation" row.
-fn finish_later(p: Paint, live: &Live) -> Option<El> {
-    live.engine_steps.then(|| {
-        Button::new(tr("Finish later"))
-            .variant(ButtonVariant::Ghost)
-            .on_press(super::live::finish_later)
-            .build_push(p.k)
-            .key("finish-later")
-    })
+        .child(row().key("action").h(ACTION_H).center().child(action))
 }
 
 /// GNOME and KDE on Wayland: Hex pastes through the desktop's
@@ -269,9 +385,9 @@ fn finish_later(p: Paint, live: &Live) -> Option<El> {
 fn paste_page(p: Paint, paste: PasteAccess, motion: Motion) -> El {
     let k = p.k;
     let desc = if paste == PasteAccess::Declined {
-        tr("Without it, WordInk copies your words and you press Ctrl+V.")
+        tr("Without it, Hex copies your words and you press Ctrl+V.")
     } else {
-        tr("WordInk only sends the paste keystroke. It never sees your screen.")
+        tr("Hex only sends the paste keystroke. It never sees your screen.")
     };
     let allow = |label: &str, primary: bool| {
         Button::new(label)
@@ -291,20 +407,14 @@ fn paste_page(p: Paint, paste: PasteAccess, motion: Motion) -> El {
         PasteAccess::Allowed => perm_pill(p, "paste-pill", PermState::Allowed),
         PasteAccess::Declined => allow(tr("Try again"), false),
     };
-    let card = col()
-        .key("setup-card")
-        .w(COL_W)
-        .radius(k.radius.lg)
-        .fill(k.c.bg_base)
-        .border(p.hair, k.c.border_weak)
-        .child(perm_row(
-            p,
-            "paste-row",
-            &glyphs::CURSOR_TEXT,
-            tr("Paste into apps"),
-            desc,
-            control,
-        ));
+    let card = card(p).child(perm_row(
+        p,
+        "paste-row",
+        &glyphs::CURSOR_TEXT,
+        tr("Paste into apps"),
+        desc,
+        control,
+    ));
     let action = if paste == PasteAccess::Declined {
         Button::new(tr("Continue"))
             .variant(ButtonVariant::Contrast)
@@ -325,13 +435,13 @@ fn paste_page(p: Paint, paste: PasteAccess, motion: Motion) -> El {
                 .gap(8.0)
                 .items_center()
                 .child(
-                    text(tr("Let WordInk paste for you"))
+                    text(tr("Let Hex paste for you"))
                         .key("title")
                         .font(title_font(p))
                         .color(p.text()),
                 )
                 .child(
-                    text(tr("WordInk needs this to type your words into your apps. Your desktop asks once, and may call it remote desktop."))
+                    text(tr("Hex needs this to type your words into your apps. Your desktop asks once, and may call it remote desktop."))
                         .key("lead")
                         .font(LEAD)
                         .color(p.muted())
@@ -401,18 +511,13 @@ fn stage(p: Paint, e: f64, mic: PermState, ax: PermState, reduced: bool) -> El {
     let mut stage = el().key("permissions-stage").size(COL_W, STAGE_H);
 
     // 1. Hex's own permissions card at the top of the `440 pt` column.
-    stage = stage.child(setup_card(p, mic, ax, tray_open, escaped));
+    stage = stage.child(float_off(
+        setup_card(p, mic, ax, tray_open, escaped),
+        float_u(e, AX_FLOAT),
+        reduced,
+    ));
 
-    // 2. macOS Microphone permission alert (`MIC_ASK .. MIC_GRANT`).
-    if (MIC_ASK..MIC_GRANT).contains(&e) {
-        stage = stage.child(
-            microphone_prompt(p, e >= MIC_PRESS)
-                .absolute((COL_W - PROMPT_W) * 0.5, 2.0 * ROW_H + 18.0)
-                .transition(arrives()),
-        );
-    }
-
-    // 3. System Settings (`Privacy & Security › Accessibility`).
+    // 2. System Settings (`Privacy & Security › Accessibility`).
     if settings_open {
         stage = stage.child(
             settings_window(p, e, reduced)
@@ -421,7 +526,7 @@ fn stage(p: Paint, e: f64, mic: PermState, ax: PermState, reduced: bool) -> El {
         );
     }
 
-    // 4. The Accessibility helper panel: sits inside Hex's card at `AX_TRAY_OPEN`,
+    // 3. The Accessibility helper panel: sits inside Hex's card at `AX_TRAY_OPEN`,
     //    then escapes out of the card at `AX_ESCAPE` and floats down to dock
     //    underneath System Settings (`GUIDE_Y`), then launches the drag row!
     if tray_open {
@@ -434,9 +539,9 @@ fn stage(p: Paint, e: f64, mic: PermState, ax: PermState, reduced: bool) -> El {
 fn setup_card(p: Paint, mic: PermState, ax: PermState, tray_open: bool, escaped: bool) -> El {
     let k = p.k;
     let ax_desc = if ax == PermState::Asking {
-        "Drag WordInk into System Settings below"
+        "Drag Hex into System Settings below"
     } else {
-        "Notices the shortcut and pastes your words in any app"
+        "Notices the shortcut and pastes your words"
     };
     let mut card = col()
         .key("setup-card")
@@ -499,7 +604,19 @@ fn socket_outline(p: Paint, escaped: bool) -> El {
         }))
 }
 
-fn separator(p: Paint, key: &str) -> El {
+/// Hex's setup card in the first run's column: the permissions, and the
+/// model step's found models.
+pub(super) fn card(p: Paint) -> El {
+    let k = p.k;
+    col()
+        .key("setup-card")
+        .w(COL_W)
+        .radius(k.radius.lg)
+        .fill(k.c.bg_base)
+        .border(p.hair, k.c.border_weak)
+}
+
+pub(super) fn separator(p: Paint, key: &str) -> El {
     el().key(key).h(p.hair).mx(16.0).fill(p.k.c.border_muted)
 }
 
@@ -632,7 +749,7 @@ fn microphone_prompt(p: Paint, pressed: bool) -> El {
         .border(p.hair, k.c.border_weak)
         .child(badge)
         .child(
-            text("“WordInk” would like to access the microphone.")
+            text("“Hex” would like to access the microphone.")
                 .key("title")
                 .font(TextStyle {
                     weight: if k.dark { 560.0 } else { 600.0 },
@@ -644,7 +761,7 @@ fn microphone_prompt(p: Paint, pressed: bool) -> El {
                 .w(PROMPT_W - 36.0),
         )
         .child(
-            text("WordInk listens only while you hold your shortcut.")
+            text("Hex listens only while you hold your shortcut.")
                 .key("body")
                 .font(k.ty.small)
                 .color(p.muted())
@@ -719,7 +836,7 @@ fn settings_window(p: Paint, e: f64, reduced: bool) -> El {
             p,
             "raycast",
             "Raycast",
-            squircle_icon(super::super::brand::ember(dark, 9)),
+            squircle_icon(rune_theme_opencode::ember(dark, 9)),
             true,
         ))
         .child(
@@ -745,7 +862,7 @@ fn settings_window(p: Paint, e: f64, reduced: bool) -> El {
         );
         if landed {
             list = list.child(
-                settings_app_row(p, "hex-landed", "WordInk", hex_app_icon(p), e >= SWITCH_ON)
+                settings_app_row(p, "hex-landed", "Hex", hex_app_icon(p), e >= SWITCH_ON)
                     .transition(Transition::opacity()),
             );
         } else {
@@ -811,7 +928,7 @@ fn escaping_guide_and_drag(p: Paint, e: f64, reduced: bool) -> El {
     let tile_w = LIST_W;
 
     let instruction = (esc_u > 0.35).then(|| {
-        text("↑  Drag WordInk into the Accessibility list above")
+        text("↑  Drag Hex into the Accessibility list above")
             .key("guide-instruction")
             .font(k.ty.small_medium)
             .color(p.text())
@@ -843,17 +960,21 @@ fn escaping_guide_and_drag(p: Paint, e: f64, reduced: bool) -> El {
             .offset_motion(Anim::INSTANT)
             .child(hex_app_icon(p))
             .child(
-                text("WordInk")
+                text("Hex")
                     .key("name")
                     .font(k.ty.small_medium)
                     .color(p.text()),
             )
             .child(el().key("sp").grow(1.0))
+            // It fades as the panel starts to escape rather than dropping
+            // out in one frame; it sits last, so nothing moves into its place.
             .children((esc_u < 0.25).then(|| {
                 text("Accessibility helper")
                     .key("sub")
                     .font(k.ty.small)
                     .color(p.faint())
+                    .opacity(1.0 - smoothstep(esc_u / 0.25))
+                    .opacity_motion(Anim::INSTANT)
             }))
     };
 
@@ -932,7 +1053,7 @@ fn dragged_row(p: Paint, u: f32) -> El {
         .offset_motion(Anim::INSTANT)
         .child(hex_app_icon(p))
         .child(
-            text("WordInk")
+            text("Hex")
                 .key("name")
                 .font(k.ty.small_medium)
                 .color(p.text()),

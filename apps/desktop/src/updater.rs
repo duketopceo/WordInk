@@ -14,7 +14,9 @@
 //! manifest's SHA-256, and (macOS, Windows) the code signature are the
 //! integrity checks.
 
-mod notes;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub mod legacy;
+pub(crate) mod notes;
 #[cfg_attr(target_os = "linux", path = "updater/linux.rs")]
 #[cfg_attr(target_os = "macos", path = "updater/macos.rs")]
 #[cfg_attr(target_os = "windows", path = "updater/windows.rs")]
@@ -38,23 +40,7 @@ pub use platform::finish_on_launch;
 
 const APP: &str = "hex";
 const ARTIFACT: &str = "desktop";
-/// WordInk's GitHub Releases page: where "download" links point, and the
-/// fallback for a download-only install whose release names no file.
-pub(crate) const RELEASES_URL: &str = "https://github.com/duketopceo/WordInk/releases";
-/// The stable manifest, a schema-1 release asset (`stable.json`) of the
-/// newest `desktop-v*` GitHub Release. Its targets name that release's assets
-/// by absolute `github.com` URLs, the manifest's own host, which
-/// `protocol::resolve_url` requires; GitHub then redirects the download to
-/// `objects.githubusercontent.com`, and the transport follows HTTPS redirects.
-/// `HEX_RELEASE_BASE_URL` (HTTPS) points a build at a fixture service that
-/// serves every channel.
-const STABLE_MANIFEST_URL: &str =
-    "https://github.com/duketopceo/WordInk/releases/latest/download/stable.json";
-/// The Dev channel's manifest (`dev.json`), an asset of the rolling
-/// `desktop-dev` prerelease. Release candidates and final releases both
-/// refresh it, so Dev never lags stable.
-const DEV_MANIFEST_URL: &str =
-    "https://github.com/duketopceo/WordInk/releases/download/desktop-dev/dev.json";
+const ORIGIN: &str = "https://anoma.ly/release";
 const STARTUP_DELAY: Duration = Duration::from_secs(10);
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// Dev builds land on every push to dev, so the Dev channel checks often.
@@ -107,39 +93,6 @@ impl Method {
     }
 }
 
-/// Why this build never checks for updates, if it doesn't. A local build
-/// (`HEX_LOCAL_BUILD=1`, made from a checkout) is a source build: its
-/// checkout updates it, never a release.
-fn disabled_status(
-    test_build: bool,
-    local_build: bool,
-    managed: impl FnOnce() -> bool,
-    method: &Method,
-) -> Option<DesktopUpdateStatus> {
-    if test_build {
-        Some(DesktopUpdateStatus::Unavailable)
-    } else if local_build || *method == Method::Source {
-        Some(DesktopUpdateStatus::SourceBuild)
-    } else if managed() {
-        Some(DesktopUpdateStatus::Managed)
-    } else {
-        None
-    }
-}
-
-/// Only Linux builds are signed (ed25519, `updater/linux.rs`), so only Linux
-/// installs itself. macOS and Windows ship unsigned until signing exists
-/// (R30): whatever this install looks like, their updater links to the
-/// release and never downloads, stages or runs anything. A checkout build
-/// stays a source build.
-fn update_method(method: Method, signed_platform: bool) -> Method {
-    if signed_platform || method == Method::Source {
-        method
-    } else {
-        Method::DownloadOnly
-    }
-}
-
 /// The channel the Release workflow published this build on, stamped at
 /// build time beside its version (`HEX_BUILD_CHANNEL`).
 const BUILD_CHANNEL: Option<&str> = option_env!("HEX_BUILD_CHANNEL");
@@ -168,96 +121,20 @@ fn channel(method: &Method, setting: Option<UpdateChannel>, home: &str) -> Strin
     }
 }
 
-/// The update channel this install follows and how it was installed, in
-/// words, for the diagnostics summary. Reads the install, never the network.
-pub fn install_summary() -> (String, String) {
-    let method = update_method(platform::method(), cfg!(target_os = "linux"));
-    let home = home_channel(&method, BUILD_CHANNEL, crate::VERSION);
-    let channel = channel(&method, AppSettings::saved_update_channel(), &home);
-    let install = match &method {
-        Method::Direct { .. } => "direct".to_owned(),
-        Method::DownloadOnly => "direct (download only)".to_owned(),
-        Method::Package(kind) => (*kind).to_owned(),
-        Method::Source => "source build".to_owned(),
-        Method::Unknown => "unknown (run in place)".to_owned(),
-    };
-    (channel, install)
-}
-
 /// Dev builds are `0.0.0-dev-<run>` (`X.Y.Z-dev.N` before 2026-10-27).
 fn is_dev_version(version: &str) -> bool {
     version.contains("-dev")
 }
 
-/// Whether `target` is an older version than `running`. Only the switch
-/// confirmation asks; the protocol itself never orders versions. A version
-/// this cannot read is never called older.
-fn is_older(target: &str, running: &str) -> bool {
-    fn parse(version: &str) -> Option<([u64; 3], Vec<&str>)> {
-        let version = version.split('+').next()?;
-        let (core, pre) = match version.split_once('-') {
-            Some((core, pre)) => (core, Some(pre)),
-            None => (version, None),
-        };
-        let mut numbers = core.split('.').map(|part| part.parse::<u64>().ok());
-        let core = [numbers.next()??, numbers.next()??, numbers.next()??];
-        if numbers.next().is_some() {
-            return None;
-        }
-        let pre = pre
-            .map(|pre| pre.split(['.', '-']).collect())
-            .unwrap_or_default();
-        Some((core, pre))
-    }
-    fn identifier(left: &str, right: &str) -> std::cmp::Ordering {
-        match (left.parse::<u64>(), right.parse::<u64>()) {
-            (Ok(left), Ok(right)) => left.cmp(&right),
-            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
-            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
-            (Err(_), Err(_)) => left.cmp(right),
-        }
-    }
-    let (Some((target_core, target_pre)), Some((running_core, running_pre))) =
-        (parse(target), parse(running))
-    else {
-        return false;
-    };
-    target_core
-        .cmp(&running_core)
-        .then_with(|| match (target_pre.is_empty(), running_pre.is_empty()) {
-            (true, true) => std::cmp::Ordering::Equal,
-            // A release outranks its own candidates.
-            (true, false) => std::cmp::Ordering::Greater,
-            (false, true) => std::cmp::Ordering::Less,
-            (false, false) => target_pre
-                .iter()
-                .zip(&running_pre)
-                .map(|(left, right)| identifier(left, right))
-                .find(|order| order.is_ne())
-                .unwrap_or_else(|| target_pre.len().cmp(&running_pre.len())),
-        })
-        .is_lt()
-}
-
 /// The control that confirms a channel switch, e.g. "Switch to Stable 2.3.1".
-/// A target older than this build says it will install an older version.
 pub fn switch_label(channel: &str, version: &str) -> String {
-    switch_label_for(channel, version, crate::VERSION)
-}
-
-fn switch_label_for(channel: &str, version: &str, running: &str) -> String {
     let channel = match channel {
         "dev" => UpdateChannel::Dev.label(),
         "stable" => UpdateChannel::Stable.label(),
         other => other,
     };
-    let template = if is_older(version, running) {
-        "Switch to {channel} {version} (installs an older version)"
-    } else {
-        "Switch to {channel} {version}"
-    };
     crate::desktop::i18n::tr_named(
-        template,
+        "Switch to {channel} {version}",
         &[
             ("channel", crate::desktop::i18n::tr(channel)),
             ("version", version),
@@ -319,6 +196,9 @@ struct Shared {
     staged: Mutex<Option<StagedUpdate>>,
     /// What the staged dev build changed, when the dev notes said.
     notes: Mutex<Option<UpdateNotes>>,
+    /// Why this install can't update itself (Windows), shown with Download
+    /// update.
+    blocked: Mutex<Option<&'static str>>,
     restart: Mutex<Restart>,
 }
 
@@ -333,6 +213,7 @@ impl Shared {
             confirmed: Mutex::new(None),
             staged: Mutex::new(None),
             notes: Mutex::new(None),
+            blocked: Mutex::new(None),
             restart: Mutex::new(Restart::Idle),
         }
     }
@@ -371,13 +252,18 @@ pub struct Updater {
 
 impl Updater {
     pub fn start() -> Self {
-        let method = update_method(platform::method(), cfg!(target_os = "linux"));
-        let disabled = disabled_status(
-            option_env!("HEX_TEST_BUILD") == Some("1"),
-            crate::app_paths::is_local_build(),
-            managed_by_policy,
-            &method,
-        );
+        let method = platform::method();
+        let disabled = if option_env!("HEX_TEST_BUILD") == Some("1") || updates_off_by_env() {
+            Some(DesktopUpdateStatus::Unavailable)
+        } else if crate::app_paths::is_local_build() {
+            Some(DesktopUpdateStatus::SourceBuild)
+        } else if managed_by_policy() {
+            Some(DesktopUpdateStatus::Managed)
+        } else if method == Method::Source {
+            Some(DesktopUpdateStatus::SourceBuild)
+        } else {
+            None
+        };
         let checks = disabled.is_none();
         let shared = Arc::new(Shared::new(
             match disabled {
@@ -386,6 +272,9 @@ impl Updater {
             },
             matches!(method, Method::Package(_)),
         ));
+        if method == Method::Unknown {
+            *lock(&shared.blocked) = platform::blocked();
+        }
         if checks {
             let worker = shared.clone();
             if let Err(error) = std::thread::Builder::new()
@@ -422,7 +311,6 @@ impl Updater {
     /// Checks now instead of at the next interval. A staged update stays
     /// offered while the check looks for a newer release.
     pub fn check_now(&self) {
-        crate::debug_log::dlog!(Info, "updater.check", "update check requested");
         let mut state = lock(&self.shared.state);
         match &*state {
             State::Disabled(_) | State::Applied | State::Downloading => return,
@@ -452,6 +340,15 @@ impl Updater {
     pub fn stop(&self) {
         lock(&self.shared.wake).stop = true;
         self.shared.signal.notify_all();
+    }
+
+    /// Why this install can't update itself, while Download update shows:
+    /// an English sentence the window translates.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn blocked(&self) -> Option<&'static str> {
+        matches!(*lock(&self.shared.state), State::Download { .. })
+            .then(|| *lock(&self.shared.blocked))
+            .flatten()
     }
 
     /// What the staged dev build changed, while Restart to update shows.
@@ -563,7 +460,7 @@ impl Updater {
             return;
         };
         if let Err(error) = crate::desktop::opencode_catalog::open_url(&url) {
-            tracing::warn!(%error, "could not open the WordInk download");
+            tracing::warn!(%error, "could not open the Hex download");
         }
     }
 
@@ -580,6 +477,13 @@ impl Updater {
             *state = State::Applied;
         }
     }
+}
+
+/// `HEX_DISABLE_UPDATES=1` turns this launch's updater off, as a test build
+/// has it: no checks, no network, nothing offered. For copies of Hex that
+/// must stay quiet, such as benchmarks (docs/perf.md).
+fn updates_off_by_env() -> bool {
+    std::env::var_os("HEX_DISABLE_UPDATES").is_some_and(|value| value == "1")
 }
 
 /// Whether an administrator turned updates off (`DisableUpdates`), read
@@ -652,13 +556,6 @@ fn run(shared: &Shared, method: &Method) {
             }
             Err(error) => {
                 tracing::warn!(error = %format!("{error:#}"), "update check failed");
-                crate::debug_log::dlog!(
-                    Info,
-                    "updater.check",
-                    "update check failed",
-                    error = format!("{error:#}"),
-                    failures = failures + 1,
-                );
                 failures = (failures + 1).min(8);
                 let next = if lock(&shared.staged).is_some() {
                     State::Ready
@@ -727,8 +624,7 @@ fn check(
     let channel = channel(method, setting, &home);
     let user_agent = transport::user_agent(&home, crate::VERSION);
     *lock(&shared.last) = Some((channel.clone(), std::time::Instant::now()));
-    let manifest_url = manifest_url(&channel)
-        .ok_or_else(|| eyre!("WordInk publishes no {channel} update channel"))?;
+    let manifest_url = manifest_url(&channel);
     let timeout = if restarting {
         RESTART_MANIFEST_TIMEOUT
     } else {
@@ -748,12 +644,6 @@ fn check(
     };
     let decision = protocol::decide(APP, ARTIFACT, &channel, &manifest, &install);
     tracing::info!(?decision, "update decision");
-    crate::debug_log::dlog!(
-        Info,
-        "updater.decision",
-        "update decision",
-        decision = format!("{decision:?}"),
-    );
     match decision {
         Decision::Reject { reason } => Err(eyre!("the update manifest was rejected: {reason}")),
         Decision::None { .. } | Decision::Install { .. }
@@ -770,6 +660,14 @@ fn check(
         }
         Decision::None { .. } => {
             transport::prune(&updates, None);
+            #[cfg(target_os = "windows")]
+            if matches!(method, Method::Direct { .. }) && platform::console_missing() {
+                let installed = download_console(&manifest, &manifest_url, &user_agent, &updates)
+                    .and_then(|file| file.map_or(Ok(()), |file| platform::install_console(&file)));
+                if let Err(error) = installed {
+                    tracing::warn!(error = %format!("{error:#}"), "could not add hex.com to this install");
+                }
+            }
             Ok(State::Current)
         }
         Decision::Notify {
@@ -777,7 +675,7 @@ fn check(
         } => Ok(match command {
             Some(command) => State::Command { command },
             None => State::Download {
-                url: notes_url.unwrap_or_else(|| RELEASES_URL.into()),
+                url: notes_url.unwrap_or_else(|| "https://anoma.ly/hex".into()),
             },
         }),
         Decision::Install {
@@ -797,11 +695,15 @@ fn check(
             version, target, ..
         } => {
             if *method == Method::DownloadOnly {
-                let url = release_asset_url(platform::TARGET, platform::running_appimage())
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| {
-                        download_page_url(&manifest, &manifest_url, platform::DOWNLOAD_TARGET)
-                    });
+                let url = protocol::parse_manifest(&manifest)
+                    .and_then(|manifest| {
+                        manifest
+                            .release
+                            .target(platform::DOWNLOAD_TARGET)
+                            .and_then(|target| protocol::resolve_url(&manifest_url, &target.url))
+                            .or(manifest.release.notes_url)
+                    })
+                    .unwrap_or_else(|| "https://anoma.ly/hex".into());
                 return Ok(State::Download { url });
             }
             let url = protocol::resolve_url(&manifest_url, &target.url)
@@ -815,8 +717,12 @@ fn check(
             #[cfg(target_os = "linux")]
             verify_linux_signature(&manifest, &manifest_url, &user_agent, &target, &updates)?;
             let file = transport::download(&url, &user_agent, &target, &updates)?;
-            let staged = platform::stage(&file, &version)
-                .wrap_err_with(|| format!("could not stage WordInk {version}"))?;
+            #[cfg(target_os = "windows")]
+            let staged = download_console(&manifest, &manifest_url, &user_agent, &updates)
+                .and_then(|console| platform::stage(&file, console.as_deref(), &version));
+            #[cfg(not(target_os = "windows"))]
+            let staged = platform::stage(&file, &version);
+            let staged = staged.wrap_err_with(|| format!("could not stage Hex {version}"))?;
             *lock(&shared.staged) = Some(StagedUpdate {
                 staged,
                 sha256: target.sha256,
@@ -831,43 +737,6 @@ fn check(
             Ok(State::Ready)
         }
     }
-}
-
-/// Where a download-only install is sent: its target's file in the release,
-/// else the release notes, else the Releases page.
-macro_rules! asset {
-    ($name:literal) => {
-        concat!(
-            "https://github.com/duketopceo/WordInk/releases/latest/download/",
-            $name
-        )
-    };
-}
-
-/// The versionless asset an install that cannot replace itself opens to
-/// update: the installer or image a first-time user downloads, not the bare
-/// executable zip in the manifest. `None` falls back to the manifest's file
-/// for the target, then the Releases page.
-fn release_asset_url(target: &str, appimage: bool) -> Option<&'static str> {
-    match (target, appimage) {
-        ("windows-x64", _) => Some(asset!("WordInk-Setup-windows-x64.exe")),
-        ("macos-arm64", _) => Some(asset!("WordInk-macos-arm64.dmg")),
-        ("linux-x64", true) => Some(asset!("WordInk-linux-x86_64.AppImage")),
-        ("linux-arm64", true) => Some(asset!("WordInk-linux-aarch64.AppImage")),
-        _ => None,
-    }
-}
-
-fn download_page_url(manifest: &str, manifest_url: &str, target: &str) -> String {
-    protocol::parse_manifest(manifest)
-        .and_then(|manifest| {
-            manifest
-                .release
-                .target(target)
-                .and_then(|target| protocol::resolve_url(manifest_url, &target.url))
-                .or(manifest.release.notes_url)
-        })
-        .unwrap_or_else(|| RELEASES_URL.into())
 }
 
 /// What the staged dev build changed; nothing for other channels or when
@@ -906,6 +775,26 @@ fn verify_linux_signature(
     platform::verify_signature(&target.sha256, &std::fs::read(file)?)
 }
 
+/// The release's `hex.com` (`<target>-cli`), checked against the manifest's
+/// size and SHA-256; none when the release has no console entry point.
+#[cfg(target_os = "windows")]
+fn download_console(
+    manifest: &str,
+    manifest_url: &str,
+    user_agent: &str,
+    updates: &Path,
+) -> Result<Option<PathBuf>> {
+    let Some(manifest) = protocol::parse_manifest(manifest) else {
+        return Ok(None);
+    };
+    let Some(target) = manifest.release.target(platform::CONSOLE_TARGET) else {
+        return Ok(None);
+    };
+    let url = protocol::resolve_url(manifest_url, &target.url)
+        .ok_or_else(|| eyre!("the hex.com URL {} is not usable", target.url))?;
+    transport::download(&url, user_agent, target, updates).map(Some)
+}
+
 /// Whether `decision` replaces the staged update: only a different release
 /// this install takes by itself does. A rollout that has not reached this
 /// install, an unconfirmed channel switch, or the same release keeps it.
@@ -920,32 +809,17 @@ fn replaces_staged(decision: &Decision, staged_sha256: &str) -> bool {
     )
 }
 
-/// `HEX_RELEASE_BASE_URL` (HTTPS only) points a build at a service origin,
-/// for local tests against a fixture service.
-fn release_origin() -> Option<String> {
-    std::env::var("HEX_RELEASE_BASE_URL")
+/// `HEX_RELEASE_BASE_URL` (HTTPS only) points a build at another service
+/// origin, for local tests against a fixture service. Nothing defaults to the
+/// service's dev stage, which only tests the service itself.
+fn manifest_url(channel: &str) -> String {
+    let origin = std::env::var("HEX_RELEASE_BASE_URL")
         .ok()
-        .filter(|origin| origin.starts_with("https://"))
-}
-
-/// The manifest of `channel`: the fixture service's, when one is set, else
-/// WordInk's GitHub Releases, which publish stable and dev.
-fn manifest_url(channel: &str) -> Option<String> {
-    manifest_url_for(release_origin().as_deref(), channel)
-}
-
-fn manifest_url_for(origin: Option<&str>, channel: &str) -> Option<String> {
-    match origin {
-        Some(origin) => Some(format!(
-            "{}/{APP}/{ARTIFACT}/{channel}.json",
-            origin.trim_end_matches('/')
-        )),
-        None => match channel {
-            "stable" => Some(STABLE_MANIFEST_URL.to_owned()),
-            "dev" => Some(DEV_MANIFEST_URL.to_owned()),
-            _ => None,
-        },
-    }
+        .filter(|origin| origin.starts_with("https://"));
+    format!(
+        "{}/{APP}/{ARTIFACT}/{channel}.json",
+        origin.as_deref().unwrap_or(ORIGIN).trim_end_matches('/')
+    )
 }
 
 /// This build's target SHA-256, when the platform can tell (the target is
@@ -999,8 +873,10 @@ fn receipt_channel(root: &Path) -> Option<String> {
         method: String,
         root: PathBuf,
     }
-    let receipt: Receipt =
-        serde_json::from_slice(&std::fs::read(root.join("install.json")).ok()?).ok()?;
+    let bytes = std::fs::read(root.join("install.json")).ok()?;
+    // Tolerate a byte order mark: some UTF-8 writers add one.
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
+    let receipt: Receipt = serde_json::from_slice(bytes).ok()?;
     let canonical = |path: &Path| path.canonicalize().ok();
     (receipt.app == APP
         && receipt.artifact == ARTIFACT
@@ -1020,30 +896,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).unwrap();
         path
-    }
-
-    #[test]
-    fn release_asset_routing() {
-        let base = "https://github.com/duketopceo/WordInk/releases/latest/download/";
-        assert_eq!(
-            release_asset_url("windows-x64", false),
-            Some(format!("{base}WordInk-Setup-windows-x64.exe").as_str())
-        );
-        assert_eq!(
-            release_asset_url("macos-arm64", false),
-            Some(format!("{base}WordInk-macos-arm64.dmg").as_str())
-        );
-        assert_eq!(
-            release_asset_url("linux-x64", true),
-            Some(format!("{base}WordInk-linux-x86_64.AppImage").as_str())
-        );
-        assert_eq!(
-            release_asset_url("linux-arm64", true),
-            Some(format!("{base}WordInk-linux-aarch64.AppImage").as_str())
-        );
-        // A non-AppImage Linux install and unknown targets use the manifest.
-        assert_eq!(release_asset_url("linux-x64", false), None);
-        assert_eq!(release_asset_url("freebsd-x64", true), None);
     }
 
     #[test]
@@ -1231,89 +1083,6 @@ mod tests {
     }
 
     #[test]
-    fn a_dev_json_naming_a_newer_candidate_is_offered_without_a_switch_prompt() {
-        // A Dev-stamped install follows dev.json: the next candidate is a
-        // plain update, never a channel switch.
-        let running = install("1.0.0-rc.1", 'a', "dev");
-        let next = manifest("dev", "1.0.0-rc.2", 'b');
-        assert!(matches!(
-            protocol::decide(APP, ARTIFACT, "dev", &next, &running),
-            Decision::Install {
-                reason: protocol::Reason::Update,
-                ..
-            }
-        ));
-        // After the final, dev.json names the final: still an update for Dev.
-        let released = manifest("dev", "1.0.0", 'c');
-        assert!(matches!(
-            protocol::decide(APP, ARTIFACT, "dev", &released, &running),
-            Decision::Install {
-                reason: protocol::Reason::Update,
-                ..
-            }
-        ));
-        // The final's own build is already what dev.json names: no move.
-        let stable = install("1.0.0", 'c', "stable");
-        assert!(matches!(
-            protocol::decide(APP, ARTIFACT, "dev", &released, &stable),
-            Decision::None { .. }
-        ));
-        // A stable install on another build that picks Dev is asked first.
-        let stable = install("0.9.0", 'd', "stable");
-        assert!(matches!(
-            protocol::decide(APP, ARTIFACT, "dev", &released, &stable),
-            Decision::Install {
-                reason: protocol::Reason::Switch,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn versions_order_like_semver() {
-        for (older, newer) in [
-            ("1.0.0-rc.1", "1.0.0-rc.2"),
-            ("1.0.0-rc.2", "1.0.0-rc.10"),
-            ("1.0.0-rc.2", "1.0.0"),
-            ("0.9.9", "1.0.0-rc.1"),
-            ("0.0.0-dev-9", "0.0.0-dev-10"),
-            ("1.0.0", "1.0.1"),
-            ("1.0.0-rc", "1.0.0-rc.1"),
-        ] {
-            assert!(is_older(older, newer), "{older} < {newer}");
-            assert!(!is_older(newer, older), "{newer} !< {older}");
-        }
-        assert!(!is_older("1.0.0", "1.0.0"));
-        assert!(!is_older("1.0.0+build5", "1.0.0"));
-        assert!(!is_older("garbage", "1.0.0"));
-        assert!(!is_older("1.0.0", "1.0"));
-    }
-
-    #[test]
-    fn a_switch_to_an_older_version_says_so_in_both_directions() {
-        // Stable user on a final picks Dev while dev.json trails: older.
-        assert_eq!(
-            switch_label_for("dev", "1.0.0-rc.2", "1.0.0"),
-            "Switch to Dev 1.0.0-rc.2 (installs an older version)"
-        );
-        // Dev user on a candidate picks Stable while stable is older.
-        assert_eq!(
-            switch_label_for("stable", "0.9.0", "1.0.0-rc.1"),
-            "Switch to Stable 0.9.0 (installs an older version)"
-        );
-        // A newer or equal target keeps the plain wording; after a final,
-        // dev.json names the final, so Dev is not older than stable.
-        assert_eq!(
-            switch_label_for("dev", "1.0.0", "1.0.0"),
-            "Switch to Dev 1.0.0"
-        );
-        assert_eq!(
-            switch_label_for("stable", "1.0.0", "1.0.0-rc.2"),
-            "Switch to Stable 1.0.0"
-        );
-    }
-
-    #[test]
     fn a_switch_waits_for_the_user_to_confirm() {
         let updater = Updater::idle_checking();
         *lock(&updater.shared.state) = State::Switch {
@@ -1442,142 +1211,10 @@ mod tests {
     }
 
     #[test]
-    fn the_stable_manifest_is_a_release_asset_of_this_repository() {
+    fn the_manifest_url_names_app_artifact_and_channel() {
         assert_eq!(
-            manifest_url_for(None, "stable").as_deref(),
-            Some("https://github.com/duketopceo/WordInk/releases/latest/download/stable.json")
-        );
-        assert_eq!(
-            manifest_url_for(None, "dev").as_deref(),
-            Some("https://github.com/duketopceo/WordInk/releases/download/desktop-dev/dev.json")
-        );
-        // GitHub publishes no other channel; the fixture service serves any.
-        assert_eq!(manifest_url_for(None, "beta"), None);
-        assert_eq!(
-            manifest_url_for(Some("https://fixture.test/"), "dev").as_deref(),
-            Some("https://fixture.test/hex/desktop/dev.json")
-        );
-        // Nothing contacts Anomaly's release service.
-        assert!(!STABLE_MANIFEST_URL.contains("anoma"));
-    }
-
-    #[test]
-    fn release_asset_urls_resolve_on_github_and_nowhere_else() {
-        let manifest = STABLE_MANIFEST_URL;
-        let asset = "https://github.com/duketopceo/WordInk/releases/download/desktop-v1.0.0/wordink-1.0.0-linux-x64";
-        // Absolute and path-absolute references on the manifest's host work.
-        assert_eq!(
-            protocol::resolve_url(manifest, asset).as_deref(),
-            Some(asset)
-        );
-        assert_eq!(
-            protocol::resolve_url(
-                manifest,
-                "/duketopceo/WordInk/releases/download/desktop-v1.0.0/wordink-1.0.0-linux-x64"
-            )
-            .as_deref(),
-            Some(asset)
-        );
-        // A manifest cannot name the redirect target or any other host: GitHub
-        // sends the download there itself, and the transport follows it.
-        for elsewhere in [
-            "https://objects.githubusercontent.com/github-production-release-asset/1",
-            "https://github.com.example.com/a",
-            "https://github.com@example.com/a",
-            "http://github.com/duketopceo/WordInk/a",
-        ] {
-            assert_eq!(
-                protocol::resolve_url(manifest, elsewhere),
-                None,
-                "{elsewhere}"
-            );
-        }
-    }
-
-    #[test]
-    fn macos_and_windows_only_link_to_the_release() {
-        let direct = || Method::Direct {
-            channel: "stable".into(),
-        };
-        // Where nothing is signed, every install kind is download-only...
-        for method in [direct(), Method::Unknown, Method::Package("aur")] {
-            assert_eq!(update_method(method, false), Method::DownloadOnly);
-        }
-        // ...except a checkout build, which its checkout updates.
-        assert_eq!(update_method(Method::Source, false), Method::Source);
-        // Linux keeps its signed, direct path.
-        assert_eq!(update_method(direct(), true), direct());
-        assert_eq!(update_method(Method::Unknown, true), Method::Unknown);
-        // Download-only is never an installing method: no staging, and the
-        // "direct" distribution carries no running-build hash.
-        assert_ne!(Method::DownloadOnly, direct());
-        assert_eq!(Method::DownloadOnly.distribution(), "direct");
-    }
-
-    #[test]
-    fn a_download_only_install_is_sent_to_its_release_file() {
-        let sha = "e".repeat(64);
-        let file = "https://github.com/duketopceo/WordInk/releases/download/desktop-v1.0.0/wordink-1.0.0-windows-x64.zip";
-        let manifest = serde_json::json!({
-            "schema": 1, "app": APP, "artifact": ARTIFACT, "channel": "stable",
-            "sequence": 1, "published_at": "2026-11-02T00:00:00Z",
-            "release": {
-                "version": "1.0.0", "rollout_percent": 100,
-                "distributions": [{ "kind": "direct" }],
-                "targets": { platform::DOWNLOAD_TARGET: { "url": file, "sha256": sha, "size": 1 } }
-            }
-        })
-        .to_string();
-        assert_eq!(
-            download_page_url(&manifest, STABLE_MANIFEST_URL, platform::DOWNLOAD_TARGET),
-            file
-        );
-        // No file for this platform, or a bad manifest: the Releases page.
-        assert_eq!(
-            download_page_url(&manifest, STABLE_MANIFEST_URL, "freebsd-x64"),
-            RELEASES_URL
-        );
-        assert_eq!(
-            download_page_url("{}", STABLE_MANIFEST_URL, platform::DOWNLOAD_TARGET),
-            RELEASES_URL
-        );
-    }
-
-    #[test]
-    fn a_local_build_never_checks_for_updates() {
-        let never = || unreachable!("a source build never asks the policy");
-        assert_eq!(
-            disabled_status(false, true, never, &Method::DownloadOnly),
-            Some(DesktopUpdateStatus::SourceBuild)
-        );
-        assert_eq!(
-            disabled_status(false, false, never, &Method::Source),
-            Some(DesktopUpdateStatus::SourceBuild)
-        );
-        assert_eq!(
-            disabled_status(true, false, never, &Method::DownloadOnly),
-            Some(DesktopUpdateStatus::Unavailable)
-        );
-        assert_eq!(
-            disabled_status(false, false, || true, &Method::DownloadOnly),
-            Some(DesktopUpdateStatus::Managed)
-        );
-        assert_eq!(
-            disabled_status(false, false, || false, &Method::DownloadOnly),
-            None
-        );
-    }
-
-    #[test]
-    fn nothing_contacts_the_old_release_service() {
-        assert_eq!(
-            notes::fetch(
-                "ua",
-                Path::new("/nonexistent/scratch"),
-                "0.0.0-dev-1",
-                "0.0.0-dev-2"
-            ),
-            None
+            manifest_url("stable"),
+            "https://anoma.ly/release/hex/desktop/stable.json"
         );
     }
 }

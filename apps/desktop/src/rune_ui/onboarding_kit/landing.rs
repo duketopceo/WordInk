@@ -1,4 +1,4 @@
-//! Shared typography, motion transitions, and the `"WordInk is ready"` finale.
+//! Shared typography, motion transitions, and the `"Hex is ready"` finale.
 
 use rune::{El, Spring, SpringPair, TextStyle, Transition, col, el, row, text};
 use rune_kit::{Button, ButtonVariant};
@@ -7,7 +7,7 @@ use crate::desktop::i18n::tr;
 
 use super::super::controls::{KeySize, Paint, PushSize, key_tray, keycap};
 use super::fixture::Language;
-use super::hex_meter::{hex_meter, hex_meter_glowing};
+use super::hex_meter::{hex_logo, hex_meter};
 use super::pill::{FLY, PILL};
 
 /// One display heading style across every onboarding step (`26 pt`, softened
@@ -144,7 +144,7 @@ pub(crate) fn keys(p: Paint, key: &str, caps: &[String], down: bool) -> El {
     )
 }
 
-/// Where Hex lives once onboarding closes, under `"WordInk is ready"`.
+/// Where Hex lives once onboarding closes, under `"Hex is ready"`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Home {
     MenuBar,
@@ -162,19 +162,20 @@ impl Home {
     }
 }
 
-/// Final `"WordInk is ready"` landing: the thin WordInk mark arrives from
-/// the top pill with a soft outline glow, followed by staggered copy and a
-/// quiet macOS menu-bar preview showing where WordInk lives.
+/// Final `"Hex is ready"` landing: the Hex logo builds outside in (its
+/// outline arriving from the top pill when `matched`), followed by
+/// staggered copy and where Hex lives. `age`: seconds since the page
+/// appeared.
 pub(crate) fn ready(
     p: Paint,
     caps: &[String],
     matched: Option<&str>,
-    now: f64,
+    age: f64,
     reduced: bool,
     motion: Motion,
     home: Home,
 ) -> El {
-    let mark = hex_meter_glowing(p, "meter", 64.0, now, reduced);
+    let mark = hex_logo(p, "meter", 64.0, age, reduced, matched.is_some());
     let mark = match matched {
         Some(id) => el().key(id).matched(id).motion(FLY).child(mark),
         None => motion.staggered(mark.key("mark"), 0.0, 8.0),
@@ -184,11 +185,6 @@ pub(crate) fn ready(
         .gap(24.0)
         .items_center()
         .child(mark)
-        .child(motion.staggered(
-            super::super::brand::wordmark("wordmark", 20.0, p.text()),
-            0.5,
-            8.0,
-        ))
         .child(
             motion.staggered(
                 col()
@@ -196,7 +192,7 @@ pub(crate) fn ready(
                     .gap(10.0)
                     .items_center()
                     .child(
-                        text(tr("WordInk is ready"))
+                        text(tr("Hex is ready"))
                             .key("title")
                             .font(title_font(p))
                             .color(p.text()),
@@ -225,7 +221,7 @@ pub(crate) fn hold_anywhere(p: Paint, caps: &[String]) -> El {
         )
 }
 
-/// Quiet capsule previewing the WordInk icon where WordInk lives: the
+/// Quiet capsule previewing the single-hexagon icon where Hex lives: the
 /// macOS menu bar, the Windows tray, or the Linux app launcher.
 fn menubar_hint(p: Paint, home: Home) -> El {
     let k = p.k;

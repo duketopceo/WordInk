@@ -1,6 +1,6 @@
-//! The onboarding story: the shipping first run
-//! ([`live`], over the tour in [`onboarding`](super::onboarding)), and its
-//! pieces and options as playground stories (only with Labs).
+//! Pieces for the next onboarding, and the options built from them as
+//! playground stories (only with Labs; the shipping
+//! tour in [`onboarding`](super::onboarding) doesn't use them yet).
 //!
 //! - [`gpu_stage`] & [`hud_stage`]: flat Rune UI + Hex's real `Dot scope`
 //!   phosphor dot-matrix HUD (`IndicatorModel` + `rune_hud::Painter` on
@@ -20,36 +20,44 @@
 //!   `Muted felt`, `Soft warm`, `Silent typing`), shortcut keycap clicks,
 //!   motion cues, and Hex's `#292` `feedback` tones.
 //! - [`mic`] & [`mic_line`]: microphone level bars and selector capsule.
-//! - [`landing`]: shared typography, zero-bounce transitions, and `"WordInk is ready"`.
+//! - [`landing`]: shared typography, zero-bounce transitions, and `"Hex is ready"`.
 
 mod cards;
+mod composition;
 mod dictated;
-pub(super) mod engine_setup;
 mod field_text;
+mod fireworks;
 mod first_run;
+mod first_screen;
 mod fixture;
 mod flight;
 mod flows;
-mod game;
-pub(crate) mod game_fx;
+pub(crate) mod game;
 pub(crate) mod gpu_stage;
 mod hex_meter;
+mod high_score;
 mod hud_stage;
+mod inbox;
 mod keyboard;
 mod landing;
 pub(super) mod live;
+mod login;
 mod mic;
 mod mic_line;
 mod permissions;
 mod pill;
+mod scene_script;
+pub(super) mod scenes;
 mod sfx;
+mod sketches;
 mod sparks;
 mod stories;
+mod triumph;
 mod typing;
 mod versus;
 mod words;
 
-pub(super) use engine_setup::State as EngineSetup;
 pub(crate) use game::add as game;
+pub(super) use sketches::fixture as sketch_fixture;
 pub(super) use stories::Onboard;
 pub(crate) use stories::{add as stories, set_live_window};

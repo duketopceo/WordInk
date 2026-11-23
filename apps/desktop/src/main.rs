@@ -1,3 +1,7 @@
+// A GUI program on Windows, so launching Hex opens no console window (#850).
+// Commands run from a terminal attach to it (`windows::attach_parent_console`).
+#![cfg_attr(all(target_os = "windows", not(test)), windows_subsystem = "windows")]
+
 /// The version Hex reports: the release version, or `0.0.0-dev-local-<commit>`
 /// for a build outside the Release workflow (build.rs).
 const VERSION: &str = env!("HEX_BUILD_VERSION");
@@ -16,21 +20,19 @@ mod application_catalog;
 mod audio;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod calendar;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+mod caps_lock_dictation;
 #[cfg(hex_capture)]
 mod capture_host;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod control;
-mod debug_log;
 mod desktop;
 mod dev_build;
-mod diagnostics;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod dictation;
 mod durable;
-mod escape_cancel;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod feedback;
-mod hardware;
 mod history;
 #[cfg(target_os = "macos")]
 mod keyboard;
@@ -38,8 +40,6 @@ mod keyboard;
 #[cfg_attr(target_os = "windows", path = "keyboard_input_sources/windows.rs")]
 #[cfg_attr(target_os = "linux", path = "keyboard_input_sources/x11.rs")]
 mod keyboard_input_sources;
-mod keyboard_kind;
-mod keys;
 mod labs;
 #[cfg(target_os = "linux")]
 mod linux;
@@ -51,7 +51,6 @@ mod meeting;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod microphone_activity;
 mod net;
-mod openrouter_oauth;
 #[cfg(target_os = "macos")]
 mod parakeet;
 #[cfg(target_os = "macos")]
@@ -64,13 +63,15 @@ mod policy;
 mod recognition;
 mod rune_hud;
 mod rune_ui;
+#[cfg(all(target_os = "macos", hex_capture))]
+mod screenshots;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod shortcut_pause;
 #[cfg(target_os = "macos")]
 mod suppression;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 mod terminal_paste;
 mod transcription;
 mod updater;
-mod voxtype_import;
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -81,21 +82,21 @@ use std::sync::atomic::AtomicBool;
 #[cfg(target_os = "macos")]
 use clap::{Parser, Subcommand, ValueEnum};
 use color_eyre::Result;
-#[cfg(all(target_os = "macos", debug_assertions))]
+#[cfg(target_os = "macos")]
 use color_eyre::eyre::eyre;
 
 #[cfg(target_os = "macos")]
 #[derive(Parser)]
 #[command(
-    name = "wordink",
+    name = "hex",
     version = crate::VERSION,
     about = "Local, observable voice control",
     long_about = "Local, observable voice control.\n\n\
         Control commands (status, dictation, meetings record, settings, model, window, …) drive \
-        the one running WordInk over its owner-only local API and never launch it, except `start` \
+        the one running Hex over its owner-only local API and never launch it, except `start` \
         and `restart`. Every one takes --json for a versioned reply (docs/cli.md). Exit codes: \
-        0 done or nothing to change, 1 refused or failed, 2 usage, 3 WordInk isn't running.",
-    after_help = "Based on Hex by Anomaly (MIT). Run `wordink <command> --help` for details, or `wordink settings list` for every setting."
+        0 done or nothing to change, 1 refused or failed, 2 usage, 3 Hex isn't running.",
+    after_help = "Run `hex <command> --help` for details, or `hex settings list` for every setting."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -117,6 +118,9 @@ enum Command {
     Control(control::cli::ControlCli),
     /// Run the desktop app with local dictation.
     App {
+        /// Start in the menu bar without opening the window.
+        #[arg(long)]
+        hidden: bool,
         /// Capture from this microphone instead of the saved one or the system default.
         #[arg(long)]
         device: Option<String>,
@@ -136,16 +140,6 @@ enum Command {
         /// Run as a direct child whose stdin is owned by the host application.
         #[arg(long)]
         embedded: bool,
-    },
-    /// Manage the API keys cloud engines use (`set` reads stdin).
-    Keys {
-        #[command(subcommand)]
-        command: keys::KeysCommand,
-    },
-    /// Bring settings across from another dictation app.
-    Import {
-        #[command(subcommand)]
-        command: voxtype_import::ImportCommand,
     },
     /// Inspect and control the running desktop app or offline audio tools.
     Dev {
@@ -327,8 +321,6 @@ fn main() -> Result<()> {
     // over SSH while the app is running.
     let cli = match cli.command {
         Some(Command::Control(command)) => control::cli::finish(control::cli::run(command)),
-        Some(Command::Keys { command }) => std::process::exit(keys::run_cli(&command)),
-        Some(Command::Import { command }) => std::process::exit(voxtype_import::run_cli(&command)),
         command => Cli { command },
     };
     #[cfg(debug_assertions)]
@@ -397,6 +389,7 @@ fn main() -> Result<()> {
     let command = cli.command.unwrap_or({
         if bundled_watcher {
             Command::App {
+                hidden: false,
                 device: None,
                 rune_args: Vec::new(),
             }
@@ -407,7 +400,7 @@ fn main() -> Result<()> {
         }
     });
     match command {
-        Command::App { device, .. } => open_app(event_path, device),
+        Command::App { hidden, device, .. } => open_app(event_path, device, hidden),
         Command::Listen { device } => {
             let _instance = desktop::instance::acquire("listener")?;
             labs::log_launch();
@@ -421,7 +414,15 @@ fn main() -> Result<()> {
                     None
                 }
             };
-            recognition::listen(events, device.as_deref(), &SHUTDOWN, None, history, None)
+            recognition::listen(
+                events,
+                device.as_deref(),
+                &SHUTDOWN,
+                None,
+                history,
+                None,
+                std::sync::Arc::new(personal_commands::TransformationClient::default()),
+            )
         }
         Command::Service { embedded } => {
             if !embedded {
@@ -429,9 +430,7 @@ fn main() -> Result<()> {
             }
             local_api::run_service(&log_dir, event_path, embedded, &SHUTDOWN)
         }
-        Command::Control(_) | Command::Keys { .. } | Command::Import { .. } => {
-            unreachable!("handled before startup")
-        }
+        Command::Control(_) => unreachable!("handled before startup"),
         #[cfg(hex_capture)]
         Command::CapsulePlayground { .. } => unreachable!("handled before startup"),
         Command::Dev { command } => {
@@ -598,13 +597,14 @@ fn main() -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn open_app(event_path: PathBuf, device: Option<String>) -> Result<()> {
+fn open_app(event_path: PathBuf, device: Option<String>, hidden: bool) -> Result<()> {
     let _instance = desktop::instance::acquire("listener")?;
     labs::log_launch();
     audio::hex_microphone::host_service();
     macos_rune::run(
         &SHUTDOWN,
         meeting::watcher::ListenerConfig { event_path, device },
+        hidden,
     )
 }
 
@@ -624,18 +624,21 @@ fn mcp_alias_arguments(mut arguments: Vec<std::ffi::OsString>) -> Vec<std::ffi::
 
 #[cfg(target_os = "macos")]
 fn is_bundled_app_executable(name: Option<&std::ffi::OsStr>) -> bool {
-    name.is_some_and(|name| name == "wordink")
+    name.is_some_and(|name| name == "hex")
 }
 
-/// Whether this launch runs the app: `hex app` without Rune's own (headless)
-/// flags, or the bundled executable with no command. A hidden or login launch
-/// counts too, though it opens no window and Rune drops the prewarmed GPU:
-/// whether the window opens depends on settings, which may load only after
-/// the keyboard layout (`macos_rune::run`).
+/// Whether this launch runs the app: `hex app` without `--hidden` or Rune's
+/// own (headless) flags, or the bundled executable with no command. A
+/// menu-bar-only or login launch counts too, though it opens no window and
+/// Rune drops the prewarmed GPU: whether the window opens depends on
+/// settings, which may load only after the keyboard layout
+/// (`macos_rune::run`).
 #[cfg(target_os = "macos")]
 fn opens_app(command: Option<&Command>, bundled_watcher: bool) -> bool {
     match command {
-        Some(Command::App { rune_args, .. }) => rune_args.is_empty(),
+        Some(Command::App {
+            hidden, rune_args, ..
+        }) => !hidden && rune_args.is_empty(),
         None => bundled_watcher,
         Some(_) => false,
     }
@@ -754,10 +757,6 @@ mod tests {
             ));
         }
         assert!(matches!(
-            parse(&["hex", "diagnostics"]),
-            Ok(Some(Command::Control(ControlCli::Diagnostics)))
-        ));
-        assert!(matches!(
             parse(&["hex", "history", "clear", "--yes"]),
             Ok(Some(Command::Control(ControlCli::History(
                 transcript_cli::HistoryArgs {
@@ -809,50 +808,6 @@ mod tests {
             }))) if output.json
         ));
         assert!(parse(&["hex", "vocabulary", "remove"]).is_err());
-        assert!(matches!(
-            parse(&["hex", "vocabulary", "suggest", "--json"]),
-            Ok(Some(Command::Control(ControlCli::Vocabulary {
-                command: crate::control::cli::VocabularyCommand::Suggest { output }
-            }))) if output.json
-        ));
-    }
-
-    #[test]
-    fn debug_logs_parse_with_follow_level_subsystem_and_json() {
-        use crate::debug_log::DebugLevel;
-
-        let parsed = Cli::try_parse_from([
-            "hex",
-            "logs",
-            "--debug",
-            "--follow",
-            "--level",
-            "debug",
-            "--subsystem",
-            "audio,bluetooth",
-            "--json",
-            "-n",
-            "20",
-        ])
-        .map(|cli| cli.command);
-        assert!(matches!(
-            parsed,
-            Ok(Some(Command::Control(ControlCli::Logs {
-                debug: true,
-                follow: true,
-                json: true,
-                lines: 20,
-                level: Some(DebugLevel::Debug),
-                ref subsystem,
-                ..
-            }))) if subsystem == &["audio".to_owned(), "bluetooth".to_owned()]
-        ));
-        // The filters belong to --debug, which excludes --process.
-        assert!(Cli::try_parse_from(["hex", "logs", "--level", "info"]).is_err());
-        assert!(Cli::try_parse_from(["hex", "logs", "--json"]).is_err());
-        assert!(Cli::try_parse_from(["hex", "logs", "--debug", "--process"]).is_err());
-        assert!(Cli::try_parse_from(["hex", "logs", "--debug", "--level", "loud"]).is_err());
-        assert!(Cli::try_parse_from(["hex", "logs", "--process"]).is_ok());
     }
 
     #[test]
@@ -886,9 +841,8 @@ mod tests {
 
     #[test]
     fn the_packaged_executable_launches_the_app() {
-        assert!(is_bundled_app_executable(Some("wordink".as_ref())));
-        assert!(!is_bundled_app_executable(Some("hex".as_ref())));
-        assert!(!is_bundled_app_executable(Some("wordink-service".as_ref())));
+        assert!(is_bundled_app_executable(Some("hex".as_ref())));
+        assert!(!is_bundled_app_executable(Some("hex-service".as_ref())));
     }
 
     #[test]
@@ -899,11 +853,12 @@ mod tests {
                 is_bundled_app_executable(std::path::Path::new(&arguments[0]).file_stem());
             opens_app(Cli::parse_from(arguments).command.as_ref(), bundled)
         };
-        assert!(opens(&["wordink"]));
-        assert!(opens(&["/Applications/WordInk.app/Contents/MacOS/wordink"]));
+        assert!(opens(&["hex"]));
+        assert!(opens(&["/Applications/Hex.app/Contents/MacOS/hex"]));
         assert!(opens(&["hex", "app"]));
         assert!(opens(&["hex", "app", "--device", "MacBook Pro Microphone"]));
         assert!(!opens(&["hex", "app", "--", "--snap", "/tmp/a.png"]));
+        assert!(!opens(&["hex", "app", "--hidden"]));
         assert!(!opens(&["hex-service"]));
         assert!(!opens(&["hex-meetings-mcp"]));
         for command in [
@@ -927,6 +882,14 @@ mod tests {
 fn main() -> Result<()> {
     #[cfg(target_arch = "x86_64")]
     transcription::cpu_floor::require();
+    // Opening ALSA's default device loads libpipewire into this process, and
+    // its realtime module asks the desktop portal for a realtime budget and
+    // then limits this process's realtime CPU time to it; the portal caches
+    // that budget once at its own startup and can report zero, which makes
+    // the kernel kill Hex. Hex never takes realtime scheduling through the
+    // portal or rtkit.
+    // SAFETY: Before any other thread exists to read the environment.
+    unsafe { std::env::set_var("DISABLE_RTKIT", "1") };
     linux::input_route::mark_streams();
     linux::run(&SHUTDOWN)
 }
@@ -934,7 +897,13 @@ fn main() -> Result<()> {
 #[cfg(target_os = "windows")]
 fn main() -> Result<()> {
     // DLL search hardening first: the CPU check's message box loads DLLs.
-    windows::restrict_dll_search();
+    let dll_search = windows::restrict_dll_search();
+    // Then, before anything prints, join the terminal that ran `hex`.
+    windows::attach_parent_console();
+    if let Err(error) = dll_search {
+        eprintln!("hex: SetDefaultDllDirectories failed: {error}");
+    }
+    windows::vulkan::check();
     windows::gpu_fallback::choose();
     #[cfg(target_arch = "x86_64")]
     transcription::cpu_floor::require();

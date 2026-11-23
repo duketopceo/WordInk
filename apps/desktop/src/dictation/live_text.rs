@@ -31,6 +31,9 @@ static BOARD: Mutex<Board> = Mutex::new(Board {
 });
 static NEXT_PUBLISHER: AtomicU64 = AtomicU64::new(1);
 static DEMANDS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(target_os = "linux")]
+static TYPING: AtomicUsize = AtomicUsize::new(0);
+static CLIENTS: AtomicUsize = AtomicUsize::new(0);
 
 fn board() -> MutexGuard<'static, Board> {
     BOARD.lock().unwrap_or_else(|error| error.into_inner())
@@ -63,17 +66,65 @@ impl Drop for Demand {
     }
 }
 
-/// Whether anything holds a [`Demand`], or the Live text indicator is the
-/// picked style (it shows the words, so streams must publish them).
-pub(crate) fn demanded() -> bool {
-    wanted(
-        crate::app_settings::indicator_style(),
-        DEMANDS.load(Ordering::Acquire),
-    )
+/// Asks dictation streams to publish their text for Live typing's
+/// input-method preedit, without the Live text plate. It shares the engine
+/// demand with [`Demand`], but never publishes to the plate.
+#[cfg(target_os = "linux")]
+pub(crate) struct TypingDemand(());
+
+#[cfg(target_os = "linux")]
+pub(crate) fn typing_demand() -> TypingDemand {
+    TYPING.fetch_add(1, Ordering::AcqRel);
+    TypingDemand(())
 }
 
-fn wanted(style: crate::app_settings::IndicatorStyle, demands: usize) -> bool {
-    demands > 0 || style == crate::app_settings::IndicatorStyle::LiveText
+#[cfg(target_os = "linux")]
+impl Drop for TypingDemand {
+    fn drop(&mut self) {
+        TYPING.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Asks dictation streams to publish their text for a `/dictations` client
+/// that asked for partials, without the Live text plate. It shares the
+/// engine demand with [`Demand`], but never publishes to the plate.
+#[cfg(any(test, target_os = "linux", target_os = "windows"))]
+pub(crate) struct ClientDemand(());
+
+#[cfg(any(test, target_os = "linux", target_os = "windows"))]
+pub(crate) fn client_demand() -> ClientDemand {
+    CLIENTS.fetch_add(1, Ordering::AcqRel);
+    ClientDemand(())
+}
+
+#[cfg(any(test, target_os = "linux", target_os = "windows"))]
+impl Drop for ClientDemand {
+    fn drop(&mut self) {
+        CLIENTS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Whether anything holds a [`Demand`], a `ClientDemand`, or a
+/// `TypingDemand` on Linux.
+pub(crate) fn demanded() -> bool {
+    DEMANDS.load(Ordering::Acquire) > 0 || CLIENTS.load(Ordering::Acquire) > 0 || typing_demanded()
+}
+
+/// Whether a `TypingDemand` is held: Live typing is Linux only.
+#[cfg(target_os = "linux")]
+fn typing_demanded() -> bool {
+    TYPING.load(Ordering::Acquire) > 0
+}
+
+#[cfg(not(target_os = "linux"))]
+fn typing_demanded() -> bool {
+    false
+}
+
+/// Whether the HUD's live text plate wants the published text (Labs › Live
+/// text, or the first run's practice field).
+pub(crate) fn board_demanded() -> bool {
+    DEMANDS.load(Ordering::Acquire) > 0
 }
 
 /// One recording's hold on the live text.
@@ -151,15 +202,6 @@ mod tests {
     }
 
     #[test]
-    fn the_live_text_style_demands_the_words_and_the_others_do_not() {
-        use crate::app_settings::IndicatorStyle::{AudioBar, LiveText, Pill};
-        assert!(wanted(LiveText, 0));
-        assert!(!wanted(Pill, 0));
-        assert!(!wanted(AudioBar, 0));
-        assert!(wanted(Pill, 1), "the practice field still asks");
-    }
-
-    #[test]
     fn a_recording_shows_its_text_and_clears_it_when_it_ends() {
         let _turn = turn();
         let seen = watched();
@@ -194,6 +236,21 @@ mod tests {
         );
         drop(newer);
         assert_eq!(seen.lock().unwrap().last(), Some(&None));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_typing_demand_feeds_the_engine_without_wanting_the_plate() {
+        let _turn = turn();
+        let before = board_demanded();
+        let demand = typing_demand();
+        assert!(demanded(), "the engine publishes for a typing demand");
+        assert_eq!(
+            board_demanded(),
+            before,
+            "typing alone never asks for the plate"
+        );
+        drop(demand);
     }
 
     #[test]

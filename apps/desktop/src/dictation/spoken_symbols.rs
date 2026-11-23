@@ -1,10 +1,13 @@
 //! Labs › Spoken symbols: whole spoken words for punctuation and symbols
 //! become the characters, joined to their neighbours as written text joins
 //! them: "hashtag release" is "#release", "my underscore variable" is
-//! "my_variable", and "done comma thanks" is "done, thanks". Matching
-//! ignores ASCII case and needs word boundaries, so "commas" or "hashtags"
-//! stay as they are. The commas, periods, and spaces a model puts around a
+//! "my_variable", and "done comma thanks" is "done, thanks". Spanish words
+//! ("arroba", "guion bajo", "punto y coma", …) work too. Matching ignores
+//! case and Spanish accents and needs word boundaries, so "commas" or
+//! "hashtags" stay as they are. The commas, periods, and spaces a model puts around a
 //! spoken symbol go with it.
+
+use super::spoken_formatting::fold;
 
 /// Which neighbour a symbol attaches to.
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -27,24 +30,12 @@ const SYMBOLS: &[(&[&str], char, Join)] = &[
     (&["comma"], ',', Join::Previous),
     (&["semicolon"], ';', Join::Previous),
     (&["colon"], ':', Join::Previous),
-    // Sentence punctuation, brackets and a few signs a Voxtype user says
-    // (the words the other tools treat as symbols; ambiguous ones such as
-    // "plus", "pipe" or "tab" are left as words).
-    (&["period"], '.', Join::Previous),
-    (&["question", "mark"], '?', Join::Previous),
-    (&["exclamation", "mark"], '!', Join::Previous),
-    (&["exclamation", "point"], '!', Join::Previous),
-    (&["open", "parenthesis"], '(', Join::Next),
-    (&["open", "paren"], '(', Join::Next),
-    (&["close", "parenthesis"], ')', Join::Previous),
-    (&["close", "paren"], ')', Join::Previous),
-    (&["open", "bracket"], '[', Join::Next),
-    (&["close", "bracket"], ']', Join::Previous),
-    (&["open", "brace"], '{', Join::Next),
-    (&["close", "brace"], '}', Join::Previous),
-    (&["dollar", "sign"], '$', Join::Next),
-    (&["percent", "sign"], '%', Join::Previous),
-    (&["backslash"], '\\', Join::Both),
+    (&["arroba"], '@', Join::Next),
+    (&["guion", "bajo"], '_', Join::Both),
+    (&["guion"], '-', Join::Both),
+    (&["punto", "y", "coma"], ';', Join::Previous),
+    (&["coma"], ',', Join::Previous),
+    (&["dos", "puntos"], ':', Join::Previous),
 ];
 
 /// `transcript` with its spoken symbols applied.
@@ -83,7 +74,7 @@ fn symbol_at(chars: &[char], start: usize) -> Option<(char, Join, usize)> {
             }
             for expected in word.chars() {
                 match chars.get(position) {
-                    Some(c) if c.to_ascii_lowercase() == expected => position += 1,
+                    Some(&c) if fold(c) == expected => position += 1,
                     _ => return None,
                 }
             }
@@ -152,25 +143,6 @@ mod tests {
     use super::apply;
 
     #[test]
-    fn spoken_sentence_punctuation_and_brackets_join_their_neighbours() {
-        assert_eq!(apply("done period next"), "done. next");
-        assert_eq!(apply("really question mark"), "really?");
-        assert_eq!(apply("wow exclamation mark ok"), "wow! ok");
-        assert_eq!(apply("wow exclamation point"), "wow!");
-        assert_eq!(apply("call open paren now close paren ok"), "call (now) ok");
-        assert_eq!(
-            apply("see open parenthesis here close parenthesis"),
-            "see (here)"
-        );
-        assert_eq!(apply("a open bracket 1 close bracket"), "a [1]");
-        assert_eq!(apply("x open brace y close brace"), "x {y}");
-        assert_eq!(apply("it costs dollar sign five"), "it costs $five");
-        assert_eq!(apply("fifty percent sign off"), "fifty% off");
-        assert_eq!(apply("a backslash b"), "a\\b");
-        assert_eq!(apply("the periodic table"), "the periodic table");
-    }
-
-    #[test]
     fn symbols_join_their_neighbours() {
         assert_eq!(apply("hashtag release"), "#release");
         assert_eq!(apply("my underscore variable"), "my_variable");
@@ -187,8 +159,23 @@ mod tests {
     }
 
     #[test]
+    fn spanish_words_become_symbols_with_or_without_accents() {
+        assert_eq!(apply("escríbeme a arroba casa"), "escríbeme a @casa");
+        assert_eq!(apply("mi guion bajo variable"), "mi_variable");
+        assert_eq!(apply("mi Guión Bajo variable"), "mi_variable");
+        assert_eq!(apply("bien guión conocido"), "bien-conocido");
+        assert_eq!(apply("uno punto y coma dos"), "uno; dos");
+        assert_eq!(apply("hola coma gracias"), "hola, gracias");
+        assert_eq!(apply("la lista dos puntos manzanas"), "la lista: manzanas");
+        assert_eq!(apply("hola comma gracias"), "hola, gracias");
+    }
+
+    #[test]
     fn other_words_are_left_alone() {
         for text in [
+            "comas",
+            "guiones largos",
+            "un punto y aparte",
             "commas",
             "slashed prices",
             "hashtags everywhere",

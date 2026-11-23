@@ -35,36 +35,80 @@ pub(super) const SCENES: &[&str] = &[
     "windows-onboarding-microphone",
     // GNOME and KDE on Wayland: the desktop's paste permission, explained.
     "onboarding-paste",
-    // Almost ready: the model still downloads.
+    // Almost ready: the model still downloads, and a sketch from "Watch
+    // another one" while it does.
     "onboarding-waiting",
+    "onboarding-sketch",
     // Your turn: the practice game, and the shortcut that didn't start.
     "onboarding-try",
     "mac-onboarding-try",
     "mac-onboarding-reopen",
-    // The engine step: recommendation with no GPU; the cloud's key field;
-    // the local model downloading; the shortcut step.
-    "onboarding-engine",
-    "onboarding-engine-cloud",
-    "onboarding-engine-local",
-    // Linux on Apple silicon: the Neural Engine recommended.
-    "onboarding-engine-neural-engine",
-    "onboarding-hotkey",
-    // Another dictation tool is installed: the shortcut step says so.
-    "onboarding-hotkey-other-tool",
-    // The short first run: welcome, the one demo (with Skip), Setup with
-    // Finish later (macOS), the test dictation in a plain field, and the
-    // main window's "Set up dictation" row after Finish later, and the test
-    // dictation with no microphone at all.
-    "onboarding-welcome",
-    "onboarding-first-demo",
-    "mac-onboarding-setup",
-    "onboarding-test-dictation",
-    "onboarding-test-dictation-no-microphone",
-    "onboarding-set-up-dictation",
-    // WordInk is ready.
+    // Hex is ready.
     "onboarding-ready",
     "mac-onboarding-ready",
 ];
+
+/// The optional pages: the demo and the practice.
+const OPTIONAL: &[&str] = &[
+    "onboarding-model-found-back",
+    "onboarding-demo",
+    "onboarding-try",
+    "mac-onboarding-try",
+    "mac-onboarding-reopen",
+];
+
+/// Skip shows only on the optional pages, the demo and the practice, and
+/// passes over them to the next step setup still needs: permissions, then
+/// the model, else Hex is ready. It never closes onboarding.
+#[test]
+fn onboarding_skip() {
+    for scene in SCENES {
+        let rt = runtime(scene, true, PANE_SIZE);
+        assert_eq!(
+            rt.find("skip").is_some(),
+            OPTIONAL.contains(scene),
+            "{scene}: Skip"
+        );
+    }
+    let page = |rt: &Runtime<Ui>| super::super::onboarding_kit::live::page(&rt.state);
+    let skip = |rt: &mut Runtime<Ui>, scene: &str, next: Page| {
+        tap(rt, "skip");
+        settle(rt);
+        assert_eq!(page(rt), Some(next), "{scene}: Skip lands here");
+        assert!(rt.state.tour.is_some(), "{scene}: onboarding stays open");
+        assert_eq!(
+            rt.find("skip").is_some(),
+            next == Page::Try,
+            "{scene}: no Skip on {next:?}"
+        );
+    };
+
+    // macOS, permissions still to grant: the demo skips to them.
+    let mut rt = runtime("mac-onboarding", true, PANE_SIZE);
+    rt.update(|ui, _| super::super::onboarding_kit::live::fixture_resume(ui, Page::Demo));
+    settle(&mut rt);
+    assert_eq!(page(&rt), Some(Page::Demo));
+    skip(&mut rt, "mac demo", Page::Permissions);
+
+    // Nothing to grant, the model still downloading: on to Almost ready.
+    let mut rt = runtime("onboarding-demo", true, PANE_SIZE);
+    skip(&mut rt, "onboarding-demo", Page::Waiting);
+
+    // Nothing left to set up: the demo and the practice skip to Hex is ready.
+    let mut rt = runtime("onboarding-demo", true, PANE_SIZE);
+    rt.update(|ui, tx| {
+        ui.picker.installed = Some(vec![ui.settings.transcription.model]);
+        if let Some(view) = &mut ui.view {
+            view.transcription.preparing = None;
+        }
+        super::super::onboarding_kit::live::poll(ui, tx);
+    });
+    skip(&mut rt, "onboarding-demo, model ready", Page::Ready);
+    for scene in ["onboarding-try", "mac-onboarding-try"] {
+        let mut rt = runtime(scene, true, PANE_SIZE);
+        skip(&mut rt, scene, Page::Ready);
+    }
+}
 
 /// Continue without a model (#894): only on the download step, only once
 /// the download failed or stalled. It finishes onboarding, and Settings ›
@@ -97,7 +141,7 @@ fn onboarding_continue_without_model() {
         "Add model file…"
     );
     assert!(
-        texts(&rt).contains(&"WordInk can't dictate until a speech model is installed".to_owned()),
+        texts(&rt).contains(&"Hex can't dictate until a speech model is installed".to_owned()),
         "the status says so too"
     );
 
@@ -116,6 +160,111 @@ fn onboarding_continue_without_model() {
     assert!(rt.state.first_run.is_none(), "onboarding closed");
 }
 
+/// The mic note follows the shortcut: Hold says hold, Toggle says tap,
+/// and a mic released while idle has nothing to explain.
+#[test]
+fn the_mic_note_follows_the_shortcut() {
+    let note = |toggle: bool, release: bool| {
+        let mut ui = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+        super::super::onboarding_kit::scenes::mac_first_run(
+            &mut ui,
+            crate::rune_ui::onboarding::MacStep::TryIt,
+            Page::Try,
+        );
+        // Each poll reads both from settings again.
+        if toggle {
+            ui.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
+        }
+        ui.settings.release_microphone_while_idle = release;
+        let s = ui.first_run.as_mut().expect("the first run is open");
+        s.toggle = toggle;
+        if let Some(live) = s.live.as_mut() {
+            live.release_microphone = release;
+        }
+        texts(&runtime_for(ui, true, PANE_SIZE))
+            .into_iter()
+            .find(|t| t.starts_with("It only records"))
+    };
+    let hold = note(false, false).expect("the note shows");
+    assert!(
+        hold.starts_with("It only records while you hold "),
+        "{hold}"
+    );
+    let tap = note(true, false).expect("the note shows");
+    assert!(tap.starts_with("It only records after you tap "), "{tap}");
+    assert_eq!(note(false, true), None, "no note once the mic is released");
+}
+
+/// The language capsule on the download page: English systems have no
+/// other language, and a later setup replaces the earlier setup's label.
+/// A test's own preferred language keeps both cases independent of the
+/// host locale.
+#[test]
+fn the_language_capsule_switches_only_between_different_languages() {
+    let setup = |model: TranscriptionModelId, language: &str| {
+        let mut ui = portal_fixture();
+        ui.settings.transcription = TranscriptionSelection {
+            model,
+            language: language.into(),
+        };
+        ui.preferred_language = Some("en".into());
+        super::super::onboarding::fixture(&mut ui, Step::Setup, true);
+        super::super::onboarding_kit::live::fixture(&mut ui, Page::Download);
+        runtime_for(ui, false, PANE_SIZE)
+    };
+
+    // An English system has no other language to offer.
+    let mut rt = setup(TranscriptionModelId::ParakeetUnifiedEnglish, "en");
+    let before = sent(&rt).len();
+    tap(&mut rt, "language-capsule");
+    assert_eq!(sent(&rt).len(), before, "nothing downloads");
+
+    // Neither has another English model, such as a Cohere English pick.
+    let mut rt = setup(TranscriptionModelId::CohereTranscribe, "en");
+    let before = sent(&rt).len();
+    tap(&mut rt, "language-capsule");
+    assert_eq!(sent(&rt).len(), before, "English to English is no switch");
+
+    // A French setup switches to the recommended English model and back.
+    let mut rt = setup(TranscriptionModelId::ParakeetV3, "fr");
+    assert!(
+        matches!(
+            sent(&rt),
+            [Request::ChooseModel { model: TranscriptionModelId::ParakeetV3, language }] if language == "fr"
+        ),
+        "{:?}",
+        sent(&rt)
+    );
+    tap(&mut rt, "language-capsule");
+    assert!(matches!(
+        sent(&rt),
+        [
+            Request::ChooseModel { model: TranscriptionModelId::ParakeetV3, language: started },
+            Request::ChooseModel { model: TranscriptionModelId::ParakeetUnifiedEnglish, language },
+        ] if started == "fr" && language == "en"
+    ));
+    tap(&mut rt, "language-capsule");
+    assert!(
+        matches!(
+            sent(&rt).last(),
+            Some(Request::ChooseModel { model: TranscriptionModelId::ParakeetV3, language }) if language == "fr"
+        ),
+        "the toggle swaps back to the saved selection"
+    );
+
+    // Running setup again for Japanese replaces the earlier French label.
+    let rt = setup(
+        crate::transcription::models::recommended_selection("ja").model,
+        "ja",
+    );
+    let shown = texts(&rt);
+    assert!(shown.contains(&"Japanese".to_owned()), "{shown:?}");
+    assert!(
+        !shown.contains(&"French".to_owned()),
+        "the previous setup's label is gone: {shown:?}"
+    );
+}
+
 #[test]
 fn onboarding_goldens() {
     let _goldens = Goldens::collect();
@@ -123,11 +272,6 @@ fn onboarding_goldens() {
         for dark in [true, false] {
             check_golden(scene, dark, PANE_SIZE);
         }
-    }
-    // The default window on a tiling desktop: the practice game and its Done
-    // button fit inside 823 px.
-    for dark in [true, false] {
-        check_golden_as("onboarding-try", "onboarding-try-823", dark, (823.0, 760.0));
     }
 }
 
@@ -174,7 +318,7 @@ fn onboarding_walkthrough() {
     ui.picker.installed = Some(Vec::new());
     // As the window opens at launch.
     ui.tour = Some(
-        super::super::onboarding::Tour::start(&ui.settings, &ui.platform, &ui.picker)
+        super::super::onboarding::Tour::start(&ui.settings, &ui.platform)
             .expect("a new install opens onboarding"),
     );
     super::super::onboarding_kit::live::open(&mut ui);
@@ -182,23 +326,19 @@ fn onboarding_walkthrough() {
     let mut rt = runtime_for(ui, true, PANE_SIZE);
     let step = |rt: &Runtime<Ui>| rt.state.tour.as_ref().map(|tour| tour.flow.step());
     let shown = texts(&rt);
+    assert!(shown.contains(&"Setting up Hex".to_owned()), "{shown:?}");
     assert!(
-        shown.contains(&"Welcome to WordInk".to_owned()),
-        "{shown:?}"
+        !shown.contains(&"Choose a speech model".to_owned()),
+        "nothing found, so no model step"
     );
-    assert_eq!(step(&rt), Some(Step::Welcome));
-    assert!(sent(&rt).is_empty(), "nothing downloads before the engine");
 
-    // Welcome, the one demo (skipped), then the engine choice: local.
-    tap(&mut rt, "continue");
-    assert_eq!(step(&rt), Some(Step::Demo));
-    tap(&mut rt, "skip-demo");
-    assert_eq!(step(&rt), Some(Step::Engine));
-    tap(&mut rt, "option-local");
+    // Setting up Hex asks the service for the recommended model at once.
+    assert_eq!(step(&rt), Some(Step::Setup));
     let (model, language) = match sent(&rt) {
         [Request::ChooseModel { model, language }] => (*model, language.clone()),
-        other => panic!("the local engine should choose a model, sent {other:?}"),
+        other => panic!("setup should choose a model, sent {other:?}"),
     };
+    assert_eq!(model, rt.state.settings.transcription.model);
 
     // The service's work, for real: download and verify into the clean folder.
     let definition = crate::transcription::models::definition(model);
@@ -223,29 +363,21 @@ fn onboarding_walkthrough() {
     );
     rt.state.picker.installed = Some(vec![model]);
 
-    // The download is verified and installed: the shortcut, the test
-    // dictation, then WordInk is ready.
-    rt.state.settings.engine = crate::transcription::cloud::EngineChoice::Local;
+    // The story plays on: the demo, then the practice game ("With Hex")
+    // once the model is ready, then Hex is ready.
     settle(&mut rt);
-    tap(&mut rt, "continue");
-    assert_eq!(step(&rt), Some(Step::Hotkey));
-    tap(&mut rt, "continue");
-    assert_eq!(step(&rt), Some(Step::TryIt));
     rt.update(|ui, _| super::super::onboarding_kit::live::fixture_resume(ui, Page::Try));
     settle(&mut rt);
-    assert!(rt.find("try-live-editor").is_some(), "the plain test field");
-    tap(&mut rt, "skip-try");
-    rt.invalidate();
-    settle(&mut rt);
-    assert!(texts(&rt).contains(&"WordInk is ready".to_owned()));
+    assert_eq!(step(&rt), Some(Step::TryIt));
+    assert!(texts(&rt).contains(&"With Hex".to_owned()));
+    assert!(rt.find("skip").is_some(), "Skip shows on the practice too");
+    tap(&mut rt, "done");
+    assert!(texts(&rt).contains(&"Hex is ready".to_owned()));
     tap(&mut rt, "start-using-hex");
-    assert!(
-        rt.state.tour.is_none(),
-        "Start using WordInk closes onboarding"
-    );
+    assert!(rt.state.tour.is_none(), "Start using Hex closes onboarding");
     assert!(rt.state.first_run.is_none());
     println!(
-        "onboarding walkthrough: Welcome -> demo -> engine -> {} downloaded ({} bytes) -> shortcut -> test dictation -> WordInk is ready",
+        "onboarding walkthrough: Setting up Hex -> {} downloaded ({} bytes) -> Your turn -> Hex is ready",
         definition.name,
         downloaded.load(std::sync::atomic::Ordering::Relaxed)
     );

@@ -25,8 +25,12 @@ const LINUX_WINDOWS: &str = "Linux & Windows";
 const PATHS: &[(&str, &str)] = &[
     ("mac-settings", "Window/General/Settings"),
     ("mac-settings-sides", "Window/General/Left Option shortcut"),
+    ("toggle-cancel", "Window/General/Toggle cancel shortcut"),
+    (
+        "portal-toggle-cancel",
+        "Window/General/Toggle cancel on Wayland",
+    ),
     ("mac-settings-advanced", "Window/General/Advanced"),
-    ("general-advanced", "Window/General/If local fails"),
     ("mac-settings-mic-level", "Window/General/Microphone level"),
     (
         "mac-settings-mic-released",
@@ -63,12 +67,12 @@ const PATHS: &[(&str, &str)] = &[
         "Window/General/Vocabulary · empty",
     ),
     (
-        "vocabulary-suggestions",
-        "Window/General/Vocabulary · suggestions",
-    ),
-    (
         "vocabulary-unused",
         "Window/General/Vocabulary · not used by the model",
+    ),
+    (
+        "vocabulary-budget",
+        "Window/General/Vocabulary · more terms than the model reads",
     ),
     ("shortcut-row", "Window/General/Shortcut/Left Option"),
     ("shortcut-row-right", "Window/General/Shortcut/Right Option"),
@@ -145,6 +149,7 @@ const PATHS: &[(&str, &str)] = &[
     ("modes", "Window/Modes/Modes"),
     ("modes-global", "Window/Modes/Global mode"),
     ("modes-picker", "Window/Modes/App picker"),
+    ("modes-speech", "Window/Modes/Speech model"),
     (
         "modes-transformation-menu",
         "Window/Modes/Transformation menu",
@@ -167,22 +172,31 @@ const PATHS: &[(&str, &str)] = &[
     ("meetings-empty", "Window/Meetings/Empty"),
     ("meetings-off", "Window/Meetings/Off"),
     ("meetings-settings", "Window/Meetings/Settings"),
+    ("meetings-summaries", "Window/Meetings/Summaries"),
+    (
+        "meetings-summaries-unavailable",
+        "Window/Meetings/Summaries without Apple Intelligence",
+    ),
+    ("meetings-summary-model", "Window/Meetings/Summary model"),
+    (
+        "meetings-summary-model-not-running",
+        "Window/Meetings/Summary model without OpenCode",
+    ),
     ("meetings-allow", "Window/Meetings/Allow system audio"),
     ("meetings-calendar", "Window/Meetings/Calendar"),
     (
         "meetings-calendar-denied",
         "Window/Meetings/Calendar denied",
     ),
-    ("replacements", "Window/Replacements/Global"),
-    ("sounds", "Window/Sounds/Pane"),
-    ("privacy", "Window/Privacy/Privacy"),
     ("history", "Window/History/History"),
+    ("history-menu", "Window/History/Retention menu"),
+    ("history-clear", "Window/History/Clear all asks first"),
+    ("history-stats", "Window/History/Stats dialog"),
     ("history-empty", "Window/History/Empty"),
-    ("history-failed", "Window/History/Failed dictations"),
-    ("history-recovered", "Window/History/Recovered dictation"),
-    ("usage", "Window/Usage/Usage"),
-    ("usage-engines", "Window/Usage/Engine timings"),
-    ("usage-empty", "Window/Usage/Empty"),
+    #[cfg(hex_capture)]
+    ("captures", "Window/Captures/Captures"),
+    #[cfg(hex_capture)]
+    ("captures-empty", "Window/Captures/Empty"),
     #[cfg(hex_capture)]
     ("mac-scrawl", "Window/Annotate/On"),
     #[cfg(hex_capture)]
@@ -208,9 +222,14 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-hud-lab", "Window/HUD Lab/HUD Lab"),
     ("mac-labs", "Window/General/Labs"),
     ("mac-labs-link", "Window/General/Labs link"),
+    ("mac-labs-on", "Window/General/Labs turned on"),
+    ("mac-labs-screenshots", "Window/General/Labs screenshots"),
+    ("mac-labs-category", "Window/General/Labs category"),
+    ("mac-labs-search", "Window/General/Labs search"),
+    ("mac-labs-settings", "Window/General/Labs settings"),
     ("mac-production", "Window/General/Production build"),
     ("mac-activity", "Window/Activity/Activity"),
-    ("mac-onboarding", "Window/Onboarding/Setting up WordInk"),
+    ("mac-onboarding", "Window/Onboarding/Setting up Hex"),
     (
         "mac-onboarding-permissions",
         "Window/Onboarding/Permissions",
@@ -227,25 +246,26 @@ const PATHS: &[(&str, &str)] = &[
         "mac-onboarding-restart",
         "Window/Onboarding/Permissions · restart",
     ),
+    ("mac-onboarding-waiting", "Window/Onboarding/Almost ready"),
+    (
+        "mac-onboarding-sketch",
+        "Window/Onboarding/Almost ready · watch another one",
+    ),
     ("mac-onboarding-try", "Window/Onboarding/Your turn"),
     (
         "mac-onboarding-reopen",
         "Window/Onboarding/Your turn · reopen",
     ),
-    (
-        "mac-onboarding-setup",
-        "Window/Onboarding/Permissions · finish later",
-    ),
-    ("mac-onboarding-ready", "Window/Onboarding/WordInk is ready"),
+    ("mac-onboarding-ready", "Window/Onboarding/Hex is ready"),
     ("portal", "Linux & Windows/Settings · portal shortcuts"),
-    ("commands", "Linux & Windows/Settings · wordink commands"),
+    ("commands", "Linux & Windows/Settings · hex commands"),
     ("portal-mouse", "Linux & Windows/Settings · mouse button"),
     ("windows-settings", "Linux & Windows/Settings · Windows"),
+    ("windows-labs", "Linux & Windows/Labs · Windows"),
+    ("linux-labs", "Linux & Windows/Labs · Linux"),
     ("disabled", "Linux & Windows/Disabled"),
     ("capturing", "Linux & Windows/Recording a shortcut"),
     ("menus", "Linux & Windows/Microphone menu"),
-    ("microphone-bluetooth", "Linux & Windows/Bluetooth earbuds"),
-    ("microphone-rename", "Linux & Windows/Rename microphone"),
     ("chinese", "Linux & Windows/Chinese"),
     ("voice-filter", "Linux & Windows/Voice Filter"),
     (
@@ -283,48 +303,14 @@ const PATHS: &[(&str, &str)] = &[
         "Linux & Windows/Onboarding · almost ready",
     ),
     (
+        "onboarding-sketch",
+        "Linux & Windows/Onboarding · watch another one",
+    ),
+    (
         "onboarding-paste",
         "Linux & Windows/Onboarding · paste permission",
     ),
     ("onboarding-try", "Linux & Windows/Onboarding · your turn"),
-    (
-        "onboarding-engine",
-        "Linux & Windows/Onboarding · engine (no GPU)",
-    ),
-    (
-        "onboarding-engine-cloud",
-        "Linux & Windows/Onboarding · engine, Groq key",
-    ),
-    (
-        "onboarding-engine-local",
-        "Linux & Windows/Onboarding · engine, downloading",
-    ),
-    (
-        "onboarding-engine-neural-engine",
-        "Linux & Windows/Onboarding · engine, Neural Engine",
-    ),
-    ("onboarding-hotkey", "Linux & Windows/Onboarding · shortcut"),
-    (
-        "onboarding-hotkey-other-tool",
-        "Linux & Windows/Onboarding · shortcut, other tool",
-    ),
-    ("onboarding-welcome", "Linux & Windows/Onboarding · welcome"),
-    (
-        "onboarding-first-demo",
-        "Linux & Windows/Onboarding · demo, with Skip",
-    ),
-    (
-        "onboarding-test-dictation",
-        "Linux & Windows/Onboarding · test dictation",
-    ),
-    (
-        "onboarding-test-dictation-no-microphone",
-        "Linux & Windows/Onboarding · test dictation, no microphone",
-    ),
-    (
-        "onboarding-set-up-dictation",
-        "Linux & Windows/Onboarding · set up dictation",
-    ),
     ("onboarding-ready", "Linux & Windows/Onboarding · ready"),
     (
         "windows-onboarding-microphone",
@@ -364,7 +350,7 @@ fn playground() -> Playground<Ui> {
     let playground = Playground::new()
         .enabled(true)
         .bar(false)
-        .sizes(&[("WordInk window", WINDOW_SIZE)])
+        .sizes(&[("Hex window", WINDOW_SIZE)])
         .group_order(GROUPS)
         .start_folded(true);
     let playground = super::onboarding_kit::stories(playground);

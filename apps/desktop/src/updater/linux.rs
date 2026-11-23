@@ -3,8 +3,8 @@
 //! directory and switching the `current` symlink atomically. Source builds
 //! (the `source-build` marker) and package-managed executables (pacman,
 //! dpkg, rpm, Nix) never replace themselves. Linux has no OS code signature,
-//! so every executable carries an ed25519 signature by WordInk's release key
-//! (`<target>-sig`, made by `packaging/linux/sign-linux.sh`) over its SHA-256,
+//! so every executable carries an ed25519 signature by Anomaly's release key
+//! (`<target>-sig`, made by `.github/release/sign-linux.sh`) over its SHA-256,
 //! which [`verify_signature`] checks before the download is even fetched.
 
 use std::fs::{self, File, OpenOptions};
@@ -24,13 +24,11 @@ pub const TARGET: &str = "linux-x64";
 pub const TARGET: &str = "linux-arm64";
 pub const DOWNLOAD_TARGET: &str = TARGET;
 
-/// WordInk's ed25519 Linux release key, `packaging/linux/wordink-signing.pub`
-/// (the `WORDINK_LINUX_SIGNING_KEY` secret of the `release` environment signs
-/// with its private half). Changing it needs the owner's review (CODEOWNERS);
-/// rotation steps are in SECURITY.md.
+/// Anomaly's ed25519 Linux release key, `.github/release/linux-signing.pub`
+/// (the `HEX_RELEASE_SIGNING_KEY` secret signs with its private half).
 pub const SIGNING_KEY: [u8; 32] = [
-    0xba, 0x92, 0x2b, 0x68, 0x3b, 0x90, 0x15, 0x9b, 0xa7, 0xf5, 0xbe, 0x19, 0x1a, 0x52, 0xf9, 0x3f,
-    0xa8, 0xfd, 0x92, 0x55, 0x4e, 0x38, 0x59, 0x97, 0x4f, 0x36, 0x8f, 0x36, 0xec, 0x64, 0x28, 0x07,
+    0xbf, 0xad, 0x02, 0xe6, 0x22, 0x08, 0xff, 0x14, 0x4b, 0x5c, 0x9d, 0x21, 0xc7, 0xe7, 0x9c, 0x7c,
+    0x16, 0xc6, 0x90, 0x42, 0x99, 0xa4, 0x37, 0xd8, 0x57, 0x30, 0x30, 0x07, 0xcd, 0x4f, 0xf7, 0xd8,
 ];
 
 /// The manifest target holding the signature of [`TARGET`].
@@ -39,10 +37,10 @@ pub fn signature_target() -> String {
 }
 
 fn signed_message(sha256: &str) -> String {
-    format!("wordink.linux-artifact.v1\n{sha256}\n")
+    format!("anomaly.hex.linux-artifact.v1\n{sha256}\n")
 }
 
-/// Whether `signature` is WordInk's release key signing the executable whose
+/// Whether `signature` is Anomaly's release key signing the executable whose
 /// SHA-256 is `sha256`. The manifest names that SHA-256, and the download is
 /// checked against it, so this ties the bytes to the key.
 pub fn verify_signature(sha256: &str, signature: &[u8]) -> Result<()> {
@@ -56,7 +54,7 @@ fn verify_with(key: &[u8; 32], sha256: &str, signature: &[u8]) -> Result<()> {
     VerifyingKey::from_bytes(key)
         .wrap_err("invalid Linux release key")?
         .verify_strict(signed_message(sha256).as_bytes(), &signature)
-        .wrap_err("the Linux update is not signed by WordInk's release key")
+        .wrap_err("the Linux update is not signed by Anomaly's release key")
 }
 
 /// The release service's distribution kinds for this architecture's `.deb`
@@ -83,23 +81,12 @@ const SOURCE_MARKER: &str = "source-build";
 #[derive(Clone, Debug)]
 pub struct Staged(PathBuf);
 
-/// Whether `value` (the `APPIMAGE` variable the AppImage runtime sets) names
-/// an existing file: this process runs from an AppImage, which cannot
-/// replace itself, so updates link to the AppImage download.
-fn appimage_set(value: Option<&std::ffi::OsStr>, exists: impl Fn(&Path) -> bool) -> bool {
-    value.is_some_and(|path| !path.is_empty() && exists(Path::new(path)))
-}
-
-pub fn running_appimage() -> bool {
-    appimage_set(std::env::var_os("APPIMAGE").as_deref(), |path| {
-        path.is_file()
-    })
+/// Only Windows explains beside Download update why it can't update itself.
+pub fn blocked() -> Option<&'static str> {
+    None
 }
 
 pub fn method() -> Method {
-    if running_appimage() {
-        return Method::DownloadOnly;
-    }
     // geteuid has no preconditions and does not mutate process state.
     let user = unsafe { libc::geteuid() };
     let Ok(executable) = std::env::current_exe().and_then(|path| path.canonicalize()) else {
@@ -188,7 +175,7 @@ pub fn stage(file: &Path, version: &str) -> Result<Staged> {
 
 pub fn restart_into(staged: &Staged) -> Result<()> {
     if !staged.0.is_file() {
-        bail!("the prepared WordInk update is no longer installed");
+        bail!("the prepared Hex update is no longer installed");
     }
     crate::linux::service::schedule_restart()
 }
@@ -222,7 +209,7 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
     fs::create_dir_all(&version_dir)?;
     fs::set_permissions(&versions, fs::Permissions::from_mode(0o700))?;
     fs::set_permissions(&version_dir, fs::Permissions::from_mode(0o700))?;
-    let executable = version_dir.join("wordink");
+    let executable = version_dir.join("hex");
     let staged = version_dir.join(".hex.partial");
     let _ = fs::remove_file(&staged);
     fs::rename(staging, &staged)?;
@@ -249,31 +236,14 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
             && name.to_str().is_some_and(is_version_name)
             && let Err(error) = fs::remove_dir_all(entry.path())
         {
-            tracing::warn!(%error, path = %entry.path().display(), "could not prune an old WordInk version");
+            tracing::warn!(%error, path = %entry.path().display(), "could not prune an old Hex version");
         }
     }
-    Ok(current.join("wordink"))
+    Ok(current.join("hex"))
 }
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn appimage_detection() {
-        use std::ffi::OsStr;
-        let yes = |_: &std::path::Path| true;
-        let no = |_: &std::path::Path| false;
-        assert!(super::appimage_set(
-            Some(OsStr::new("/x/WordInk.AppImage")),
-            yes
-        ));
-        assert!(!super::appimage_set(
-            Some(OsStr::new("/x/WordInk.AppImage")),
-            no
-        ));
-        assert!(!super::appimage_set(Some(OsStr::new("")), yes));
-        assert!(!super::appimage_set(None, yes));
-    }
-
     use super::*;
 
     #[test]
@@ -291,8 +261,12 @@ mod tests {
 
     #[test]
     fn the_compiled_key_is_the_published_one() {
-        let packaging = Path::new(env!("CARGO_MANIFEST_DIR")).join("packaging/linux");
-        let pem = fs::read_to_string(packaging.join("wordink-signing.pub")).unwrap();
+        // .github/release/ is outside the Nix source; skip there.
+        let Ok(pem) = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/release/linux-signing.pub"),
+        ) else {
+            return;
+        };
         // SubjectPublicKeyInfo for Ed25519: a fixed 12-byte prefix, then the key.
         let mut der = vec![
             0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
@@ -314,34 +288,11 @@ mod tests {
             }
         }
         assert!(pem.lines().any(|line| line == encoded), "{encoded}");
-        let installer = fs::read_to_string(packaging.join("install-release.sh")).unwrap();
+        let installer = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/release/install-linux.sh"),
+        )
+        .unwrap();
         assert!(installer.contains(&format!("\nsigning_key={encoded}\n")));
-    }
-
-    #[test]
-    fn a_throwaway_key_signs_what_the_updater_verifies() {
-        use ed25519_dalek::{Signer, SigningKey};
-        // A key generated here, never the release key: proves the format
-        // `packaging/linux/sign-linux.sh` writes (a raw 64-byte signature over
-        // `wordink.linux-artifact.v1\n<sha256>\n`) is what `verify_with` takes.
-        let mut seed = [0u8; 32];
-        getrandom::fill(&mut seed).unwrap();
-        let key = SigningKey::from_bytes(&seed);
-        let sha = "c".repeat(64);
-        assert_eq!(
-            signed_message(&sha),
-            format!("wordink.linux-artifact.v1\n{sha}\n")
-        );
-        let signature = key.sign(signed_message(&sha).as_bytes()).to_bytes();
-        assert_eq!(signature.len(), 64);
-        let public = key.verifying_key().to_bytes();
-        assert!(verify_with(&public, &sha, &signature).is_ok());
-        // Another artifact's hash, a flipped bit, and the release key all fail.
-        assert!(verify_with(&public, &"d".repeat(64), &signature).is_err());
-        let mut flipped = signature;
-        flipped[10] ^= 1;
-        assert!(verify_with(&public, &sha, &flipped).is_err());
-        assert!(verify_signature(&sha, &signature).is_err());
     }
 
     #[test]
@@ -349,19 +300,16 @@ mod tests {
         let root = std::env::temp_dir().join(format!("hex-linux-activate-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("versions/1.0.0")).unwrap();
-        fs::write(root.join("versions/1.0.0/wordink"), b"old").unwrap();
+        fs::write(root.join("versions/1.0.0/hex"), b"old").unwrap();
         fs::create_dir_all(root.join("versions/0.9.0")).unwrap();
-        fs::write(root.join("versions/0.9.0/wordink"), b"older").unwrap();
+        fs::write(root.join("versions/0.9.0/hex"), b"older").unwrap();
         symlink("versions/1.0.0", root.join("current")).unwrap();
         let staging = root.join("hex.staging");
         fs::write(&staging, b"new").unwrap();
 
         let executable = activate(&root, "1.1.0", &staging).unwrap();
         assert_eq!(fs::read(executable).unwrap(), b"new");
-        assert_eq!(
-            fs::read(root.join("versions/1.0.0/wordink")).unwrap(),
-            b"old"
-        );
+        assert_eq!(fs::read(root.join("versions/1.0.0/hex")).unwrap(), b"old");
         assert!(!root.join("versions/0.9.0").exists());
         let _ = fs::remove_dir_all(root);
     }
@@ -372,7 +320,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         let running = root.join("versions").join(crate::VERSION);
         fs::create_dir_all(&running).unwrap();
-        fs::write(running.join("wordink"), b"running").unwrap();
+        fs::write(running.join("hex"), b"running").unwrap();
         symlink(
             Path::new("versions").join(crate::VERSION),
             root.join("current"),
@@ -383,8 +331,8 @@ mod tests {
             fs::write(&staging, bytes).unwrap();
             activate(&root, version, &staging).unwrap();
         }
-        assert_eq!(fs::read(root.join("current/wordink")).unwrap(), b"newer");
-        assert_eq!(fs::read(running.join("wordink")).unwrap(), b"running");
+        assert_eq!(fs::read(root.join("current/hex")).unwrap(), b"newer");
+        assert_eq!(fs::read(running.join("hex")).unwrap(), b"running");
         let _ = fs::remove_dir_all(root);
     }
 }

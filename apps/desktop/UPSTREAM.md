@@ -5,9 +5,9 @@ This directory is a copy of [Hex](https://github.com/anomalyco/hex) by Anomaly, 
 | | |
 |---|---|
 | Source | https://github.com/anomalyco/hex |
-| Tag | v3.3.0 |
-| Commit | `753b078972b2f7912063db182b8b66b7c8d45ffc` |
-| Imported | 2026-11-02 (v3.2.0); synced to v3.3.0 on 2026-11-04 |
+| Tag | v3.4.0 |
+| Commit | `8766d096eb3c98a5b1a54cb966a6daa717bc839d` |
+| Imported | 2026-11-02 (v3.2.0); synced to v3.4.0 on 2026-11-23 |
 
 ## Not copied
 
@@ -19,14 +19,14 @@ These Hex paths were left out because WordInk does not use them:
 - `flake.nix`, `flake.lock`, `nix/`
 - `.github/`, `.cloudflare/`, `.hivemind.toml` (Hex's CI and hosting; WordInk's CI lives in the repo root `.github/`)
 
-## Where WordInk differs from Hex after the v3.3.0 sync
+## Where WordInk differs from Hex after the v3.4.0 sync
 
 - Speech model picker: Hex's new compare and full-list views, with WordInk's Cloud group (Groq, OpenRouter, gateway) added to the full list.
 - First run: WordInk's short first run (Skip on the demo, Finish later) stays; Hex's Skip on the practice page and its `onboarding_skip` check are not adopted. Hex's "Continue without a model" is.
 - Terminal paste: WordInk's Auto / Always / Never (`terminal_paste`) stays in place of Hex's `paste_with_shift` bool, which only migrates.
 - Default dictation shortcut: WordInk's `dictation_default_for` stays; Hex's KDE Plasma case (#898) feeds its GNOME branch.
 - Policy locks (`policy.rs`, macOS managed preferences) read the `io.github.duketopceo.wordink` domain.
-- Version stays 1.0.0 (not Hex's 3.3.0); `ModelDefinition.license` and the licence badge stay (GigaAM v3: MIT).
+- Version stays 1.0.0 (not Hex's 3.4.0); `ModelDefinition.license` and the licence badge stay (GigaAM v3: MIT).
 
 ## Pulling a later Hex change
 
