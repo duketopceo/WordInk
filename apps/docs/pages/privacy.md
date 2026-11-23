@@ -55,7 +55,6 @@ default.
 The SDK keeps no usage statistics. If you want them, count `wordink-transcript` events (or
 `onTranscript` calls) in your own code and send them to your own backend.
 
-## WordInk Remote (iOS)
+## iPhone
 
-The iOS app is paused and not distributed. The earlier app is preserved on branch
-`archive/ios-2026-11-03` and will be rebuilt later.
+WordInk has no iPhone app. For dictation on iPhone, use [Hex: voice dictation keyboard](https://apps.apple.com/us/app/hex-voice-dictation-keyboard/id6836837368), a separate app by Anomaly (the project WordInk's desktop app is based on). WordInk does not run it and does not see what you dictate there; Hex's own privacy policy applies to it. WordInk's earlier iOS app was never distributed and is preserved on branch `archive/ios-2026-11-03`.
