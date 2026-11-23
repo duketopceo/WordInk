@@ -98,9 +98,9 @@ update state must say a newer version exists and the button must open the right
 file:
 
 - **Windows (installed from Setup):** the link opens
-  `WordInk-Setup-windows-x64.exe`. Run it over the old install: it keeps
+  `WordInk-for-Windows-Setup.exe`. Run it over the old install: it keeps
   settings and history and `wordink.exe --version` reports the new version.
-- **macOS (dmg install):** the link opens `WordInk-macos-arm64.dmg`. Mounting it
+- **macOS (dmg install):** the link opens `WordInk-for-Mac-Apple-Silicon.dmg`. Mounting it
   shows `WordInk.app`, the Applications link and the WordInk volume icon. Drag
   the app over the old one, confirm the replace, and open it: the new version
   runs and settings survive.

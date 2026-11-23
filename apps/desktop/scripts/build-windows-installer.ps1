@@ -1,29 +1,28 @@
-# Builds hex-setup-<version>-windows-<x64|arm64>.exe, the per-user Windows
-# installer, around an already-built (and signed) release hex.exe and its
-# console entry point hex.com. Installs Inno Setup 6 when ISCC is missing. The
-# installer embeds both byte for byte. -Console is left out only to wrap a
-# release published before hex.com.
+# Builds wordink-setup-<version>-windows-<x64|arm64>.exe, the per-user Windows
+# installer (packaging/windows/wordink.iss), around an already-built release
+# wordink.exe, and prints its path. Installs Inno Setup 6 when ISCC is missing.
+# The installer embeds the executable byte for byte. The Desktop release
+# workflow publishes it as WordInk-for-Windows-Setup.exe.
 #
-#   scripts/build-windows-installer.ps1 -Executable dist\hex-2.4.0-windows-x64.exe `
-#     -Console dist\hex-2.4.0-windows-x64.com -Version 2.3.0 -Arch x86_64 -OutDir dist
+#   scripts/build-windows-installer.ps1 -Executable target\release\wordink.exe `
+#     -Version 1.2.3 -Arch x86_64 -OutDir dist
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string]$Executable,
-    [string]$Console,
     [Parameter(Mandatory)] [string]$Version,
     [Parameter(Mandatory)] [ValidateSet('x86_64', 'aarch64')] [string]$Arch,
     [Parameter(Mandatory)] [string]$OutDir
 )
 $ErrorActionPreference = 'Stop'
 
-if ($Version -notmatch '^(\d+\.\d+\.\d+(-beta\.\d+)?|0\.0\.0-dev-\d+)$') { throw "Expected a release version, not $Version." }
+# A release (1.2.3), a release candidate (1.2.3-rc.1) or a workflow dry run
+# (0.0.0-dryrun.42).
+if ($Version -notmatch '^\d+\.\d+\.\d+(-(rc|dryrun)\.\d+)?$') { throw "Expected a release version, not $Version." }
 $Executable = (Resolve-Path $Executable).Path
-$consoleDefine = @()
-if ($Console) { $consoleDefine = @("/DConsole=$((Resolve-Path $Console).Path)") }
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 $label = if ($Arch -eq 'x86_64') { 'x64' } else { 'arm64' }
-$script = Join-Path (Split-Path -Parent $PSScriptRoot) 'packaging\windows\hex.iss'
+$script = Join-Path (Split-Path -Parent $PSScriptRoot) 'packaging\windows\wordink.iss'
 
 function Find-Iscc {
     $candidates = @(
@@ -48,8 +47,8 @@ if (-not $iscc) {
     if (-not $iscc) { throw 'Inno Setup could not be installed.' }
 }
 
-& $iscc /Qp "/DAppVersion=$Version" "/DArch=$label" "/DExecutable=$Executable" @consoleDefine "/DOutputDir=$OutDir" $script
+& $iscc /Qp "/DAppVersion=$Version" "/DArch=$label" "/DExecutable=$Executable" "/DOutputDir=$OutDir" $script
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE." }
-$installer = Join-Path $OutDir "hex-setup-$Version-windows-$label.exe"
+$installer = Join-Path $OutDir "wordink-setup-$Version-windows-$label.exe"
 if (-not (Test-Path $installer)) { throw "ISCC did not produce $installer." }
 Write-Output $installer

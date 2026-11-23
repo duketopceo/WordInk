@@ -85,6 +85,8 @@ jobs:
           sparse-checkout: |
             apps/desktop/CHANGELOG.md
             apps/desktop/scripts/release-notes.sh
+            apps/desktop/scripts/prepend-release-download-table.sh
+            apps/desktop/packaging/linux/release-asset-names.sh
           sparse-checkout-cone-mode: false
       - id: version
         env:
@@ -125,12 +127,15 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           DRY_RUN: ${{ steps.version.outputs.dry_run }}
+          WORDINK_TAG: ${{ github.ref_name }}
+          WORDINK_REPO: ${{ github.repository }}
         run: |
           mkdir -p "$RUNNER_TEMP/notes"
           if [ "$DRY_RUN" = true ]; then
             echo "Dry run $VERSION: not a release." > "$RUNNER_TEMP/notes/release-notes.md"
           else
-            apps/desktop/scripts/release-notes.sh "$VERSION" > "$RUNNER_TEMP/notes/release-notes.md"
+            body=$(apps/desktop/scripts/release-notes.sh "$VERSION")
+            apps/desktop/scripts/prepend-release-download-table.sh "$body" > "$RUNNER_TEMP/notes/release-notes.md"
           fi
           cat "$RUNNER_TEMP/notes/release-notes.md"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -204,6 +209,8 @@ jobs:
       # executable needs no OpenBLAS runtime.
       TRANSCRIBE_CMAKE_ARGS: ${{ matrix.cmake }}
       MACOSX_DEPLOYMENT_TARGET: "15.0"
+      # crates/capture/build.rs runs in crates/capture; the plist path must be absolute (build-app.sh uses $root/...).
+      SCRAWL_HELPER_PLIST: ${{ matrix.label == 'macos-arm64' && format('{0}/apps/desktop/packaging/macos/scrawl-helper-Info.plist', github.workspace) || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -280,7 +287,8 @@ jobs:
               [ "$reported" = "$HEX_VERSION" ] || { echo "::error::the app reports $reported, not $HEX_VERSION"; exit 1; }
               ditto -c -k --keepParent "$bundle" "$dist/$name.zip"
               # The drag-to-Applications disk image (unsigned, not notarized).
-              packaging/macos/make-dmg.sh "$bundle" "$dist/WordInk-macos-arm64.dmg"
+              . packaging/linux/release-asset-names.sh
+              packaging/macos/make-dmg.sh "$bundle" "$dist/$WORDINK_ASSET_DMG"
               ;;
             Windows)
               stage=$(mktemp -d)/wordink
@@ -289,11 +297,12 @@ jobs:
               powershell -NoProfile -Command "Compress-Archive -Path '$(cygpath -w "$stage")' -DestinationPath '$(cygpath -w "$dist/$name.zip")'"
               # The per-user Setup .exe (Inno Setup, packaging/windows/wordink.iss),
               # unsigned. Its name carries no version, so README links can
-              # use releases/latest/download/WordInk-Setup-windows-x64.exe.
+              # use releases/latest/download/$WORDINK_ASSET_WINDOWS_SETUP.
               setup="$temp/setup"
               pwsh -NoProfile -File scripts/build-windows-installer.ps1 -Executable "$(cygpath -w "$exe")" \
                 -Version "$HEX_VERSION" -Arch x86_64 -OutDir "$(cygpath -w "$setup")"
-              mv "$setup/wordink-setup-$HEX_VERSION-windows-x64.exe" "$dist/WordInk-Setup-windows-x64.exe"
+              . packaging/linux/release-asset-names.sh
+              mv "$setup/wordink-setup-$HEX_VERSION-windows-x64.exe" "$dist/$WORDINK_ASSET_WINDOWS_SETUP"
               ;;
           esac
           ls -l "$dist"
@@ -395,7 +404,8 @@ jobs:
             APPIMAGETOOL="$tools/appimagetool" APPIMAGE_RUNTIME_DIR="$tools/runtime" \
               apps/desktop/packaging/linux/make-appimage.sh "$executable" "$arch" "$out"
           done
-          dpkg-deb --info "$out/wordink_amd64.deb"
+          . apps/desktop/packaging/linux/release-asset-names.sh
+          dpkg-deb --info "$out/$WORDINK_ASSET_DEB_AMD64"
           ls -l "$out"
       # The one-line installers are release assets under these exact names
       # (`.../releases/latest/download/<name>` is the URL users run).
@@ -441,8 +451,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { label: linux-x64, os: ubuntu-24.04, artifact: linux-packages, deb: wordink_amd64.deb, rpm: wordink-x86_64.rpm, appimage: WordInk-linux-x86_64.AppImage }
-          - { label: linux-arm64, os: ubuntu-24.04-arm, artifact: linux-packages, deb: wordink_arm64.deb, rpm: wordink-aarch64.rpm, appimage: WordInk-linux-aarch64.AppImage }
+          - { label: linux-x64, os: ubuntu-24.04, artifact: linux-packages, deb: wordink-package-debian-amd64.deb, rpm: wordink-package-fedora-x86_64.rpm, appimage: WordInk-for-Linux-x86_64.AppImage }
+          - { label: linux-arm64, os: ubuntu-24.04-arm, artifact: linux-packages, deb: wordink-package-debian-arm64.deb, rpm: wordink-package-fedora-aarch64.rpm, appimage: WordInk-for-Linux-ARM64.AppImage }
           - { label: windows-x64, os: windows-latest, artifact: build-windows-x64 }
           - { label: macos-arm64, os: macos-26, artifact: build-macos-arm64 }
     env:
@@ -495,7 +505,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $setup = Join-Path $env:RUNNER_TEMP 'files\WordInk-Setup-windows-x64.exe'
+          $setup = Join-Path $env:RUNNER_TEMP 'files\WordInk-for-Windows-Setup.exe'
           $dir = Join-Path $env:LOCALAPPDATA 'Programs\WordInk'
           $exe = Join-Path $dir 'wordink.exe'
           $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\WordInk.lnk'
@@ -526,7 +536,7 @@ jobs:
           set -euo pipefail
           mnt="$RUNNER_TEMP/mnt"
           mkdir -p "$mnt"
-          hdiutil attach -quiet -nobrowse -readonly -mountpoint "$mnt" "$RUNNER_TEMP/files/WordInk-macos-arm64.dmg"
+          hdiutil attach -quiet -nobrowse -readonly -mountpoint "$mnt" "$RUNNER_TEMP/files/WordInk-for-Mac-Apple-Silicon.dmg"
           trap 'hdiutil detach -quiet "$mnt" || true' EXIT
           [ "$(readlink "$mnt/Applications")" = /Applications ] || { echo "::error::the .dmg has no Applications link"; exit 1; }
           [ -f "$mnt/.VolumeIcon.icns" ] || { echo "::error::the .dmg has no volume icon"; exit 1; }
@@ -625,6 +635,8 @@ jobs:
           path: ${{ runner.temp }}/notes
       # Re-check what the signing job produced before it leaves the runner.
       - run: apps/desktop/packaging/linux/verify-release.sh "$RUNNER_TEMP/release"
+      - name: Legacy asset aliases (1.0.x updaters)
+        run: apps/desktop/packaging/linux/compat-asset-aliases.sh "$RUNNER_TEMP/release"
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: ${{ runner.temp }}/release/*
@@ -637,9 +649,15 @@ jobs:
           # A release candidate is a prerelease and never the latest release.
           if [ "$PRERELEASE" = true ]; then flags+=(--prerelease --latest=false); else flags+=(--latest); fi
           gh release create "$WORDINK_TAG" -R "$WORDINK_REPO" "${flags[@]}" "$RUNNER_TEMP"/release/*
-          expected=$(find "$RUNNER_TEMP/release" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
+          . apps/desktop/packaging/linux/release-asset-names.sh
+          expected=$({
+            awk '{sub(/^\*/, "", $2); print $2}' "$RUNNER_TEMP/release/SHA256SUMS"
+            printf '%s\n' \
+              "$WORDINK_LEGACY_DMG" "$WORDINK_LEGACY_WINDOWS_SETUP" \
+              "$WORDINK_LEGACY_APPIMAGE_X86_64" "$WORDINK_LEGACY_APPIMAGE_AARCH64"
+          } | LC_ALL=C sort -u)
           uploaded=$(gh release view "$WORDINK_TAG" -R "$WORDINK_REPO" --json assets --jq '.assets[].name' | LC_ALL=C sort)
-          [ "$expected" = "$uploaded" ] || { echo "::error::the draft's assets differ from the release files"; diff <(echo "$expected") <(echo "$uploaded") || true; exit 1; }
+          [ "$expected" = "$uploaded" ] || { echo "::error::the draft's assets differ from the signed set plus legacy aliases"; diff <(echo "$expected") <(echo "$uploaded") || true; exit 1; }
 
   # Copies the draft's assets into a workflow artifact for the smoke jobs. The
   # job token needs contents: write to see a draft release; the job checks out

@@ -38,7 +38,7 @@ Keep every signing secret in the protected `release` environment, like `WORDINK_
 
 1. Set up the signing service and its OIDC trust for this repository's `release` environment.
 2. Add the Windows secrets to the `release` environment.
-3. In `desktop-release.yml`, on the Windows leg, sign `wordink.exe` before packaging and `WordInk-Setup-windows-x64.exe` after building it, each gated on the secret being present.
+3. In `desktop-release.yml`, on the Windows leg, sign `wordink.exe` before packaging and `WordInk-for-Windows-Setup.exe` after building it, each gated on the secret being present.
 4. Put the certificate's subject in `AUTHENTICODE_SIGNER` (`updater/windows.rs`).
 5. Turn on the installed-update path the owner described on #113:
    - stage and verify the update;

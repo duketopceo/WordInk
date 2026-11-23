@@ -86,6 +86,11 @@ pub fn method() -> Method {
     }
 }
 
+/// Only Linux AppImages need their own update route.
+pub fn running_appimage() -> bool {
+    false
+}
+
 /// What the window shows when this Hex can't update itself.
 pub fn blocked() -> Option<&'static str> {
     eligibility().err().map(Ineligible::message)

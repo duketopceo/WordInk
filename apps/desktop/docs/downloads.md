@@ -29,6 +29,13 @@ downloads.hex.kitlangton.dev, .com         Kit's old bucket, frozen at 2.3.1; re
 github.com/anomalyco/hex/releases/tag/v<version>       identical-byte mirror of every file (app-v through 2.3.1)
 ```
 
+| OS | Installer |
+|---|---|
+| Windows 10/11 (x64) | [`WordInk-for-Windows-Setup.exe`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Windows-Setup.exe): per user, no admin, Start Menu shortcut, uninstall from Apps & Features |
+| macOS 15+ (Apple silicon) | [`WordInk-for-Mac-Apple-Silicon.dmg`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Mac-Apple-Silicon.dmg): drag WordInk to Applications |
+| Linux x86_64 | [`WordInk-for-Linux-x86_64.AppImage`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Linux-x86_64.AppImage), [`wordink-package-debian-amd64.deb`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-debian-amd64.deb), [`wordink-package-fedora-x86_64.rpm`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-fedora-x86_64.rpm) |
+| Linux aarch64 | [`WordInk-for-Linux-ARM64.AppImage`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Linux-ARM64.AppImage), [`wordink-package-debian-arm64.deb`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-debian-arm64.deb), [`wordink-package-fedora-aarch64.rpm`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-fedora-aarch64.rpm) |
+
 `docs/releasing.md` describes the Worker config, the workflow that publishes
 these, the credentials, and the transition from Kit's bucket.
 `hex-production-files` was seeded with byte copies of everything the old bucket
@@ -65,6 +72,8 @@ On September 11, 2026, a HEAD request for the pinned default Parakeet Unified
 English artifact followed `huggingface.co` to `us.aws.cdn.hf.co` and returned
 HTTP 200. This is an observed delivery host, not a permanent exhaustive CDN list.
 No model body was downloaded for that check.
+
+Each `desktop-vX.Y.Z` release carries: the per-architecture Linux executables and tarballs, AppImages, `.deb` and `.rpm` packages, `wordink-V-macos-arm64.zip` and `WordInk-for-Mac-Apple-Silicon.dmg`, `wordink-V-windows-x64.zip` and `WordInk-for-Windows-Setup.exe`, the three one-line installers, a CycloneDX SBOM, `stable.json` (final releases) and `dev.json`, `SHA256SUMS` and its ed25519 signature `SHA256SUMS.sig`. The exact table is in [`releasing.md`](../../../docs/releasing.md).
 
 Model downloads, update checks, and transformation scripts' `fetch` go through
 Hex's own HTTPS client (`src/net.rs`, #894), which behaves like a browser on a
@@ -121,6 +130,8 @@ not establish access from a particular enterprise network.
 - No signed Linux feed has been published yet. Linux installer/updater source
   defaults were migrated; no Linux native install or enterprise-network test
   was performed as part of these hosting checks.
+
+Allow `github.com` and its release asset host for downloads and update checks, and `huggingface.co` with its download CDN for local speech models. Model downloads go in ranged pieces and resume after a failure. Proxy variables (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`) are honored on every OS.
 
 ## Observed 2.1.17 Publication — September 11, 2026
 

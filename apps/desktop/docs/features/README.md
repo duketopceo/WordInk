@@ -73,34 +73,17 @@ Swift app's data, or forcibly replace an existing app destination. Homebrew unin
 leaves runtime settings, models, and retained data intact.
 
 ```ts
-Download Hex                              // setup.download-recovery
-├── anoma.ly/hex names the visitor's platform  // setup.download-button
-│   ├── Mac -> DMG | Intel Mac -> disabled, "needs Apple silicon"
-│   ├── Windows x64 / ARM64 (UA-CH) -> hex-setup-<version>-windows-<arch>.exe + SmartScreen note
-│   ├── Linux -> copyable `curl … install-linux.sh | sh` + Arch/glibc requirement
-│   ├── Phone -> Send yourself the link
-│   └── Other platforms -> every build, Homebrew, the GitHub release
-├── Website, README, installers, apps, feeds, appcast -> anoma.ly/hex/files (Worker hex-production-site):
-│   installers and appcast from the site build, dev notes from the dev-notes branch, frozen feeds and artifacts from R2
-├── Releases up to 2.3.1 -> downloads.hex.kitlangton.dev (Kit's frozen bucket) -> the same bytes
-├── GitHub v<version> (app-v through 2.3.1) -> identical DMG, Setup.exe, and Linux bytes
-└── Older app cannot reach its update feed -> manually install the DMG
-
-Install on Windows                        // setup.windows-installer
-├── Setup.exe, per user, no admin -> managed versions\<version>\hex.exe
-│   ├── x64 without a Vulkan 1.2 driver -> installs; speech on the CPU + Settings note (#1240)
-│   ├── another version installed (e.g. self-updated) -> install this one over it
-│   └── finish -> Open Hex -> the first run downloads a model
-└── Settings › Apps -> uninstall every version, shortcut, Launch at login; keep data
-
-Install on Linux                          // setup.linux-installer
-└── curl … | sh -> signed feed -> verified artifact -> launcher + hex.service
-    ├── cannot start -> name the glibc floor or the missing Arch packages
-    └── finish without wl-copy -> print apt/dnf/pacman commands for wl-clipboard and wtype
-
-Prepare local models                      // separate network dependency
-└── Dictation -> huggingface.co and its download CDN
-    └── Transfer fails -> host-specific guidance -> restore access -> Retry
+Download WordInk
+├── GitHub Releases (duketopceo/WordInk, desktop-vX.Y.Z tags)
+│   ├── installers (version-less names, releases/latest/download/<name>)
+│   │   ├── Windows -> WordInk-for-Windows-Setup.exe (Inno Setup, per user, unsigned)
+│   │   ├── macOS -> WordInk-for-Mac-Apple-Silicon.dmg (drag to Applications, unsigned)
+│   │   └── Linux -> AppImage, .deb, .rpm (x86_64, aarch64; package-managed updates)
+│   └── one-line installers
+│       ├── Linux -> install.sh (ed25519-verified, self-updating)
+│       ├── macOS -> install-macos.sh (unsigned WordInk.app, link-only updates)
+│       └── Windows -> install.ps1 (per user, unsigned, link-only updates)
+└── Dev channel -> rolling desktop-dev prerelease (dev.json)
 ```
 
 The website shows the pinned macOS version and platform requirements beside its

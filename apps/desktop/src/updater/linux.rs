@@ -81,12 +81,28 @@ const SOURCE_MARKER: &str = "source-build";
 #[derive(Clone, Debug)]
 pub struct Staged(PathBuf);
 
+/// Whether `value` (the `APPIMAGE` variable the AppImage runtime sets) names
+/// an existing file: this process runs from an AppImage, which cannot
+/// replace itself, so updates link to the AppImage download.
+fn appimage_set(value: Option<&std::ffi::OsStr>, exists: impl Fn(&Path) -> bool) -> bool {
+    value.is_some_and(|path| !path.is_empty() && exists(Path::new(path)))
+}
+
+pub fn running_appimage() -> bool {
+    appimage_set(std::env::var_os("APPIMAGE").as_deref(), |path| {
+        path.is_file()
+    })
+}
+
 /// Only Windows explains beside Download update why it can't update itself.
 pub fn blocked() -> Option<&'static str> {
     None
 }
 
 pub fn method() -> Method {
+    if running_appimage() {
+        return Method::DownloadOnly;
+    }
     // geteuid has no preconditions and does not mutate process state.
     let user = unsafe { libc::geteuid() };
     let Ok(executable) = std::env::current_exe().and_then(|path| path.canonicalize()) else {

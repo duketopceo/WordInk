@@ -33,30 +33,26 @@ app and **Disabled** when it does nothing.
 
 x86_64 PCs need a 2013 or newer processor with AVX2 (Intel Haswell / AMD Excavator or later); on an older processor Hex shows a message and quits instead of starting.
 
-Download and run the installer for your PC:
+Download and run
+[WordInk-for-Windows-Setup.exe](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Windows-Setup.exe)
+(from the first release after 1.0.0): a per-user installer with a Start Menu
+shortcut and an uninstaller in Apps & Features. Or install with the one-line
+PowerShell installer from the latest release (see [downloads.md](downloads.md)
+and [releasing.md](../../../docs/releasing.md)); both install the same layout in
+`%LOCALAPPDATA%\Programs\WordInk`.
 
-- x64: [`HexSetup.exe`](https://anoma.ly/hex/download/windows-x64-setup)
-- ARM64: [`HexSetup.exe`](https://anoma.ly/hex/download/windows-arm64-setup)
-
-Until Hex's first stable release these are the newest dev build, which keeps
-updating itself from the Dev channel; afterwards, the stable release.
-
-[anoma.ly/hex](https://anoma.ly/hex/) picks the right one. The
-installer needs no administrator rights: it installs for the current user,
-adds Hex to the Start menu, to **Settings › Apps** for uninstalling, and
-`hex` to PATH for terminals, and opens Hex, whose first run downloads a speech
-model. Releases built once
-Anomaly's Azure Artifact Signing is configured are Authenticode-signed
-([windows-signing.md](windows-signing.md)). Until then, and while a new
-publisher builds SmartScreen reputation, SmartScreen may say it protected your
-PC; choose **More info**, then **Run anyway**.
+The installer needs no administrator rights: it installs for the current user,
+adds WordInk to the Start menu, to **Settings › Apps** for uninstalling, and
+`wordink` to PATH for terminals, and opens WordInk, whose first run downloads a
+speech model. Until signing and SmartScreen reputation are in place, SmartScreen
+may say it protected your PC; choose **More info**, then **Run anyway**.
 
 **x64** decodes on the GPU through Vulkan 1.2, which a current NVIDIA, AMD, or
 Intel graphics driver supplies (`vulkan-1.dll`). With a missing or older
-driver Hex still starts and decodes on the CPU, and Settings › Speech engine
+driver WordInk still starts and decodes on the CPU, and Settings › Speech engine
 says so. **ARM64** decodes on the CPU. Both are
-self-contained: no Visual C++ Redistributable is required. Hex then keeps
-itself current through the signed update feed. Uninstalling removes every
+self-contained: no Visual C++ Redistributable is required. WordInk then keeps
+itself current through the update manifest. Uninstalling removes every
 installed version, the shortcut, and Launch at login, and keeps settings and
 history in `%APPDATA%\hex` and logs and models in `%LOCALAPPDATA%\hex`.
 
