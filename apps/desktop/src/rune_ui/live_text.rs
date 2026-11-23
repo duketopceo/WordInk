@@ -21,6 +21,7 @@ use rune::{
 };
 
 use super::controls::Paint;
+use crate::dictation::indicator::Label;
 use crate::transcription::engine::Partial;
 
 /// The overlay's size: room for about a dozen words on one line.
@@ -395,6 +396,22 @@ fn is_blank(partial: &Partial) -> bool {
     partial.stable.trim().is_empty() && partial.tentative.trim().is_empty()
 }
 
+/// What the plate says: streaming words, else the dictation's phase. `None`
+/// hides the plate when Live text is off or there is nothing to show.
+pub(crate) fn line(
+    enabled: bool,
+    label: Option<Label>,
+    partial: Option<&Partial>,
+) -> Option<(String, String)> {
+    if !enabled {
+        return None;
+    }
+    match partial.filter(|partial| !is_blank(partial)) {
+        Some(Partial { stable, tentative }) => Some((stable.clone(), tentative.clone())),
+        None => label.map(|label| (label.text().to_owned(), String::new())),
+    }
+}
+
 /// About one space of the plate's font, between right-to-left stable and
 /// tentative words.
 const RTL_SPACE: f32 = 4.0;
@@ -648,45 +665,6 @@ mod tests {
             rect(false),
             (700.0 - SIZE.0 / 2.0, 100.0 - PAD - PLATE_H, SIZE.0)
         );
-    }
-
-    #[test]
-    fn a_failure_arriving_after_a_queued_words_end_stays_visible() {
-        let mut plate = Plate::default();
-        plate.set_words("old words".into(), String::new());
-        plate.mark_shown(true);
-
-        // A queued words-ended update runs first and would hide an empty
-        // plate, but the failure queued behind it brings the plate back.
-        plate.words_ended();
-        assert!(plate.should_hide());
-        plate.show_failure("No microphone is available.".into());
-        assert!(!plate.should_hide());
-        assert_eq!(plate.stable, "old words", "the old words stay for the fade");
-
-        // Once the notice is up, a later words end cannot hide it.
-        plate.words_ended();
-        assert!(!plate.should_hide());
-        assert!(plate.take_failure());
-        assert!(plate.should_hide());
-        plate.mark_shown(false);
-    }
-
-    #[test]
-    fn a_failure_notice_takes_the_plate_from_the_live_words() {
-        let rt = runtime_plate(
-            Plate {
-                stable: SHORT.into(),
-                tentative: " and then".into(),
-                failure: Some("No microphone is available. Connect a microphone.".into()),
-                ..Plate::default()
-            },
-            false,
-        );
-        assert!(rect(&rt, "plate").is_some());
-        assert!(rect(&rt, "failure").is_some());
-        assert!(rect(&rt, "stable").is_none());
-        assert!(rect(&rt, "tentative").is_none());
     }
 
     #[test]

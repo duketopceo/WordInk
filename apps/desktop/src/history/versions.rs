@@ -129,6 +129,7 @@ mod tests {
             total_ms: 1_100,
             recording: None,
             model: Some("Parakeet v3".into()),
+            usage: None,
         }
     }
 

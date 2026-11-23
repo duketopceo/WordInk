@@ -318,7 +318,7 @@ fn onboarding_walkthrough() {
     ui.picker.installed = Some(Vec::new());
     // As the window opens at launch.
     ui.tour = Some(
-        super::super::onboarding::Tour::start(&ui.settings, &ui.platform)
+        super::super::onboarding::Tour::start(&ui.settings, &ui.platform, &ui.picker)
             .expect("a new install opens onboarding"),
     );
     super::super::onboarding_kit::live::open(&mut ui);

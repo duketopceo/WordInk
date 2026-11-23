@@ -441,6 +441,14 @@ pub fn root() -> Result<PathBuf> {
     Ok(crate::app_paths::support_dir()?.join("meetings"))
 }
 
+fn require_local_model(installed: bool) -> Result<()> {
+    if installed {
+        Ok(())
+    } else {
+        Err(eyre!(crate::transcription::engine::NO_LOCAL_MODEL))
+    }
+}
+
 pub fn record(
     start: MeetingStart,
     shutdown: &AtomicBool,

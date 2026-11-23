@@ -87,6 +87,10 @@ url = "2.5.8"
 # name and panics on any https request without it.
 ureq = { version = "3.4.2", default-features = false, features = ["native-tls"] }
 
+[dev-dependencies]
+# Decodes FLAC fixtures in cloud audio tests.
+claxon = "0.4.3"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 capture-core = { path = "crates/capture-core" }
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }

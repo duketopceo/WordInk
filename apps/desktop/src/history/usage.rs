@@ -562,6 +562,7 @@ mod tests {
             audio_ms: 0,
             inference_ms: 0,
             total_ms: 0,
+            recording_bytes: 0,
             usage: usage.map(
                 |(provider, model, audio_seconds, words, cost_usd)| UsageRecord {
                     provider: provider.into(),
@@ -571,6 +572,10 @@ mod tests {
                     cost_usd,
                 },
             ),
+            model: None,
+            language: None,
+            text_ms: None,
+            versions: Vec::new(),
         }
     }
 

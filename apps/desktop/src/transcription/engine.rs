@@ -399,6 +399,9 @@ impl Running {
     }
 }
 
+/// What a local transcription says when the engine started with no model.
+pub(crate) const NO_LOCAL_MODEL: &str = "no local model installed \u{2014} install one in Settings";
+
 pub struct TranscriptionEngine {
     commands: Sender<Command>,
     running: Running,

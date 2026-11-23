@@ -172,6 +172,34 @@ impl Phase {
     }
 }
 
+/// What Live text says while no words stream: the dictation's phase.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Label {
+    Ready,
+    LoadingModel,
+    ConnectingEarbuds,
+    Recording,
+    Transcribing,
+    Done,
+    Copied,
+    Error,
+}
+
+impl Label {
+    pub const fn text(self) -> &'static str {
+        match self {
+            Self::Ready => "Ready",
+            Self::LoadingModel => "Loading model",
+            Self::ConnectingEarbuds => "Connecting earbuds mic…",
+            Self::Recording => "Recording",
+            Self::Transcribing => "Transcribing",
+            Self::Done => "Done",
+            Self::Copied => "Copied",
+            Self::Error => "Error",
+        }
+    }
+}
+
 /// One Dot scope frame: the plate's pose and every dot's light.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DotFrame {

@@ -20,7 +20,12 @@ fn entry(raw: &str, final_text: &str) -> HistoryEntry {
         audio_ms: 0,
         inference_ms: 0,
         total_ms: 0,
+        recording_bytes: 0,
         usage: None,
+        model: None,
+        language: None,
+        text_ms: None,
+        versions: Vec::new(),
     }
 }
 
