@@ -6,13 +6,13 @@ WordInk desktop releases are hosted on GitHub Releases only. The release flow is
 
 | OS | Installer |
 |---|---|
-| Windows 10/11 (x64) | [`WordInk-Setup-windows-x64.exe`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-Setup-windows-x64.exe): per user, no admin, Start Menu shortcut, uninstall from Apps & Features |
-| macOS 15+ (Apple silicon) | [`WordInk-macos-arm64.dmg`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-macos-arm64.dmg): drag WordInk to Applications |
-| Linux x86_64 | [`WordInk-linux-x86_64.AppImage`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-linux-x86_64.AppImage) |
-| Linux aarch64 | [`WordInk-linux-aarch64.AppImage`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-linux-aarch64.AppImage) |
+| Windows 10/11 (x64) | [`WordInk-for-Windows-Setup.exe`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Windows-Setup.exe): per user, no admin, Start Menu shortcut, uninstall from Apps & Features |
+| macOS 15+ (Apple silicon) | [`WordInk-for-Mac-Apple-Silicon.dmg`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Mac-Apple-Silicon.dmg): drag WordInk to Applications |
+| Linux x86_64 | [`WordInk-for-Linux-x86_64.AppImage`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Linux-x86_64.AppImage) |
+| Linux aarch64 | [`WordInk-for-Linux-ARM64.AppImage`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Linux-ARM64.AppImage) |
 | iPhone | [Hex on the App Store](https://apps.apple.com/us/app/hex-voice-dictation-keyboard/id6836837368) (a separate app by Anomaly; WordInk has no iOS app) |
 
-Linux packages, for package-manager installs: [`wordink_amd64.deb`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink_amd64.deb), [`wordink_arm64.deb`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink_arm64.deb), [`wordink-x86_64.rpm`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-x86_64.rpm), [`wordink-aarch64.rpm`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-aarch64.rpm).
+Linux packages, for package-manager installs: [`wordink-package-debian-amd64.deb`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-debian-amd64.deb), [`wordink-package-debian-arm64.deb`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-debian-arm64.deb), [`wordink-package-fedora-x86_64.rpm`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-fedora-x86_64.rpm), [`wordink-package-fedora-aarch64.rpm`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-fedora-aarch64.rpm).
 
 The names carry no version, so these `releases/latest/download/` links always fetch the newest final release (GitHub's `latest` skips prereleases, so release candidates are only on their own release pages). They start with the first release after 1.0.0.
 
@@ -32,7 +32,7 @@ On Linux, the `.deb` and `.rpm` install `/usr/bin/wordink`, the launcher entry a
 
 People need only the table above. The other files on a release page are for the updater and the one-line installers (executables and `.sig` files, tarballs, zips, `stable.json`, `dev.json`, the installer scripts) and for verification (`SHA256SUMS`, its `.sig`, the SBOM); do not rename or remove them.
 
-Each `desktop-vX.Y.Z` release carries: the per-architecture Linux executables and tarballs, AppImages, `.deb` and `.rpm` packages, `wordink-V-macos-arm64.zip` and `WordInk-macos-arm64.dmg`, `wordink-V-windows-x64.zip` and `WordInk-Setup-windows-x64.exe`, the three one-line installers, a CycloneDX SBOM, `stable.json` (final releases) and `dev.json`, `SHA256SUMS` and its ed25519 signature `SHA256SUMS.sig`. The exact table is in [`releasing.md`](../../../docs/releasing.md).
+Each `desktop-vX.Y.Z` release carries: the per-architecture Linux executables and tarballs, AppImages, `.deb` and `.rpm` packages, `wordink-V-macos-arm64.zip` and `WordInk-for-Mac-Apple-Silicon.dmg`, `wordink-V-windows-x64.zip` and `WordInk-for-Windows-Setup.exe`, the three one-line installers, a CycloneDX SBOM, `stable.json` (final releases) and `dev.json`, `SHA256SUMS` and its ed25519 signature `SHA256SUMS.sig`. The exact table is in [`releasing.md`](../../../docs/releasing.md).
 
 ## Channels
 

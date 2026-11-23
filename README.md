@@ -28,13 +28,13 @@
 
 | Your device | Download | |
 | --- | --- | --- |
-| **Windows 10/11** (x64) | [WordInk-Setup-windows-x64.exe](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-Setup-windows-x64.exe) | per-user installer, no admin |
-| **macOS 15+** (Apple silicon) | [WordInk-macos-arm64.dmg](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-macos-arm64.dmg) | drag WordInk to Applications |
-| **Linux** (x86_64) | [WordInk-linux-x86_64.AppImage](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-linux-x86_64.AppImage) | glibc 2.39+; `chmod +x` and run |
-| **Linux** (aarch64) | [WordInk-linux-aarch64.AppImage](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-linux-aarch64.AppImage) | glibc 2.39+; `chmod +x` and run |
+| **Windows 10/11** (x64) | [WordInk-for-Windows-Setup.exe](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Windows-Setup.exe) | per-user installer, no admin |
+| **macOS 15+** (Apple silicon) | [WordInk-for-Mac-Apple-Silicon.dmg](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Mac-Apple-Silicon.dmg) | drag WordInk to Applications |
+| **Linux** (x86_64) | [WordInk-for-Linux-x86_64.AppImage](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Linux-x86_64.AppImage) | glibc 2.39+; `chmod +x` and run |
+| **Linux** (aarch64) | [WordInk-for-Linux-ARM64.AppImage](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Linux-ARM64.AppImage) | glibc 2.39+; `chmod +x` and run |
 | **iPhone** | [Hex: voice dictation keyboard](https://apps.apple.com/us/app/hex-voice-dictation-keyboard/id6836837368) on the App Store | free, on-device; a separate app by Anomaly (MIT), the project WordInk's desktop app is based on |
 
-Linux packages for your package manager: [.deb x86_64](https://github.com/duketopceo/WordInk/releases/latest/download/wordink_amd64.deb) · [.deb arm64](https://github.com/duketopceo/WordInk/releases/latest/download/wordink_arm64.deb) · [.rpm x86_64](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-x86_64.rpm) · [.rpm aarch64](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-aarch64.rpm). Most people want the table above and nothing else.
+Linux packages for your package manager: [.deb x86_64](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-debian-amd64.deb) · [.deb arm64](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-debian-arm64.deb) · [.rpm x86_64](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-fedora-x86_64.rpm) · [.rpm aarch64](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-fedora-aarch64.rpm). Most people want the table above and nothing else.
 
 The [releases page](https://github.com/duketopceo/WordInk/releases/latest) also lists the update manifests, the one-line installers, signed checksums, tarballs and a few raw executables. You do not need those to install WordInk; the app's updater and the one-line installers use them. The installer downloads start with the first release after 1.0.0; for 1.0.0 use the one-line installers below.
 
@@ -42,7 +42,7 @@ The [releases page](https://github.com/duketopceo/WordInk/releases/latest) also 
 
 - **Windows:** SmartScreen says "Windows protected your PC". Click **More info**, then **Run anyway**.
 - **macOS:** after dragging WordInk to Applications, open it once and close the warning. Then open **System Settings > Privacy & Security**, scroll to "WordInk was blocked", click **Open Anyway** and confirm. (Right-click > **Open**, the older shortcut, no longer skips the warning on macOS 15 and later.) From a terminal, `xattr -dr com.apple.quarantine /Applications/WordInk.app` does the same.
-- **Linux:** AppImage: `chmod +x WordInk-linux-x86_64.AppImage` and run it. If you took a package instead, `.deb`: `sudo apt install ./wordink_amd64.deb`, `.rpm`: `sudo dnf install ./wordink-x86_64.rpm`; packages update through your package manager. For a signed, self-updating install use the one-line installer below.
+- **Linux:** AppImage: `chmod +x WordInk-for-Linux-x86_64.AppImage` and run it. If you took a package instead, `.deb`: `sudo apt install ./wordink-package-debian-amd64.deb`, `.rpm`: `sudo dnf install ./wordink-package-fedora-x86_64.rpm`; packages update through your package manager. For a signed, self-updating install use the one-line installer below.
 
 ## Install from the terminal
 

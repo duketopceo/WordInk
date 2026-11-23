@@ -850,10 +850,10 @@ macro_rules! asset {
 /// for the target, then the Releases page.
 fn release_asset_url(target: &str, appimage: bool) -> Option<&'static str> {
     match (target, appimage) {
-        ("windows-x64", _) => Some(asset!("WordInk-Setup-windows-x64.exe")),
-        ("macos-arm64", _) => Some(asset!("WordInk-macos-arm64.dmg")),
-        ("linux-x64", true) => Some(asset!("WordInk-linux-x86_64.AppImage")),
-        ("linux-arm64", true) => Some(asset!("WordInk-linux-aarch64.AppImage")),
+        ("windows-x64", _) => Some(asset!("WordInk-for-Windows-Setup.exe")),
+        ("macos-arm64", _) => Some(asset!("WordInk-for-Mac-Apple-Silicon.dmg")),
+        ("linux-x64", true) => Some(asset!("WordInk-for-Linux-x86_64.AppImage")),
+        ("linux-arm64", true) => Some(asset!("WordInk-for-Linux-ARM64.AppImage")),
         _ => None,
     }
 }
@@ -1027,19 +1027,19 @@ mod tests {
         let base = "https://github.com/duketopceo/WordInk/releases/latest/download/";
         assert_eq!(
             release_asset_url("windows-x64", false),
-            Some(format!("{base}WordInk-Setup-windows-x64.exe").as_str())
+            Some(format!("{base}WordInk-for-Windows-Setup.exe").as_str())
         );
         assert_eq!(
             release_asset_url("macos-arm64", false),
-            Some(format!("{base}WordInk-macos-arm64.dmg").as_str())
+            Some(format!("{base}WordInk-for-Mac-Apple-Silicon.dmg").as_str())
         );
         assert_eq!(
             release_asset_url("linux-x64", true),
-            Some(format!("{base}WordInk-linux-x86_64.AppImage").as_str())
+            Some(format!("{base}WordInk-for-Linux-x86_64.AppImage").as_str())
         );
         assert_eq!(
             release_asset_url("linux-arm64", true),
-            Some(format!("{base}WordInk-linux-aarch64.AppImage").as_str())
+            Some(format!("{base}WordInk-for-Linux-ARM64.AppImage").as_str())
         );
         // A non-AppImage Linux install and unknown targets use the manifest.
         assert_eq!(release_asset_url("linux-x64", false), None);
