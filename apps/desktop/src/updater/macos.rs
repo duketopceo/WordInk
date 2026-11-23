@@ -234,6 +234,11 @@ pub fn install_on_quit(staged: &Staged) {
     }
 }
 
+/// Only Linux AppImages need their own update route.
+pub fn running_appimage() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,9 +375,4 @@ mod tests {
         assert!(!replaceable(Path::new("/System/Applications/WordInk.app")));
         let _ = fs::remove_dir_all(root);
     }
-}
-
-/// Only Linux AppImages need their own update route.
-pub fn running_appimage() -> bool {
-    false
 }
