@@ -82,11 +82,27 @@ done
 SCRAWL_HELPER_PLIST="$root/packaging/macos/scrawl-helper-Info.plist" \
   cargo build --locked --release ${env_args[@]+"${env_args[@]}"} --manifest-path "$root/Cargo.toml"
 helper="$target_dir/release/scrawl-helper"
-if [ ! -f "$helper" ]; then
+ensure_scrawl_helper() {
+  if [ -f "$helper" ]; then
+    return 0
+  fi
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    if [ "$candidate" = "$helper" ]; then
+      return 0
+    fi
+    install -m 755 "$candidate" "$helper"
+    return 0
+  done < <(find "$target_dir" -name scrawl-helper -type f ! -path '*/app/*' 2>/dev/null)
+  return 1
+}
+if ! ensure_scrawl_helper; then
+  cargo clean -p scrawl-capture --manifest-path "$root/Cargo.toml"
   SCRAWL_HELPER_PLIST="$root/packaging/macos/scrawl-helper-Info.plist" \
-    cargo build --locked --release -p scrawl-capture --manifest-path "$root/Cargo.toml"
+    cargo build --locked --release -p scrawl-capture --features helper,screen --manifest-path "$root/Cargo.toml"
+  ensure_scrawl_helper
 fi
-[ -f "$helper" ] || { echo "::error::scrawl-helper is missing at $helper" >&2; exit 1; }
+[ -f "$helper" ] || { echo "::error::scrawl-helper is missing at $helper (built by scrawl-capture build.rs, not a cargo bin)" >&2; exit 1; }
 rm -rf "$bundle"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources" "$bundle/Contents/Library"
 cp "$target_dir/release/wordink" "$executable"

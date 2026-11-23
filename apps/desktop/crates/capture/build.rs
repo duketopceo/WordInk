@@ -5,7 +5,11 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         return;
     }
-    if std::env::var_os("CARGO_FEATURE_HELPER").is_some() {
+    let build_helper = std::env::var_os("CARGO_FEATURE_HELPER").is_some()
+        || std::env::var_os("SCRAWL_HELPER_PLIST").is_some()
+        || std::env::var_os("SCRAWL_HELPER_BUNDLE_ID").is_some()
+        || std::env::var_os("SCRAWL_HELPER_NAME").is_some();
+    if build_helper {
         compile_helper();
     }
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
@@ -66,10 +70,7 @@ fn compile_helper() {
         default_plist
     };
 
-    let profile_dir = out_dir
-        .ancestors()
-        .nth(3)
-        .expect("Unexpected OUT_DIR layout");
+    let profile_dir = profile_directory(&out_dir);
     let arch = match std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
         Ok("aarch64") => "arm64",
         Ok(other) => other,
@@ -101,5 +102,22 @@ fn compile_helper() {
     );
     let dest = profile_dir.join("scrawl-helper");
     let _ = std::fs::remove_file(&dest);
-    std::fs::copy(&built, dest).expect("Could not place scrawl-helper");
+    std::fs::copy(&built, &dest).expect("Could not place scrawl-helper");
+}
+
+/// `$CARGO_TARGET_DIR/$PROFILE` (typically `target/release`), where `build-app.sh` expects
+/// `scrawl-helper` beside `wordink`.
+fn profile_directory(out_dir: &std::path::Path) -> std::path::PathBuf {
+    if let Ok(profile) = std::env::var("PROFILE") {
+        for ancestor in out_dir.ancestors() {
+            if ancestor.file_name().is_some_and(|name| name == profile) {
+                return ancestor.to_path_buf();
+            }
+        }
+    }
+    out_dir
+        .ancestors()
+        .nth(3)
+        .expect("Unexpected OUT_DIR layout")
+        .to_path_buf()
 }

@@ -209,6 +209,8 @@ jobs:
       # executable needs no OpenBLAS runtime.
       TRANSCRIBE_CMAKE_ARGS: ${{ matrix.cmake }}
       MACOSX_DEPLOYMENT_TARGET: "15.0"
+      # crates/capture/build.rs compiles scrawl-helper beside wordink; WordInk's plist is required.
+      SCRAWL_HELPER_PLIST: ${{ matrix.label == 'macos-arm64' && 'packaging/macos/scrawl-helper-Info.plist' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
