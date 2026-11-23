@@ -1851,7 +1851,7 @@ fn mode_corrections_and_names_save_from_their_fields() {
         .iter()
         .map(|r| r.matched_phrase.clone())
         .collect();
-    assert_eq!(phrases, ["hex app", "dax"]);
+    assert_eq!(phrases, ["wordink app", "dax"]);
 }
 
 #[test]
@@ -2427,8 +2427,7 @@ fn terminal_paste_select_cycles_with_space() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     assert_eq!(rt.state.settings.terminal_paste, TerminalPaste::Always);
     open_advanced(&mut rt, Pane::General);
-    tab_to(&mut rt, "terminal-paste");
-    key(&mut rt, Key::Text(" ".into()), Mods::default());
+    pick(&mut rt, "terminal-paste", 0);
     assert_eq!(rt.state.settings.terminal_paste, TerminalPaste::Auto);
 }
 
@@ -3044,7 +3043,7 @@ fn output_fixes_show_only_with_their_lab_and_fix_this_copies_for_the_sentence() 
     assert!(on.state.output.prompt_copied);
     assert_eq!(
         on.state.output.fix_copied.as_deref(),
-        Some("Um, open code shipped the hex app today.")
+        Some("Um, open code shipped the wordink app today.")
     );
     tap(&mut on, "output-vocabulary");
     assert!(on.state.vocabulary.open);

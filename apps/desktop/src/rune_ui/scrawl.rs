@@ -282,7 +282,7 @@ fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
             Some(if view.screen_recording {
                 tr("Lets Annotate record your screen")
             } else if stale {
-                tr("An older Hex entry can keep this off")
+                tr("An older WordInk entry can keep this off")
             } else {
                 tr("Required to record your screen. macOS asks the first time you annotate, or allow it here.")
             }),

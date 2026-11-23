@@ -233,8 +233,8 @@ mod tests {
     #[test]
     fn streams_carry_a_stable_name_without_spaces() {
         let properties = stream_properties(42);
-        assert!(properties.contains("application.name = \"hex\""));
-        assert!(properties.contains("node.name = \"hex\""));
+        assert!(properties.contains("application.name = \"WordInk\""));
+        assert!(properties.contains("node.name = \"WordInk\""));
         assert!(properties.contains("state.restore-target = false"));
         assert!(properties.contains("hex.process.id = 42"));
     }

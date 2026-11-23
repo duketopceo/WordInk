@@ -457,6 +457,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: a summary of retained dictations at the top of History, and hex history stats",
     ),
     key(
+        "labs.neural_engine",
+        Kind::Bool,
+        "Labs: Parakeet v3 on the Apple Neural Engine in the Local transcription picker (Linux on Apple silicon, with the mlx-omarchy runtime); stays on while it is the dictation model",
+    ),
+    key(
         "labs.recent_dictations",
         Kind::Bool,
         "Labs: a Copy Recent Dictation submenu in the menu bar that copies one of the last five dictations (macOS)",
@@ -733,8 +738,8 @@ pub(super) const KEYS: &[Key] = &[
     ),
     key(
         "terminal_paste",
-        Kind::Str,
-        "When to paste with Ctrl-Shift+V for terminals (Linux and Windows): auto, always, or never",
+        Kind::Choice(&["auto", "always", "never"]),
+        "Paste with Ctrl-Shift-V: in terminals only (auto), always, or never (Linux and Windows)",
     ),
     key(
         "gnome_keyboard_shortcuts",
@@ -757,6 +762,52 @@ pub(super) const KEYS: &[Key] = &[
         "transcription_device",
         Kind::Choice(&["auto", "gpu", "cpu"]),
         "Where the speech model runs: auto (a GPU unless it failed before), gpu, or cpu (Linux and Windows)",
+    ),
+    key(
+        "engine",
+        Kind::Choice(&[
+            "auto",
+            "local",
+            "groq",
+            "openrouter",
+            "openai",
+            "deepgram",
+            "gateway",
+        ]),
+        "Which engine dictation uses: auto (Groq when a key is set, else the local model), local, or a cloud provider. Keys are set with `wordink keys set <provider>`",
+    ),
+    key(
+        "local_cloud_fallback",
+        Kind::Choice(&["none", "groq", "openrouter"]),
+        "If a local dictation fails, retry that clip once on this cloud provider: none (default), groq or openrouter. Needs the provider's key (`wordink keys set <provider>`); meetings never fall back",
+    ),
+    optional(
+        "engine_model",
+        Kind::Text,
+        "The model the cloud engine uses: an OpenRouter audio model id, `whisper-1` for openai; none uses the provider's default",
+    ),
+    optional(
+        "meeting_engine",
+        Kind::Choice(&[
+            "auto",
+            "local",
+            "groq",
+            "openrouter",
+            "openai",
+            "deepgram",
+            "gateway",
+        ]),
+        "Which engine meetings use, apart from dictation: none (the local model), or a cloud provider",
+    ),
+    optional(
+        "meeting_engine_model",
+        Kind::Text,
+        "The model the meeting engine uses, such as `microsoft/mai-transcribe-2` for openrouter; none uses the provider's default",
+    ),
+    optional(
+        "gateway_url",
+        Kind::Text,
+        "The WordInk gateway's URL (https; http only for localhost). Its token is set with `wordink keys set gateway`",
     ),
     key(
         "indicator_position",

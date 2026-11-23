@@ -1172,13 +1172,16 @@ mod tests {
         for switch in Feature::switches(&mut settings) {
             *switch = true;
         }
-        for feature in Feature::ALL {
+        let with_switch = Feature::ALL
+            .into_iter()
+            .filter(|feature| *feature != Feature::TerminalPaste);
+        for feature in with_switch.clone() {
             assert!(feature.on(&settings), "{} has no switch", feature.name());
         }
         assert_eq!(
             Feature::switches(&mut settings).len(),
-            Feature::ALL.len(),
-            "one switch per feature"
+            with_switch.count(),
+            "one switch per feature but Terminal paste"
         );
     }
 

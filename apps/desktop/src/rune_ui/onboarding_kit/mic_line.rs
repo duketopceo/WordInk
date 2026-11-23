@@ -107,6 +107,13 @@ pub(crate) fn pick(
         Listing::Listed(devices) => devices,
     };
     let label = |id: &str| devices.label(id).map(|label| label.to_owned());
+    let display = |id: &str| {
+        aliases
+            .get(id)
+            .cloned()
+            .or_else(|| label(id))
+            .unwrap_or_else(|| id.to_owned())
+    };
     let is_listed = |id: &str| {
         devices.names.iter().any(|name| name == id)
             || devices.devices.iter().any(|device| device.id == id)
@@ -119,9 +126,7 @@ pub(crate) fn pick(
         .and_then(label);
     let in_use = saved.filter(|saved| is_listed(saved) && off != Some(*saved));
     let shown = match (in_use, &default_name) {
-        (Some(saved), _) => Shown::Device(
-            label(saved).unwrap_or_else(|| saved.to_owned()),
-        ),
+        (Some(saved), _) => Shown::Device(display(saved)),
         (None, Some(name)) => Shown::Device(name.clone()),
         (None, None) if devices.names.is_empty() => Shown::NoInput,
         (None, None) => Shown::Device(tr("System default").to_owned()),

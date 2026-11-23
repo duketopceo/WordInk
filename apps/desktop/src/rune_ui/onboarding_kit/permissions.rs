@@ -307,7 +307,7 @@ fn live_page(p: Paint, live: &Live, s: &Onboard, which: Perm) -> El {
     let card = match which {
         Perm::Accessibility if live.accessibility_row => {
             let ax_desc = match live.accessibility {
-                ItemStatus::Stale => tr("An older Hex entry can keep this off"),
+                ItemStatus::Stale => tr("An older WordInk entry can keep this off"),
                 ItemStatus::Waiting => tr("Switch on Hex in System Settings"),
                 ItemStatus::Restart => tr("Turns on when Hex restarts"),
                 _ => tr("Notices the shortcut and pastes your words"),

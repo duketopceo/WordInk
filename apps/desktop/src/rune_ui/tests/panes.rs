@@ -1753,7 +1753,7 @@ fn stale_permissions_offer_fix_it_and_reset_entries_across_panes() {
     assert!(
         shown
             .iter()
-            .any(|text| text == "An older Hex entry can keep this off")
+            .any(|text| text == "An older WordInk entry can keep this off")
     );
     tap(&mut rt, "ax-pill-allow");
     assert_eq!(
@@ -1771,7 +1771,7 @@ fn stale_permissions_offer_fix_it_and_reset_entries_across_panes() {
     assert!(
         shown
             .iter()
-            .any(|text| text == "An older Hex entry can keep this off")
+            .any(|text| text == "An older WordInk entry can keep this off")
     );
     tap(&mut rt, "permission-accessibility-allow");
     assert_eq!(
@@ -1792,7 +1792,7 @@ fn stale_permissions_offer_fix_it_and_reset_entries_across_panes() {
     assert!(
         shown
             .iter()
-            .any(|text| text == "An older Hex entry can keep this off")
+            .any(|text| text == "An older WordInk entry can keep this off")
     );
     tap(&mut rt, "meeting-system-audio-allow");
     assert_eq!(
@@ -2098,7 +2098,10 @@ fn labs_lists_every_toggle_off_by_default() {
         "the second dictation shortcut runs on Windows too"
     );
     tap(&mut rt, "lab-terminal-paste");
-    assert!(rt.state.settings.paste_with_shift);
+    assert_eq!(
+        rt.state.settings.terminal_paste,
+        crate::app_settings::TerminalPaste::Always
+    );
     assert!(
         rt.find("lab-meetings").is_some(),
         "Meetings runs on Windows too"

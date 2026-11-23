@@ -101,7 +101,12 @@ fn keys() -> impl Iterator<Item = &'static Key> {
 
 /// Settings `hex settings` never shows: Hex's own bookkeeping.
 #[cfg(test)]
-const INTERNAL: &[&str] = &["migrations", "mouse_shortcut_notice", "labs.groups"];
+const INTERNAL: &[&str] = &[
+    "migrations",
+    "mouse_shortcut_notice",
+    "labs.groups",
+    "vocabulary_dismissed",
+];
 
 /// Settings another `hex` command edits instead (`hex vocabulary`).
 #[cfg(test)]
@@ -816,7 +821,7 @@ mod tests {
                 .any(|key| path == key || path.starts_with(&format!("{key}.")));
             assert!(
                 covered,
-                "settings.json has `{path}`, which `hex settings` can't name"
+                "settings.json has `{path}`, which `wordink settings` can't name"
             );
         }
         for key in keys() {

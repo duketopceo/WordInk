@@ -245,7 +245,10 @@ mod tests {
             model: TranscriptionModelId::WhisperLargeV3Turbo,
             language: "fr".into(),
         });
-        settings.remember_transcription(TranscriptionSelection::default());
+        settings.remember_transcription(TranscriptionSelection {
+            model: TranscriptionModelId::ParakeetV3,
+            language: "en".into(),
+        });
         let installed = |model: &ModelDefinition, _: &str| {
             matches!(
                 model.id,

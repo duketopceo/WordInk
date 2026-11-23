@@ -23,7 +23,7 @@ pub const MAX_COLUMNS: usize = 96;
 pub const MAX_ROWS: usize = 15;
 pub const MAX_DOTS: usize = 1024;
 /// The plate height the HUD window is laid out around.
-pub const PLATE_HEIGHT: f32 = 32.0;
+pub const PLATE_HEIGHT: f32 = 26.0;
 
 /// Dot scope's live parameters. Every default is the prototype's value.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -144,9 +144,9 @@ impl Default for Tuning {
         Self {
             columns: 43.0,
             rows: 9.0,
-            spacing: 3.25,
-            width: 140.0,
-            processing_width: 96.0,
+            spacing: 2.6,
+            width: 112.0,
+            processing_width: 76.0,
             height: PLATE_HEIGHT,
             braid_speed: 1.0,
             helix_cycles: 1.6,
