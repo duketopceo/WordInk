@@ -787,10 +787,6 @@ mod tests {
             ));
         }
         assert!(matches!(
-            parse(&["hex", "diagnostics"]),
-            Ok(Some(Command::Control(ControlCli::Diagnostics)))
-        ));
-        assert!(matches!(
             parse(&["hex", "history", "clear", "--yes"]),
             Ok(Some(Command::Control(ControlCli::History(
                 transcript_cli::HistoryArgs {
@@ -843,49 +839,13 @@ mod tests {
         ));
         assert!(parse(&["hex", "vocabulary", "remove"]).is_err());
         assert!(matches!(
-            parse(&["hex", "vocabulary", "suggest", "--json"]),
-            Ok(Some(Command::Control(ControlCli::Vocabulary {
-                command: crate::control::cli::VocabularyCommand::Suggest { output }
-            }))) if output.json
-        ));
-    }
-
-    #[test]
-    fn debug_logs_parse_with_follow_level_subsystem_and_json() {
-        use crate::debug_log::DebugLevel;
-
-        let parsed = Cli::try_parse_from([
-            "hex",
-            "logs",
-            "--debug",
-            "--follow",
-            "--level",
-            "debug",
-            "--subsystem",
-            "audio,bluetooth",
-            "--json",
-            "-n",
-            "20",
-        ])
-        .map(|cli| cli.command);
-        assert!(matches!(
-            parsed,
+            parse(&["hex", "logs", "--process", "-f", "-n", "20"]),
             Ok(Some(Command::Control(ControlCli::Logs {
-                debug: true,
+                process: true,
                 follow: true,
-                json: true,
                 lines: 20,
-                level: Some(DebugLevel::Debug),
-                ref subsystem,
-                ..
-            }))) if subsystem == &["audio".to_owned(), "bluetooth".to_owned()]
+            })))
         ));
-        // The filters belong to --debug, which excludes --process.
-        assert!(Cli::try_parse_from(["hex", "logs", "--level", "info"]).is_err());
-        assert!(Cli::try_parse_from(["hex", "logs", "--json"]).is_err());
-        assert!(Cli::try_parse_from(["hex", "logs", "--debug", "--process"]).is_err());
-        assert!(Cli::try_parse_from(["hex", "logs", "--debug", "--level", "loud"]).is_err());
-        assert!(Cli::try_parse_from(["hex", "logs", "--process"]).is_ok());
     }
 
     #[test]
