@@ -177,6 +177,7 @@ pub fn history_draft(
         total_ms,
         recording,
         model: crate::history::dictation_model(),
+        usage: None,
     }
 }
 

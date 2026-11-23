@@ -343,3 +343,9 @@ pub fn unload_idle() -> Option<std::time::Duration> {
     (state & UNLOAD_IDLE != 0)
         .then(|| std::time::Duration::from_secs(((state >> MINUTES_SHIFT) & MINUTES_MASK) * 60))
 }
+
+/// The Neural Engine Parakeet model may be offered (read wherever a model is
+/// listed, chosen, or run).
+pub fn neural_engine() -> bool {
+    crate::app_settings::AppSettings::saved_labs().neural_engine
+}

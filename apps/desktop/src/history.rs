@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 
 pub mod captures;
+pub mod usage;
 pub mod playback;
 pub mod recordings;
 pub mod stats;
@@ -86,6 +87,8 @@ pub enum HistoryKind {
     Printed,
     /// Dictate without processing: pasted as heard, with no step run.
     Raw,
+    /// Text recovered from a kept failed-dictation clip (Usage counts it).
+    Recovered,
 }
 
 impl HistoryKind {
@@ -96,6 +99,7 @@ impl HistoryKind {
             Self::VoiceAction => "Voice Action",
             Self::Printed => "Printed",
             Self::Raw => "Raw",
+            Self::Recovered => "Recovered",
         }
     }
 }
@@ -103,8 +107,35 @@ impl HistoryKind {
 /// Bounded record of the post-processing that shaped the final text.
 pub type HistoryProcessing = crate::desktop::events::DictationProcessing;
 
+/// What one transcription used and cost, for the Usage pane (KTD5). Local
+/// transcriptions record provider `local` and a cost of zero.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct UsageRecord {
+    /// `groq`, `local`, ...
+    pub provider: String,
+    pub model: String,
+    pub audio_seconds: f64,
+    pub words: u32,
+    /// Estimated, in US dollars, from the bundled price table.
+    pub cost_usd: f64,
+}
+
+impl UsageRecord {
+    /// A transcription that ran on this computer: free, so only its size.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub fn local(model: &str, audio_ms: u64, text: &str) -> Self {
+        Self {
+            provider: "local".into(),
+            model: model.into(),
+            audio_seconds: audio_ms as f64 / 1000.0,
+            words: text.split_whitespace().count() as u32,
+            cost_usd: 0.0,
+        }
+    }
+}
+
 /// One retained successful result.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct HistoryEntry {
     pub id: u64,
     pub timestamp_ms: u64,
@@ -127,6 +158,9 @@ pub struct HistoryEntry {
     /// when it has none.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub recording_bytes: u64,
+    /// Cloud usage for this entry, when retained (Usage pane).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<UsageRecord>,
     /// The speech model that made the text, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -208,6 +242,8 @@ pub struct HistoryDraft {
     pub recording: Option<Recording>,
     /// The speech model that transcribed it ([`dictation_model`]).
     pub model: Option<String>,
+    /// Cloud usage for a recovered dictation.
+    pub usage: Option<UsageRecord>,
 }
 
 /// The name of the speech model dictation runs: the one the engine holds,
@@ -421,6 +457,7 @@ impl HistoryStore {
             inference_ms: draft.inference_ms,
             total_ms: draft.total_ms,
             recording_bytes,
+            usage: draft.usage.clone(),
             model: draft.model.map(|model| truncated(&model, MAX_LABEL_BYTES)),
             language: None,
             text_ms: None,
@@ -845,6 +882,7 @@ mod tests {
             total_ms: 1_100,
             recording: None,
             model: None,
+            usage: None,
         }
     }
 

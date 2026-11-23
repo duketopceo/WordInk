@@ -35,6 +35,12 @@ pub enum DictationIndicatorEvent {
     /// until the next `Reset`.
     DemoVoice,
     Started,
+    /// Bluetooth earbuds are switching to headset mode.
+    #[allow(dead_code)]
+    EarbudsConnecting,
+    /// The earbuds' microphone is ready.
+    #[allow(dead_code)]
+    EarbudsReady,
     Meter {
         average: f32,
         // Dot scope follows `average`; the window's meters read
@@ -308,6 +314,7 @@ impl IndicatorModel {
             DictationIndicatorEvent::DemoVoice => {
                 self.demo_voice = Some(0.0);
             }
+            DictationIndicatorEvent::EarbudsConnecting | DictationIndicatorEvent::EarbudsReady => {}
             DictationIndicatorEvent::Started => {
                 // HUD Lab and the playground send `DemoVoice` after this.
                 self.demo_voice = None;

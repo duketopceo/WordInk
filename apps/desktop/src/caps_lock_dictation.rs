@@ -143,6 +143,7 @@ pub(crate) struct LedModel {
 impl LedModel {
     pub(crate) fn handle(&mut self, event: DictationIndicatorEvent) {
         match event {
+            DictationIndicatorEvent::EarbudsConnecting | DictationIndicatorEvent::EarbudsReady => {}
             DictationIndicatorEvent::Reset => {
                 self.capture = CaptureState::Idle;
                 self.jobs.clear();

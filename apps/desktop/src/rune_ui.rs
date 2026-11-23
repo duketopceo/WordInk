@@ -10,6 +10,7 @@
 //! design language (`rune-theme-opencode`); see `docs/design-system.md`.
 
 mod activity;
+mod brand;
 #[cfg(hex_capture)]
 pub(crate) mod capture_capsule;
 mod controls;
@@ -47,6 +48,7 @@ mod models;
 mod modes;
 mod onboarding;
 mod onboarding_kit;
+mod openrouter_connect;
 mod output;
 mod paste_access;
 mod picker;
@@ -682,8 +684,14 @@ pub(crate) struct Ui {
     explainer: explainer::Explainer,
     sound_sets: sound_sets::SoundSets,
     tour: Option<onboarding::Tour>,
+    /// Deferred work after the tour, until the window is ready.
+    deferred: Option<onboarding::Deferred>,
     /// The new first run over the tour (Labs).
     first_run: Option<onboarding_kit::Onboard>,
+    /// The cloud-engine onboarding step.
+    engine_setup: onboarding_kit::EngineSetup,
+    /// OpenRouter sign-in while onboarding or from General.
+    openrouter: openrouter_connect::Connect,
     /// The OS's capabilities and the OS-only state its panes show.
     platform: platform::PlatformState,
     host: platform::PlatformHost,
@@ -752,8 +760,9 @@ impl Ui {
         ui.platform.developer =
             crate::dev_build::is_dev_build() && crate::DEVELOPER_FEATURES_ENABLED;
         ui.platform.hud.tuning = crate::rune_hud::dot_scope::lab();
-        ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
+        ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform, &ui.picker);
         onboarding_kit::live::open(&mut ui);
+        ui.deferred = onboarding::Deferred::at_launch(&ui);
         ui.platform.set_login_item(host::launch_at_login());
         ui
     }
@@ -799,7 +808,10 @@ impl Ui {
             explainer: explainer::Explainer::default(),
             sound_sets: sound_sets::SoundSets::default(),
             tour: None,
+            deferred: None,
             first_run: None,
+            engine_setup: onboarding_kit::EngineSetup::default(),
+            openrouter: openrouter_connect::Connect::default(),
             platform: platform::PlatformState::new(platform::Capabilities::current()),
             host: platform::PlatformHost::Local(Default::default()),
             meetings: meetings::MeetingsPane::default(),

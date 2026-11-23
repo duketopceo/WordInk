@@ -115,7 +115,10 @@ impl LinuxIndicator {
         self.next_job += 1;
         let job_id = self.next_job;
         self.send(HudEvent::Submitted { job_id });
-        self.send(HudEvent::JobFailed { job_id });
+        self.send(HudEvent::JobFailed {
+            job_id,
+            message: None,
+        });
     }
 
     /// Earbuds are switching to headset mode (or have finished): the HUD says

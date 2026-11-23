@@ -88,6 +88,8 @@ pub(crate) struct Live {
     /// The scan for models on this computer hasn't answered yet.
     scanning: bool,
     pub(crate) practice: Practice,
+    /// The WordInk tour shows engine and hotkey steps after permissions.
+    pub(crate) engine_steps: bool,
     /// The model and language this run downloads.
     choice: TranscriptionSelection,
     /// The other selection the language capsule switches to; `None` when
@@ -148,6 +150,13 @@ struct Checked {
 }
 
 impl Live {
+    /// The model this run downloads and shows progress for.
+    pub(super) fn set_choice(&mut self, selection: TranscriptionSelection) {
+        self.choice = selection;
+        self.failed = false;
+        self.checked = None;
+    }
+
     /// The model can't be had here: its download failed or stalled, so
     /// Continue without a model is offered (#894).
     pub(crate) fn model_blocked(&self) -> bool {
@@ -300,6 +309,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     };
     // Replaces the previous run's label; an English-only run clears it.
     set_other_label(other.map(|other| transcription_models::language_name(&other.language)));
+    let engine_steps = ui.tour.as_ref().is_some_and(|tour| tour.engine_steps());
     let had_model = installed(ui, &choice);
     let status = ui.platform.setup_status(had_model);
     let mic_granted = status.microphone == crate::desktop::onboarding::PermissionState::Ready;
@@ -340,6 +350,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         pick_started: false,
         scanning: false,
         practice: Practice::Waiting,
+        engine_steps,
         choice,
         alternate,
         granted_at: None,
@@ -351,8 +362,10 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     let now = clock(ui);
     s.now = now;
     match tour_step {
+        TourStep::Welcome if engine_steps => s.step = Step::Pick,
         TourStep::Welcome => s.begin_live(now),
-        TourStep::Setup => s.resume_setup(),
+        TourStep::Demo => s.jump_to_demo(),
+        TourStep::Setup | TourStep::Engine | TourStep::Hotkey => s.resume_setup(),
         TourStep::TryIt if had_model => s.jump_to_try(),
         TourStep::TryIt => s.jump_to_waiting(),
         TourStep::Done => s.jump_to_ready(),
@@ -360,7 +373,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     ui.first_run = Some(s);
     // The tour waits at setup, where it asks for permissions, while the
     // story plays; with everything granted it goes on to the practice.
-    if tour_step == TourStep::Welcome {
+    if tour_step == TourStep::Welcome && !engine_steps {
         onboarding::input(ui, Input::Continue);
     }
 }
@@ -451,6 +464,11 @@ pub(in crate::rune_ui) fn fixture_resume(ui: &mut Ui, page: Page) {
     poll(ui, &mut tx);
 }
 
+/// "Finish later" on the permissions and engine pages.
+pub(in crate::rune_ui) fn finish_later(ui: &mut Ui) {
+    onboarding::input(ui, Input::Defer);
+}
+
 /// "Run setup again" and `hex onboarding reset`: forgets that onboarding
 /// finished and opens it now. Settings, history, models, and permissions
 /// stay as they are, so the run finds them ready and passes their steps.
@@ -460,7 +478,11 @@ pub(crate) fn restart(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {
     }
     ui.select_pane(super::super::Pane::General, tx);
     ui.first_run = None;
-    ui.tour = Some(onboarding::Tour::replay(&ui.settings, &ui.platform));
+    ui.tour = Some(onboarding::Tour::replay(
+        &ui.settings,
+        &ui.platform,
+        &ui.picker,
+    ));
     open(ui);
     tx.settle();
     if ui.first_run.is_none() {

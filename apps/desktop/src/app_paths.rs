@@ -42,6 +42,10 @@ pub fn support_dir() -> Result<PathBuf> {
     Ok(data.join(folder))
 }
 
+pub fn crate_root() -> &'static str {
+    module_path!().split("::").next().unwrap_or("wordink")
+}
+
 pub fn logs_dir() -> Result<PathBuf> {
     static LOGS: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     machine_local(&LOGS, "logs")
@@ -138,7 +142,7 @@ pub fn init_process_logging(shutdown: &'static AtomicBool) -> Result<PathBuf> {
     create_private_dir(&log_dir)?;
     let process_log = open_private_append(&log_dir.join("process.log"))?;
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("hex=info"));
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(format!("{}=info", crate_root())));
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_writer(std::io::stderr.and(Mutex::new(process_log)))

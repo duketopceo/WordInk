@@ -71,7 +71,7 @@ mod linux {
 
     /// The installer the website serves, so an adopted install is exactly
     /// the one it makes.
-    const INSTALLER: &str = include_str!("../../.github/release/install-linux.sh");
+    const INSTALLER: &str = include_str!("../../scripts/install-linux.sh");
 
     /// Files 2.3.1's installer marked as its own, which the current
     /// installer refuses to replace.

@@ -82,6 +82,7 @@ pub use notes::{summarize, summarize_file};
 pub use retention::audio_expired;
 pub use retention::{expire, expire_audio, expired, retention_for};
 pub use transcript::TranscriptReader;
+pub use transcript::take_fallback_note;
 pub use warning::TrackWarning;
 
 /// What the recorder knows about a meeting when it starts.

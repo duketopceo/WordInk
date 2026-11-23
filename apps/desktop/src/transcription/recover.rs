@@ -151,7 +151,6 @@ pub fn retry_with(
     let entry_id = history.and_then(|history| {
         history
             .record(HistoryDraft {
-                usage: Some(usage.clone()),
                 kind: HistoryKind::Recovered,
                 raw_text: text.clone(),
                 final_text: text.clone(),
@@ -160,6 +159,9 @@ pub fn retry_with(
                 audio_ms: (usage.audio_seconds * 1000.0) as u64,
                 inference_ms: 0,
                 total_ms: 0,
+                recording: None,
+                model: None,
+                usage: Some(usage.clone()),
             })
             .ok()
             .flatten()

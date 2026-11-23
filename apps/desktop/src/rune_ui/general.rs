@@ -942,6 +942,7 @@ pub(super) fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Vec
             ui,
             p,
             "terminal-paste",
+            tr("Terminal paste"),
             vec![tr("Auto"), tr("Always"), tr("Never")],
             match settings.terminal_paste {
                 TerminalPaste::Auto => 0,
@@ -961,6 +962,7 @@ pub(super) fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Vec
             layer,
         );
         rows.push(
+            tr("Terminal paste"),
             icon_row(
                 p,
                 "terminal-paste",
@@ -968,8 +970,7 @@ pub(super) fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Vec
                 tr("Terminal paste"),
                 Some(tr("Auto pastes with Ctrl+Shift+V in terminals; desktops that hide the focused window use Ctrl+V")),
                 control,
-            )
-            .into(),
+            ),
         );
     }
     if clipboard_note_shown(ui) {

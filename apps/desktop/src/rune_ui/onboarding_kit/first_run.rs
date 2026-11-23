@@ -758,7 +758,12 @@ fn instrument_bar(p: Paint, s: &Onboard) -> El {
         .key("instrument-bar")
         .gap(8.0)
         .center_y()
-        .child(mic_capsule(p, s.listening_peak()))
+        .child(mic_capsule(
+            p,
+            s.listening_peak(),
+            "",
+            s.live.as_ref().is_some_and(|live| live.listening),
+        ))
         .child(shortcut_capsule(p, &s.caps, down, s.live.is_none()))
 }
 

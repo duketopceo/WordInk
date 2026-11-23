@@ -331,12 +331,30 @@ pub struct Transcribed {
     pub source: Source,
     /// Time from the finish request to the final text.
     pub finish_ms: u64,
+    /// What a cloud engine used and cost; `None` for a local model.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub usage: Option<crate::history::UsageRecord>,
+    /// Which local model actually produced the text, when it can differ from
+    /// the saved selection (the Neural Engine model hands a dictation to the
+    /// GPU model when its worker cannot take it).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub served: Option<ServedBy>,
+}
+
+/// The local model that answered a dictation and that attempt's own time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub struct ServedBy {
+    pub model: crate::transcription::models::TranscriptionModelId,
+    pub inference_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
     Stream,
     Offline,
+    /// The clip went to a cloud provider whole.
+    Cloud,
     /// The stream could not be used; the reason is logged with the result.
     Fallback(String),
 }
@@ -346,6 +364,7 @@ impl Source {
         match self {
             Self::Stream => "stream",
             Self::Offline => "offline",
+            Self::Cloud => "cloud",
             Self::Fallback(_) => "fallback",
         }
     }
@@ -1287,6 +1306,8 @@ impl Worker {
                         text,
                         source: Source::Stream,
                         finish_ms: started.elapsed().as_millis() as u64,
+                        usage: None,
+                        served: None,
                     })),
                     Err(_) if job.cancel.is_cancelled() => {
                         job.finish(Err("transcription was abandoned".into()));
@@ -1368,6 +1389,8 @@ impl Worker {
             text: text.trim().to_string(),
             source,
             finish_ms: started.elapsed().as_millis() as u64,
+            usage: None,
+            served: None,
         });
         // An offline run may switch the model (macOS activates a selection).
         self.publish_streams();
@@ -1507,6 +1530,8 @@ mod tests {
             text: "streamed 8".into(),
             source: Source::Stream,
             finish_ms: 0,
+            usage: None,
+            served: None,
         }));
         assert_eq!(dictation.wait().unwrap().source, Source::Stream);
         // The chunk waits to run after the stream.
@@ -2168,6 +2193,8 @@ mod tests {
                 text: "late but fine".into(),
                 source: Source::Offline,
                 finish_ms: 0,
+                usage: None,
+                served: None,
             }));
         });
         assert_eq!(pending.wait().unwrap().text, "late but fine");

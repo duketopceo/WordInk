@@ -758,8 +758,8 @@ fn offline_model(command: ModelCommand) -> u8 {
             println!(
                 "{}",
                 crate::transcription::local_transcriber::transcribe_wav_with_selection(
-                    &wav,
-                    &selection(model, language)?
+                    &std::fs::read(&wav)?,
+                    &selection(model, language)?,
                 )?
             );
             Ok(())

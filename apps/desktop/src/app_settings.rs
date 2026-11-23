@@ -315,6 +315,26 @@ pub struct AppSettings {
     pub transcription: TranscriptionSelection,
     /// Where the speech model runs (Linux and Windows).
     pub transcription_device: TranscriptionDevice,
+    /// Which engine dictation uses: Groq when a key resolves, else local
+    /// (`auto`), or one of them always. Keys are never stored here.
+    pub engine: crate::transcription::cloud::EngineChoice,
+    /// Retry a local dictation once on this cloud provider when the local
+    /// path fails (`none`, `groq`, `openrouter`). Off by default; audio never
+    /// leaves the computer unless this is set and the provider's key resolves.
+    pub local_cloud_fallback: crate::transcription::cloud::LocalFallback,
+    /// The model the named cloud engine is sent (an OpenRouter id,
+    /// `whisper-1`, ...). Unset, or not one the provider takes: its default.
+    pub engine_model: Option<String>,
+    /// Which engine meetings use, apart from dictation. Unset keeps meeting
+    /// audio on the local model, as before; a cloud engine sends each meeting
+    /// chunk to that provider.
+    pub meeting_engine: Option<crate::transcription::cloud::EngineChoice>,
+    /// The model the meeting engine is sent (an OpenRouter id such as
+    /// `microsoft/mai-transcribe-2`). Unset: the provider's default.
+    pub meeting_engine_model: Option<String>,
+    /// The WordInk gateway's URL. https, or http to localhost only. Its
+    /// token is a key (`wordink keys set gateway`), never stored here.
+    pub gateway_url: Option<String>,
     pub transcription_recents: Vec<TranscriptionSelection>,
     pub keyboard_model_switching: KeyboardModelSwitching,
     pub dictation_processing: DictationProcessingSettings,
@@ -374,6 +394,10 @@ pub struct AppSettings {
     pub vocabulary: Vec<VocabularyEntry>,
     /// How readily transcription swaps heard words for a vocabulary term.
     pub vocabulary_boost: crate::dictation::vocabulary::VocabularyBoost,
+    /// Words the person dismissed from the Vocabulary's suggestions, so they
+    /// aren't proposed again. Left out of the file while empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub vocabulary_dismissed: Vec<String>,
     /// One-time settings changes already applied. A file that predates a
     /// change lacks its ID, so the change runs once on the next load; new
     /// settings start with every ID because they need none.
@@ -461,6 +485,12 @@ impl Default for AppSettings {
             show_dock_icon: true,
             transcription: default_transcription(),
             transcription_device: TranscriptionDevice::Auto,
+            engine: crate::transcription::cloud::EngineChoice::default(),
+            local_cloud_fallback: crate::transcription::cloud::LocalFallback::default(),
+            engine_model: None,
+            meeting_engine: None,
+            meeting_engine_model: None,
+            gateway_url: None,
             transcription_recents: Vec::new(),
             keyboard_model_switching: KeyboardModelSwitching::default(),
             dictation_processing: DictationProcessingSettings::default(),
@@ -485,6 +515,7 @@ impl Default for AppSettings {
             updates: UpdateSettings::default(),
             vocabulary: Vec::new(),
             vocabulary_boost: crate::dictation::vocabulary::VocabularyBoost::default(),
+            vocabulary_dismissed: Vec::new(),
             migrations: MIGRATIONS.iter().map(|id| id.to_string()).collect(),
             text_replacements: Vec::new(),
         }

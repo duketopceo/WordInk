@@ -36,6 +36,7 @@ pub enum TranscriptionModelId {
     ParakeetUnifiedEnglish,
     ParakeetV2,
     ParakeetV3,
+    ParakeetV3Ane,
     Orukeet,
     WhisperLargeV3Turbo,
     Qwen3Asr06B,
@@ -73,6 +74,7 @@ impl TranscriptionModelId {
             Self::ParakeetUnifiedEnglish => "parakeet_unified_en",
             Self::ParakeetV2 => "parakeet_v2",
             Self::ParakeetV3 => "parakeet_v3",
+            Self::ParakeetV3Ane => "parakeet_v3_ane",
             Self::Orukeet => "orukeet",
             Self::WhisperLargeV3Turbo => "whisper_large_v3_turbo",
             Self::Qwen3Asr06B => "qwen3_asr06_b",
@@ -100,7 +102,10 @@ impl TranscriptionModelId {
     /// saved choice of one stays saved while it can't run, and the listener
     /// runs a fallback (`custom_models::runnable`).
     pub const fn is_labs_gated(self) -> bool {
-        matches!(self, Self::Custom(_) | Self::ParakeetUltra)
+        matches!(
+            self,
+            Self::Custom(_) | Self::ParakeetUltra | Self::ParakeetV3Ane
+        )
     }
 }
 
@@ -112,6 +117,7 @@ impl FromStr for TranscriptionModelId {
             "parakeet_unified_en" => Ok(Self::ParakeetUnifiedEnglish),
             "parakeet_v2" => Ok(Self::ParakeetV2),
             "parakeet_v3" => Ok(Self::ParakeetV3),
+            "parakeet_v3_ane" => Ok(Self::ParakeetV3Ane),
             "orukeet" => Ok(Self::Orukeet),
             "whisper_large_v3_turbo" => Ok(Self::WhisperLargeV3Turbo),
             "qwen3_asr06_b" => Ok(Self::Qwen3Asr06B),

@@ -120,6 +120,9 @@ pub struct LabsSettings {
     pub standalone_special_keys: bool,
     pub history_stats: bool,
     pub recent_dictations: bool,
+    /// Parakeet v3 on the Apple Neural Engine joins the Local transcription
+    /// picker (Linux on Apple silicon).
+    pub neural_engine: bool,
     pub skip_pauses: bool,
     /// An automatic meeting recording stops after its call ends (macOS, issue 835).
     pub stop_when_call_ends: bool,
@@ -252,6 +255,7 @@ impl Default for LabsSettings {
             standalone_special_keys: false,
             history_stats: false,
             recent_dictations: false,
+            neural_engine: false,
             skip_pauses: false,
             stop_when_call_ends: false,
             output_fixes: false,

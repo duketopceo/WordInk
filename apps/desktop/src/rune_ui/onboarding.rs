@@ -62,6 +62,10 @@ impl Tour {
     }
 
     /// The tour from Welcome, as on a new install: Run setup again.
+    pub(super) fn engine_steps(&self) -> bool {
+        self.flow.engine_setup_enabled()
+    }
+
     pub(super) fn replay(
         settings: &AppSettings,
         platform: &PlatformState,

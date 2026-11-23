@@ -207,7 +207,7 @@ impl AppSettings {
         Ok((settings, migrated, issue))
     }
 
-    pub(super) fn write_to(&self, path: &Path) -> Result<()> {
+    pub(crate) fn write_to(&self, path: &Path) -> Result<()> {
         self.write_managed_to(path, Policy::current())
     }
 

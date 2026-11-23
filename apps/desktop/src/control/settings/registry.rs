@@ -16,6 +16,8 @@ pub(super) enum Kind {
         max: u64,
     },
     Choice(&'static [&'static str]),
+    /// A short string setting, validated like `Text` but typed as string in the CLI.
+    Str,
     Text,
     Shortcut(HotkeySlot),
     Path,
@@ -29,6 +31,7 @@ impl Kind {
             Self::Number { .. } => "number",
             Self::Integer { .. } => "integer",
             Self::Choice(_) => "choice",
+            Self::Str => "string",
             Self::Text => "text",
             Self::Shortcut(_) => "shortcut",
             Self::Path => "path",

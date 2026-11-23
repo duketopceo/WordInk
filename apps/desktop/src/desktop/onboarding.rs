@@ -410,6 +410,11 @@ impl Flow {
         self.step
     }
 
+    /// Whether this flow includes demo, engine, and hotkey steps.
+    pub fn engine_setup_enabled(&self) -> bool {
+        self.engine.is_some()
+    }
+
     /// Marks Accessibility stale once the host has seen System Settings close
     /// or lose focus without a grant.
     pub fn set_accessibility_stale(&mut self, stale: bool) {

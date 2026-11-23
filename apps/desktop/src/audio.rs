@@ -15,6 +15,7 @@ mod mix_format;
 pub(crate) mod output_ducking;
 pub(crate) mod output_route;
 mod overloads;
+pub(crate) mod sources;
 #[cfg(target_os = "macos")]
 pub(crate) mod recording_environment;
 mod transport;
@@ -1360,11 +1361,23 @@ fn open_selected<T>(
     open_default()
 }
 
+/// One input the picker can show, with a cleaned-up label.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InputDevice {
+    pub id: String,
+    pub label: String,
+    pub kind: sources::DeviceKind,
+    pub hidden: bool,
+    pub music_mode: bool,
+}
+
 /// The inputs Settings offers, without Hex Microphone, and what System
 /// default currently resolves to.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InputDevices {
     pub names: Vec<String>,
+    /// Every input, with its label, kind and whether it is hidden by default.
+    pub devices: Vec<InputDevice>,
     /// The input System default captures from. Linux's ALSA default has no
     /// useful name, so it is `None` there.
     pub system_default: Option<String>,
@@ -1378,6 +1391,17 @@ pub struct InputDevices {
     /// The OS default, a Bluetooth headset that `system_default` stands in
     /// for so the headset keeps its audio quality.
     pub bluetooth_default_passed_over: Option<String>,
+}
+
+impl InputDevices {
+    /// The cleaned-up name listed for `id`, if it is listed.
+    pub fn label(&self, id: &str) -> Option<&str> {
+        self.devices
+            .iter()
+            .find(|device| device.id == id)
+            .map(|device| device.label.as_str())
+            .or_else(|| self.names.iter().find(|name| name.as_str() == id).map(|s| s.as_str()))
+    }
 }
 
 pub fn input_devices() -> Result<InputDevices> {
@@ -1437,8 +1461,19 @@ pub fn input_devices() -> Result<InputDevices> {
         .collect::<Vec<_>>();
     names.sort_by_key(|name| name.to_lowercase());
     names.dedup();
+    let devices = names
+        .iter()
+        .map(|name| InputDevice {
+            id: name.clone(),
+            label: name.clone(),
+            kind: sources::DeviceKind::Other,
+            hidden: false,
+            music_mode: false,
+        })
+        .collect();
     Ok(InputDevices {
         names,
+        devices,
         system_default,
         default_is_hex_microphone,
         off_with_lid_closed,

@@ -25,6 +25,7 @@
 mod cards;
 mod composition;
 mod dictated;
+pub(super) mod engine_setup;
 mod field_text;
 mod fireworks;
 mod first_run;
@@ -57,6 +58,7 @@ mod typing;
 mod versus;
 mod words;
 
+pub(super) use engine_setup::State as EngineSetup;
 pub(crate) use game::add as game;
 pub(super) use sketches::fixture as sketch_fixture;
 pub(super) use stories::Onboard;

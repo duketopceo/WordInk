@@ -1,6 +1,10 @@
 pub(crate) mod app_model_switching;
 pub(crate) mod artifacts;
 pub(crate) mod background_priority;
+pub(crate) mod cloud;
+pub(crate) mod compare;
+pub(crate) mod recover;
+pub(crate) mod ane;
 #[cfg(target_os = "macos")]
 pub(crate) mod benchmark;
 #[cfg(all(
