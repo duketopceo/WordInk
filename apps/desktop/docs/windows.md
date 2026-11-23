@@ -32,7 +32,7 @@ app and **Disabled** when it does nothing.
 x86_64 PCs need a 2013 or newer processor with AVX2 (Intel Haswell / AMD Excavator or later); on an older processor WordInk shows a message and quits instead of starting.
 
 Download and run
-[WordInk-Setup-windows-x64.exe](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-Setup-windows-x64.exe)
+[WordInk-for-Windows-Setup.exe](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Windows-Setup.exe)
 (from the first release after 1.0.0): a per-user installer with a Start Menu
 shortcut and an uninstaller in Apps & Features. Or install with the one-line
 PowerShell installer from the latest release (see [downloads.md](downloads.md)

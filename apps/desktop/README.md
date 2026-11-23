@@ -13,10 +13,10 @@ it pastes into whatever app you're in. It is built on
 
 ## Download
 
-- **Windows 10/11 (x64):** [WordInk-Setup-windows-x64.exe](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-Setup-windows-x64.exe), a per-user installer (no admin)
-- **macOS 15+ (Apple silicon):** [WordInk-macos-arm64.dmg](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-macos-arm64.dmg), drag WordInk to Applications
-- **Linux x86_64:** [AppImage](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-linux-x86_64.AppImage) · [.deb](https://github.com/duketopceo/WordInk/releases/latest/download/wordink_amd64.deb) · [.rpm](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-x86_64.rpm)
-- **Linux aarch64:** [AppImage](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-linux-aarch64.AppImage) · [.deb](https://github.com/duketopceo/WordInk/releases/latest/download/wordink_arm64.deb) · [.rpm](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-aarch64.rpm)
+- **Windows 10/11 (x64):** [WordInk-for-Windows-Setup.exe](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Windows-Setup.exe), a per-user installer (no admin)
+- **macOS 15+ (Apple silicon):** [WordInk-for-Mac-Apple-Silicon.dmg](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Mac-Apple-Silicon.dmg), drag WordInk to Applications
+- **Linux x86_64:** [AppImage](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Linux-x86_64.AppImage) · [.deb](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-debian-amd64.deb) · [.rpm](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-fedora-x86_64.rpm)
+- **Linux aarch64:** [AppImage](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Linux-ARM64.AppImage) · [.deb](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-debian-arm64.deb) · [.rpm](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-fedora-aarch64.rpm)
 
 These start with the first release after 1.0.0. The Windows and macOS builds are unsigned, so the first launch warns once:
 

@@ -2,7 +2,7 @@
 # installer (packaging/windows/wordink.iss), around an already-built release
 # wordink.exe, and prints its path. Installs Inno Setup 6 when ISCC is missing.
 # The installer embeds the executable byte for byte. The Desktop release
-# workflow publishes it as WordInk-Setup-windows-x64.exe.
+# workflow publishes it as WordInk-for-Windows-Setup.exe.
 #
 #   scripts/build-windows-installer.ps1 -Executable target\release\wordink.exe `
 #     -Version 1.2.3 -Arch x86_64 -OutDir dist

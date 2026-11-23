@@ -9,13 +9,13 @@ Record for each machine: the tag, the date, the OS version, and pass, fail or sk
 - Use a user account that has never run WordInk, or uninstall with purge first (release checklist step 13).
 - Have a text editor, a terminal emulator and a web page with a password field open.
 - Have a Groq API key ready for the cloud steps. Have the network available for the model download, then a way to turn it off.
-- Install from the candidate's installer: `WordInk-Setup-windows-x64.exe` or `WordInk-macos-arm64.dmg` from the release page, not a local build.
+- Install from the candidate's installer: `WordInk-for-Windows-Setup.exe` or `WordInk-for-Mac-Apple-Silicon.dmg` from the release page, not a local build.
 
 ## 1. Download and open
 
 | Step | macOS | Windows | Expected |
 |---|---|---|---|
-| 1.1 | Open the `.dmg` | Run `WordInk-Setup-windows-x64.exe` | The dmg window shows WordInk and an Applications shortcut. The Windows installer asks for no administrator rights. |
+| 1.1 | Open the `.dmg` | Run `WordInk-for-Windows-Setup.exe` | The dmg window shows WordInk and an Applications shortcut. The Windows installer asks for no administrator rights. |
 | 1.2 | Drag WordInk to Applications, open it | Finish the installer | macOS blocks the unsigned app once; System Settings › Privacy & Security › Open Anyway opens it. Windows SmartScreen may warn; More info › Run anyway opens it. |
 | 1.3 | Check the Dock and Finder icon | Check the Start menu, desktop shortcut, taskbar and Apps & Features icons | The WordInk logo, sharp at every size, nowhere the Hex logo. |
 | 1.4 | `/Applications/WordInk.app/Contents/MacOS/wordink --version` | `%LOCALAPPDATA%\Programs\WordInk\wordink.exe --version` | The candidate's version. Windows: Apps & Features shows the same version. |
@@ -79,7 +79,7 @@ In Settings › General › Recording indicator, pick each style in turn and dic
 | Step | macOS | Windows | Expected |
 |---|---|---|---|
 | 8.1 | Settings shows the update state for the channel | Same | A newer release is reported with its notes. |
-| 8.2 | Press Update | Press Update | Unsigned builds open the new `.dmg` or `WordInk-Setup-windows-x64.exe` download, not a zip. Settings, history and models survive installing it over the old copy. |
+| 8.2 | Press Update | Press Update | Unsigned builds open the new `.dmg` or `WordInk-for-Windows-Setup.exe` download, not a zip. Settings, history and models survive installing it over the old copy. |
 
 ## 9. Uninstall
 
