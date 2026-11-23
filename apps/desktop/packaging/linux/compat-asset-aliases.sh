@@ -6,7 +6,7 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-# shellcheck source=release-asset-names.sh
+# shellcheck disable=SC1091
 . "$here/release-asset-names.sh"
 
 dist=${1:?Usage: compat-asset-aliases.sh <dist>}

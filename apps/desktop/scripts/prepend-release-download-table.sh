@@ -5,7 +5,7 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-# shellcheck source=../packaging/linux/release-asset-names.sh
+# shellcheck disable=SC1091
 . "$here/../packaging/linux/release-asset-names.sh"
 
 body=${1:?Usage: prepend-release-download-table.sh <changelog-body>}

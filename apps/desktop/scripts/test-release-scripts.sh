@@ -96,7 +96,7 @@ expect_fail "manifest: dev refuses a Linux target without its signature" "$linux
 # --- check-release-files.sh ---------------------------------------------------
 files="$work/files"
 mkdir "$files"
-# shellcheck source=../packaging/linux/release-asset-names.sh
+# shellcheck disable=SC1091
 . "$linux/release-asset-names.sh"
 for f in "wordink-$v-linux-x64" "wordink-$v-linux-x64.tar.gz" "wordink-$v-linux-arm64" "wordink-$v-linux-arm64.tar.gz" \
   "wordink-$v-windows-x64.zip" "wordink-$v-macos-arm64.zip" "wordink-$v.sbom.cdx.json" \

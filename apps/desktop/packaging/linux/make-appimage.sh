@@ -18,7 +18,7 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-# shellcheck source=release-asset-names.sh
+# shellcheck disable=SC1091
 . "$here/release-asset-names.sh"
 
 executable=${1:?Usage: make-appimage.sh <executable> <x64|arm64> <dist>}

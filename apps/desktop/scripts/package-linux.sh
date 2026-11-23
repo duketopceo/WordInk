@@ -13,7 +13,7 @@
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-# shellcheck source=../packaging/linux/release-asset-names.sh
+# shellcheck disable=SC1091
 . "$root/packaging/linux/release-asset-names.sh"
 [ $# -eq 4 ] || {
   echo "Usage: $0 <executable> <version> <x64|arm64> <dist>" >&2
