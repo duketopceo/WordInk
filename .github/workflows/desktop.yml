@@ -115,7 +115,7 @@ jobs:
       - name: Release scripts (shellcheck and tests)
         if: startsWith(matrix.os, 'ubuntu')
         run: |
-          shellcheck packaging/linux/{sign-linux,make-tarball,make-appimage,check-release-files,write-sums,verify-release,write-manifest,release-asset-names,compat-asset-aliases}.sh \
+          shellcheck -x packaging/linux/{sign-linux,make-tarball,make-appimage,check-release-files,write-sums,verify-release,write-manifest,release-asset-names,compat-asset-aliases}.sh \
             packaging/aur/render-pkgbuild.sh packaging/macos/make-dmg.sh \
             scripts/{release-gate,release-notes,prepend-release-download-table,test-release-scripts,package-linux}.sh
           scripts/test-release-scripts.sh
