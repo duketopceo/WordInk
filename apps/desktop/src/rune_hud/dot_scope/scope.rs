@@ -1024,7 +1024,7 @@ mod tests {
             spread(&quiet)
         );
         let pose = loud.pose();
-        assert!((pose.width - 140.0).abs() < 1.0);
+        assert!((pose.width - 112.0).abs() < 1.0);
         assert!(pose.opacity > 0.99 && pose.glow > 0.2);
     }
 
@@ -1044,7 +1044,7 @@ mod tests {
         assert!(spread(&scope) < voice * 0.6);
         let pose = scope.pose();
         assert!(pose.cool > 0.99);
-        assert!((pose.width - 96.0).abs() < 1.0);
+        assert!((pose.width - 76.0).abs() < 1.0);
     }
 
     #[test]

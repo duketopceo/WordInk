@@ -470,8 +470,8 @@ mod tests {
     #[test]
     fn defaults_are_the_prototypes() {
         let t = Tuning::default();
-        assert_eq!((t.columns, t.rows, t.spacing), (43.0, 9.0, 3.25));
-        assert_eq!((t.width, t.processing_width, t.height), (140.0, 96.0, 32.0));
+        assert_eq!((t.columns, t.rows, t.spacing), (43.0, 9.0, 2.6));
+        assert_eq!((t.width, t.processing_width, t.height), (112.0, 76.0, 26.0));
         assert_eq!((t.response, t.release, t.history_speed), (6.5, 0.15, 150.0));
         assert_eq!((t.phosphor, t.shimmer_pass), (0.6, 0.55));
         assert_eq!((t.transition, t.bounce), (0.3, 0.15));

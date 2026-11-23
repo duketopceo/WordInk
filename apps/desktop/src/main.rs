@@ -5,7 +5,7 @@
 // Windows builds still compile it for the window and listener, which leaves macOS-only
 // paths (and helpers only onboarding touches on one OS) unused in `clippy --tests`.
 #![cfg_attr(
-    any(target_os = "linux", target_os = "windows"),
+    any(target_os = "linux", target_os = "windows", target_os = "macos"),
     allow(dead_code, unused_variables)
 )]
 

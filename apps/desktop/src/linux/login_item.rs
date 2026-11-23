@@ -1,5 +1,5 @@
 //! Launch at login on Linux: the XDG autostart entry
-//! `~/.config/autostart/anomaly.hex.desktop`, named for Hex's app id, the
+//! `~/.config/autostart/io.github.duketopceo.wordink.desktop`, named for WordInk's app id, the
 //! same managed file the installer writes. Hex only replaces or removes an entry that carries its
 //! `X-Hex-Managed=true` mark; the file on disk is the only state.
 
@@ -470,9 +470,9 @@ mod tests {
         let root = std::env::temp_dir().join(format!("hex-login-link-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         let target = root.join("target.desktop");
-        fs::write(&target, "[Desktop Entry]\nX-XDP-Autostart=anomaly.hex\n").unwrap();
+        fs::write(&target, "[Desktop Entry]\nX-XDP-Autostart=io.github.duketopceo.wordink\n").unwrap();
         assert!(ours(&read(&target).unwrap().unwrap()));
-        let link = root.join("anomaly.hex.desktop");
+        let link = root.join("io.github.duketopceo.wordink.desktop");
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert!(!ours(&read(&link).unwrap().unwrap()));
         assert_eq!(read(&root.join("missing.desktop")).unwrap(), None);
@@ -488,7 +488,7 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("hex-autostart-{unique}"));
         fs::create_dir_all(&directory).unwrap();
         let legacy = directory.join("hex.desktop");
-        let entry = directory.join("anomaly.hex.desktop");
+        let entry = directory.join("io.github.duketopceo.wordink.desktop");
         fs::write(
             &legacy,
             "[Desktop Entry]\nExec=hex start\nX-Hex-Managed=true\n",
@@ -514,7 +514,7 @@ mod tests {
         assert!(
             fs::read_to_string(&entry)
                 .unwrap()
-                .contains("\nIcon=anomaly.hex\n")
+                .contains("\nIcon=io.github.duketopceo.wordink\n")
         );
         fs::remove_dir_all(directory).unwrap();
     }
@@ -533,7 +533,7 @@ mod tests {
         fs::create_dir_all(&directory).unwrap();
         let launcher = directory.join("hex");
         fs::write(&launcher, "").unwrap();
-        let path = directory.join("anomaly.hex.desktop");
+        let path = directory.join("io.github.duketopceo.wordink.desktop");
         // A downloaded binary that has since moved.
         fs::write(&path, entry(&directory.join("Downloads/hex"))).unwrap();
         refresh_in(&directory, &launcher).unwrap();

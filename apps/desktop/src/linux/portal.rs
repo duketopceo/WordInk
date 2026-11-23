@@ -32,7 +32,7 @@ const SHORTCUTS: &str = "org.freedesktop.portal.GlobalShortcuts";
 const REQUEST: &str = "org.freedesktop.portal.Request";
 const SESSION: &str = "org.freedesktop.portal.Session";
 /// Hex's Linux app id: the portal names host apps by their desktop entry,
-/// `anomaly.hex.desktop`, and Hex's windows report it as their Wayland
+/// `io.github.duketopceo.wordink.desktop`, and Hex's windows report it as their Wayland
 /// app_id and X11 WM_CLASS. GNOME's shortcuts provider before 51 rejects ids
 /// that are not reverse-DNS (#579), so this matches the macOS bundle
 /// identifier.
@@ -179,7 +179,7 @@ pub(crate) struct PortalBus {
     /// The portal interface this bus serves and its version.
     interface: &'static str,
     pub(crate) version: u32,
-    /// The portal knows Hex as `anomaly.hex` (xdg-desktop-portal 1.20 and
+    /// The portal knows WordInk as `io.github.duketopceo.wordink` (xdg-desktop-portal 1.20 and
     /// newer register host apps); older ones may not know Hex's app id.
     pub(crate) registered: bool,
 }
@@ -261,7 +261,7 @@ impl PortalBus {
             &(APP_ID, HashMap::<&str, Variant<'_>>::new()),
         ) {
             if !unknown(&error) {
-                // The portal finds the app id through anomaly.hex.desktop and the caller's
+                // The portal finds the app id through io.github.duketopceo.wordink.desktop and the caller's
                 // /proc entry, which setgid wrappers such as newgrp make unreadable.
                 let fix = match written {
                     Some(entry) => format!(
@@ -504,7 +504,7 @@ pub(crate) fn tidy_desktop_entries() -> Result<()> {
 }
 
 /// The portal identifies a host app by a desktop entry named for its id,
-/// `anomaly.hex.desktop`, which installs ship: see [`DesktopEntries::ensure`].
+/// `io.github.duketopceo.wordink.desktop`, which installs ship: see [`DesktopEntries::ensure`].
 /// What Hex's launcher entry starts: the same stable path as Launch at
 /// login, so a version manager's upgrade doesn't strand it (#810).
 fn executable() -> Result<String> {
@@ -586,7 +586,7 @@ impl DesktopEntries {
     }
 
     /// Moves Hex's own managed `hex.desktop` (the name before #579) to
-    /// `anomaly.hex.desktop`, keeping its Exec lines, unless the user put an
+    /// `io.github.duketopceo.wordink.desktop`, keeping its Exec lines, unless the user put an
     /// entry of their own there; then removes a hidden fallback that would
     /// shadow a package's entry of the same id, or names Hex's icon in an
     /// entry Hex wrote with the generic one (#652). Returns the entry it wrote.
@@ -725,7 +725,7 @@ fn write_entry(applications: &Path, entry: &Path, contents: &str) -> Result<()> 
     Ok(())
 }
 
-/// `entry` with every `Icon=` naming Hex's icon (`anomaly.hex` in hicolor).
+/// `entry` with every `Icon=` naming Hex's icon (`io.github.duketopceo.wordink` in hicolor).
 pub(crate) fn with_icon(entry: &str) -> String {
     let mut named = String::with_capacity(entry.len());
     for line in entry.lines() {
@@ -1279,7 +1279,7 @@ mod tests {
         assert!(desktop_entry("/opt/hex", false).contains("\nExec=\"/opt/hex\"\n"));
         assert!(!desktop_entry("/opt/hex", false).contains("NoDisplay"));
         assert!(desktop_entry("/opt/hex", true).contains("\nNoDisplay=true\n"));
-        assert!(desktop_entry("/opt/hex", false).contains("\nStartupWMClass=anomaly.hex\n"));
+        assert!(desktop_entry("/opt/hex", false).contains("\nStartupWMClass=io.github.duketopceo.wordink\n"));
     }
 
     #[test]
@@ -1287,7 +1287,7 @@ mod tests {
         let old = "[Desktop Entry]\nName=Hex\nExec=\"/home/a/.local/bin/hex\"\nStartupWMClass=hex\nX-Hex-Managed=true\n\n[Desktop Action quit]\nExec=\"/home/a/.local/bin/hex\" quit\n";
         assert_eq!(
             moved_entry(old),
-            "[Desktop Entry]\nStartupWMClass=anomaly.hex\nName=Hex\nExec=\"/home/a/.local/bin/hex\"\nX-Hex-Managed=true\n\n[Desktop Action quit]\nExec=\"/home/a/.local/bin/hex\" quit\n"
+            "[Desktop Entry]\nStartupWMClass=io.github.duketopceo.wordink\nName=Hex\nExec=\"/home/a/.local/bin/hex\"\nX-Hex-Managed=true\n\n[Desktop Action quit]\nExec=\"/home/a/.local/bin/hex\" quit\n"
         );
     }
 
@@ -1318,8 +1318,8 @@ mod tests {
         .unwrap();
         entries.tidy().unwrap();
         let named = std::fs::read_to_string(entries.entry()).unwrap();
-        assert!(named.contains("\nIcon=anomaly.hex\n"), "{named}");
-        assert!(desktop_entry("/opt/hex", false).contains("\nIcon=anomaly.hex\n"));
+        assert!(named.contains("\nIcon=io.github.duketopceo.wordink\n"), "{named}");
+        assert!(desktop_entry("/opt/hex", false).contains("\nIcon=io.github.duketopceo.wordink\n"));
         // Someone else's entry keeps its icon.
         std::fs::write(entries.entry(), "[Desktop Entry]\nIcon=mine\n").unwrap();
         entries.tidy().unwrap();
@@ -1339,7 +1339,7 @@ mod tests {
         assert!(!entries.applications.join("hex.desktop").exists());
         let moved = std::fs::read_to_string(entries.entry()).unwrap();
         assert!(moved.contains("Exec=\"/home/a/.local/bin/hex\"\n"));
-        assert!(moved.contains("StartupWMClass=anomaly.hex\n"));
+        assert!(moved.contains("StartupWMClass=io.github.duketopceo.wordink\n"));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1394,7 +1394,7 @@ mod tests {
         );
         // A package ships Hex's entry now: the stranded fallback goes.
         std::fs::write(
-            entries.system[0].join("anomaly.hex.desktop"),
+            entries.system[0].join("io.github.duketopceo.wordink.desktop"),
             "[Desktop Entry]\n",
         )
         .unwrap();
@@ -1431,7 +1431,7 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
         let (root, provided) = entries("provided");
         std::fs::write(
-            provided.system[0].join("anomaly.hex.desktop"),
+            provided.system[0].join("io.github.duketopceo.wordink.desktop"),
             "[Desktop Entry]\n",
         )
         .unwrap();
@@ -1459,7 +1459,7 @@ mod tests {
         assert_eq!(entries.ensure("/opt/hex").unwrap(), None);
         assert!(entries.entry().exists());
         std::fs::write(
-            entries.system[0].join("anomaly.hex.desktop"),
+            entries.system[0].join("io.github.duketopceo.wordink.desktop"),
             "[Desktop Entry]\n",
         )
         .unwrap();
