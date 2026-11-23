@@ -110,7 +110,10 @@ fn compile_helper() {
 fn profile_directory(out_dir: &std::path::Path) -> std::path::PathBuf {
     if let Ok(profile) = std::env::var("PROFILE") {
         for ancestor in out_dir.ancestors() {
-            if ancestor.file_name().is_some_and(|name| name == profile) {
+            if ancestor
+                .file_name()
+                .is_some_and(|name| name == std::ffi::OsStr::new(profile.as_str()))
+            {
                 return ancestor.to_path_buf();
             }
         }
