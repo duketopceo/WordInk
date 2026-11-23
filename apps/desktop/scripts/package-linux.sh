@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Wraps a Linux release executable in the wordink .deb and .rpm
 # (packaging/linux/nfpm.yaml):
 #
@@ -10,7 +10,7 @@
 # `releases/latest/download/<name>` always fetches the newest one; the package
 # metadata carries the version. The Desktop release workflow publishes both.
 # Requires nfpm (NFPM names another binary).
-set -eu
+set -euo pipefail
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 # shellcheck disable=SC1091
