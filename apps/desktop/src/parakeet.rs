@@ -1191,6 +1191,7 @@ fn record_history(
         total_ms: completed.timings.total_started.elapsed().as_millis() as u64,
         recording: completed.recording.take(),
         model: crate::history::dictation_model(),
+        usage: None,
     };
     if let Err(error) = history.record(draft) {
         tracing::warn!(%error, "could not record dictation history");

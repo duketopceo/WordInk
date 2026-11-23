@@ -116,7 +116,7 @@ pub(crate) fn pick(
         .system_default
         .as_deref()
         .filter(|id| !crate::audio::hex_microphone::is_hex_virtual_device_name(id))
-        .and_then(|id| label(id));
+        .and_then(label);
     let in_use = saved.filter(|saved| is_listed(saved) && off != Some(*saved));
     let shown = match (in_use, &default_name) {
         (Some(saved), _) => Shown::Device(

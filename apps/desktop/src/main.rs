@@ -1,6 +1,13 @@
 // A GUI program on Windows, so launching Hex opens no console window (#850).
 // Commands run from a terminal attach to it (`windows::attach_parent_console`).
 #![cfg_attr(all(target_os = "windows", not(test)), windows_subsystem = "windows")]
+// WordInk links the full macOS CLI and onboarding surface in one crate. Linux and
+// Windows builds still compile it for the window and listener, which leaves macOS-only
+// paths (and helpers only onboarding touches on one OS) unused in `clippy --tests`.
+#![cfg_attr(
+    any(target_os = "linux", target_os = "windows"),
+    allow(dead_code, unused_variables)
+)]
 
 /// The version Hex reports: the release version, or `0.0.0-dev-local-<commit>`
 /// for a build outside the Release workflow (build.rs).
