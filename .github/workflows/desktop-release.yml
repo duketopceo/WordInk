@@ -648,12 +648,12 @@ jobs:
           if [ "$PRERELEASE" = true ]; then flags+=(--prerelease --latest=false); else flags+=(--latest); fi
           gh release create "$WORDINK_TAG" -R "$WORDINK_REPO" "${flags[@]}" "$RUNNER_TEMP"/release/*
           . apps/desktop/packaging/linux/release-asset-names.sh
-          expected=$(
+          expected=$({
             awk '{sub(/^\*/, "", $2); print $2}' "$RUNNER_TEMP/release/SHA256SUMS"
             printf '%s\n' \
               "$WORDINK_LEGACY_DMG" "$WORDINK_LEGACY_WINDOWS_SETUP" \
               "$WORDINK_LEGACY_APPIMAGE_X86_64" "$WORDINK_LEGACY_APPIMAGE_AARCH64"
-          | LC_ALL=C sort -u)
+          } | LC_ALL=C sort -u)
           uploaded=$(gh release view "$WORDINK_TAG" -R "$WORDINK_REPO" --json assets --jq '.assets[].name' | LC_ALL=C sort)
           [ "$expected" = "$uploaded" ] || { echo "::error::the draft's assets differ from the signed set plus legacy aliases"; diff <(echo "$expected") <(echo "$uploaded") || true; exit 1; }
 
