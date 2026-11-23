@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # make-appimage.sh <executable> <x64|arm64> <dist>: wraps a Linux release
-# executable in WordInk-linux-<x86_64|aarch64>.AppImage in <dist>, with the
+# executable in WordInk-for-Linux-<x86_64|ARM64>.AppImage in <dist>, with the
 # desktop entry and icons from this checkout. The AppImage bundles no
 # libraries: like the tarball, it needs glibc 2.39 or newer and the system's
 # audio, Vulkan, X11/Wayland and xkbcommon libraries.
@@ -17,6 +17,10 @@
 # SHA256SUMS (signed) lists the result.
 set -euo pipefail
 
+here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=release-asset-names.sh
+. "$here/release-asset-names.sh"
+
 executable=${1:?Usage: make-appimage.sh <executable> <x64|arm64> <dist>}
 label=${2:?Usage: make-appimage.sh <executable> <x64|arm64> <dist>}
 dist=${3:?Usage: make-appimage.sh <executable> <x64|arm64> <dist>}
@@ -27,7 +31,6 @@ case "$label" in
   arm64) arch=aarch64 ;;
   *) echo "::error::The architecture must be x64 or arm64, not $label." >&2; exit 1 ;;
 esac
-here=$(cd "$(dirname "$0")" && pwd)
 desktop=$(cd "$here/../.." && pwd)
 app_id=io.github.duketopceo.wordink
 runtime="$APPIMAGE_RUNTIME_DIR/runtime-$arch"
@@ -55,7 +58,11 @@ install -m 644 "$here/icons/hicolor/256x256/apps/$app_id.png" "$appdir/$app_id.p
 ln -s "$app_id.png" "$appdir/.DirIcon"
 install -m 644 "$desktop/LICENSE" "$desktop/THIRD_PARTY_NOTICES.md" "$appdir/"
 
-out="$dist/WordInk-linux-$arch.AppImage"
+case "$arch" in
+  x86_64) out="$dist/$WORDINK_ASSET_APPIMAGE_X86_64" ;;
+  aarch64) out="$dist/$WORDINK_ASSET_APPIMAGE_AARCH64" ;;
+  *) echo "::error::unknown AppImage arch $arch" >&2; exit 1 ;;
+esac
 rm -f "$out"
 ARCH=$arch "$APPIMAGETOOL" --no-appstream --runtime-file "$runtime" "$appdir" "$out" >&2
 chmod 755 "$out"

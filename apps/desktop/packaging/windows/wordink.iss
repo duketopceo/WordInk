@@ -1,4 +1,4 @@
-; Per-user Windows installer for WordInk (WordInk-Setup-windows-x64.exe on a
+; Per-user Windows installer for WordInk (WordInk-for-Windows-Setup.exe on a
 ; release). No admin rights. It installs the same layout as the one-line
 ; installer, packaging/windows/install.ps1, so either can update or remove what
 ; the other installed:

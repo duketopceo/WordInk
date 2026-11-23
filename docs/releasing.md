@@ -48,10 +48,11 @@ No other tag suffix is accepted.
      tarballs, AppImages, `.deb` and `.rpm` packages and gathers the three
      one-line installers. None of these has a secret. The macOS build is the
      unsigned `WordInk.app` from `scripts/build-app.sh`, zipped with `ditto` so
-     the zip root is `WordInk.app/`, and packed into `WordInk-macos-arm64.dmg`
-     (`packaging/macos/make-dmg.sh`). The Windows leg also compiles the Inno
-     Setup installer (`packaging/windows/wordink.iss`) into
-     `WordInk-Setup-windows-x64.exe`. `package-linux` downloads nfpm,
+     the zip root is `WordInk.app/`, and packed into
+     `WordInk-for-Mac-Apple-Silicon.dmg` (`packaging/macos/make-dmg.sh`). The
+     Windows leg also compiles the Inno Setup installer
+     (`packaging/windows/wordink.iss`) into `WordInk-for-Windows-Setup.exe`.
+     `package-linux` downloads nfpm,
      appimagetool and the AppImage runtimes at pinned versions and checks
      their SHA-256 before running them.
    - `check-installers` installs what was packed on clean runners, with no
@@ -131,11 +132,11 @@ For version `V` (`stable.json` only on final releases):
 | `wordink-V-linux-x64.tar.gz`, `wordink-V-linux-arm64.tar.gz` | tarball with the installer, desktop files and icons (made before signing, so it holds no `.sig`) |
 | `wordink-V-macos-arm64.zip` | unsigned `WordInk.app` (zip root `WordInk.app/`); what `install-macos.sh` and the macOS updater link use |
 | `wordink-V-windows-x64.zip` | unsigned build with `wordink.exe`; what `install.ps1` and the Windows updater link use |
-| `WordInk-Setup-windows-x64.exe` | per-user Inno Setup installer (no admin, Start Menu shortcut, uninstaller), unsigned |
-| `WordInk-macos-arm64.dmg` | disk image with `WordInk.app` and an Applications link, unsigned, not notarized |
-| `WordInk-linux-x86_64.AppImage`, `WordInk-linux-aarch64.AppImage` | AppImage of the same executable (no bundled libraries, no self-update) |
-| `wordink_amd64.deb`, `wordink_arm64.deb` | Debian/Ubuntu package (nfpm): `/usr/bin/wordink`, launcher entry, icons, systemd user unit |
-| `wordink-x86_64.rpm`, `wordink-aarch64.rpm` | Fedora/openSUSE package with the same contents |
+| `WordInk-for-Windows-Setup.exe` | per-user Inno Setup installer (no admin, Start Menu shortcut, uninstaller), unsigned |
+| `WordInk-for-Mac-Apple-Silicon.dmg` | disk image with `WordInk.app` and an Applications link, unsigned, not notarized |
+| `WordInk-for-Linux-x86_64.AppImage`, `WordInk-for-Linux-ARM64.AppImage` | AppImage of the same executable (no bundled libraries, no self-update) |
+| `wordink-package-debian-amd64.deb`, `wordink-package-debian-arm64.deb` | Debian/Ubuntu package (nfpm): `/usr/bin/wordink`, launcher entry, icons, systemd user unit |
+| `wordink-package-fedora-x86_64.rpm`, `wordink-package-fedora-aarch64.rpm` | Fedora/openSUSE package with the same contents |
 | `install.sh`, `install-macos.sh`, `install.ps1` | the one-line installers (Linux, macOS, Windows); users run them from `releases/latest/download/` |
 | `wordink-V.sbom.cdx.json` | CycloneDX SBOM |
 | `stable.json` | update manifest the stable-channel updater reads (final releases only) |
@@ -147,6 +148,12 @@ For version `V` (`stable.json` only on final releases):
 the workflow fails if the release has any other file or lacks one
 (`apps/desktop/packaging/linux/check-release-files.sh` holds the list).
 
+Human-facing installers use the `WordInk-for-*` prefix so they sort together at
+the top of a release's asset list (GitHub sorts alphabetically). Packages use
+the `wordink-package-*` prefix so they read as optional package-manager paths
+and sit with the other `wordink-*` updater assets. Canonical names live in
+`apps/desktop/packaging/linux/release-asset-names.sh`.
+
 The installers and packages have no version in their names, so
 `https://github.com/duketopceo/WordInk/releases/latest/download/<name>` (the
 README's Download links) always fetches the newest one. GitHub resolves
@@ -155,6 +162,19 @@ prerelease and never `latest`, so its installers are only reachable from its
 own release page (`releases/download/desktop-vX.Y.Z-rc.N/<name>`). The
 versioned zips, tarballs and bare executables keep their names, which the
 updater manifests and the one-line installers rely on; do not rename them.
+
+**Backward compatibility (1.0.0–1.0.2 clients):** those builds open
+`releases/latest/download/` using the old installer filenames. Each new release
+also uploads hard-linked copies under the legacy names (`WordInk-macos-arm64.dmg`,
+`WordInk-Setup-windows-x64.exe`, `WordInk-linux-x86_64.AppImage`,
+`WordInk-linux-aarch64.AppImage`) via `compat-asset-aliases.sh`. They are not
+listed in `SHA256SUMS` (signing finishes before aliases are added). Linux
+self-update still uses the versioned executables and signatures in
+`stable.json` / `dev.json`, unchanged.
+
+**Release notes:** the workflow prepends a Download table
+(`prepend-release-download-table.sh`) before the `CHANGELOG.md` section for the
+tag, so non-technical readers see one row per OS at the top of the release page.
 
 The AUR template in `apps/desktop/packaging/aur` is filled from a release with
 `render-pkgbuild.sh <version> SHA256SUMS` (it uses the two Linux tarballs).

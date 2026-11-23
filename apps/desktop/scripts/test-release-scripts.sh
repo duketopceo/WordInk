@@ -96,17 +96,49 @@ expect_fail "manifest: dev refuses a Linux target without its signature" "$linux
 # --- check-release-files.sh ---------------------------------------------------
 files="$work/files"
 mkdir "$files"
+# shellcheck source=../packaging/linux/release-asset-names.sh
+. "$linux/release-asset-names.sh"
 for f in "wordink-$v-linux-x64" "wordink-$v-linux-x64.tar.gz" "wordink-$v-linux-arm64" "wordink-$v-linux-arm64.tar.gz" \
-  "wordink-$v-windows-x64.zip" "wordink-$v-macos-arm64.zip" "wordink-$v.sbom.cdx.json" install.sh install-macos.sh install.ps1 \
-  WordInk-Setup-windows-x64.exe WordInk-macos-arm64.dmg WordInk-linux-x86_64.AppImage WordInk-linux-aarch64.AppImage \
-  wordink_amd64.deb wordink_arm64.deb wordink-x86_64.rpm wordink-aarch64.rpm; do
+  "wordink-$v-windows-x64.zip" "wordink-$v-macos-arm64.zip" "wordink-$v.sbom.cdx.json" \
+  "$WORDINK_ASSET_INSTALL_SH" "$WORDINK_ASSET_INSTALL_MACOS_SH" "$WORDINK_ASSET_INSTALL_PS1" \
+  "$WORDINK_ASSET_WINDOWS_SETUP" "$WORDINK_ASSET_DMG" \
+  "$WORDINK_ASSET_APPIMAGE_X86_64" "$WORDINK_ASSET_APPIMAGE_AARCH64" \
+  "$WORDINK_ASSET_DEB_AMD64" "$WORDINK_ASSET_DEB_ARM64" \
+  "$WORDINK_ASSET_RPM_X86_64" "$WORDINK_ASSET_RPM_AARCH64"; do
   : > "$files/$f"
 done
 expect_ok "files: the complete set" "$linux/check-release-files.sh" "$files"
 : > "$files/extra.txt"
 expect_fail "files: an extra file" "$linux/check-release-files.sh" "$files"
-rm "$files/extra.txt" "$files/wordink_arm64.deb"
+rm "$files/extra.txt" "$files/$WORDINK_ASSET_DEB_ARM64"
 expect_fail "files: a missing package" "$linux/check-release-files.sh" "$files"
+
+# --- compat-asset-aliases.sh --------------------------------------------------
+aliases="$work/aliases"
+mkdir -p "$aliases"
+printf win > "$aliases/$WORDINK_ASSET_WINDOWS_SETUP"
+printf mac > "$aliases/$WORDINK_ASSET_DMG"
+printf x64 > "$aliases/$WORDINK_ASSET_APPIMAGE_X86_64"
+printf arm > "$aliases/$WORDINK_ASSET_APPIMAGE_AARCH64"
+expect_ok "aliases: link legacy names" "$linux/compat-asset-aliases.sh" "$aliases"
+if [ "$(cat "$aliases/$WORDINK_LEGACY_WINDOWS_SETUP")" = win ] \
+  && [ "$(cat "$aliases/$WORDINK_LEGACY_DMG")" = mac ] \
+  && [ "$(cat "$aliases/$WORDINK_LEGACY_APPIMAGE_X86_64")" = x64 ] \
+  && [ "$(cat "$aliases/$WORDINK_LEGACY_APPIMAGE_AARCH64")" = arm ]; then
+  ok "aliases: legacy names share canonical bytes"
+else
+  bad "aliases: legacy names share canonical bytes"
+fi
+
+# --- prepend-release-download-table.sh --------------------------------------
+if WORDINK_TAG=desktop-v1.0.0 WORDINK_REPO=duketopceo/WordInk \
+  "$here/prepend-release-download-table.sh" "Body line" | grep -q 'WordInk-for-Windows-Setup.exe' \
+  && WORDINK_TAG=desktop-v1.0.0 WORDINK_REPO=duketopceo/WordInk \
+  "$here/prepend-release-download-table.sh" "Body line" | tail -n1 | grep -q '^Body line$'; then
+  ok "notes: download table prepends"
+else
+  bad "notes: download table prepends"
+fi
 
 # --- AUR render-pkgbuild.sh -----------------------------------------------
 aur="$here/../packaging/aur"

@@ -58,8 +58,8 @@ Install WordInk with the installer or the one-line installer for your platform; 
 Download WordInk
 ├── GitHub Releases (duketopceo/WordInk, desktop-vX.Y.Z tags)
 │   ├── installers (version-less names, releases/latest/download/<name>)
-│   │   ├── Windows -> WordInk-Setup-windows-x64.exe (Inno Setup, per user, unsigned)
-│   │   ├── macOS -> WordInk-macos-arm64.dmg (drag to Applications, unsigned)
+│   │   ├── Windows -> WordInk-for-Windows-Setup.exe (Inno Setup, per user, unsigned)
+│   │   ├── macOS -> WordInk-for-Mac-Apple-Silicon.dmg (drag to Applications, unsigned)
 │   │   └── Linux -> AppImage, .deb, .rpm (x86_64, aarch64; package-managed updates)
 │   └── one-line installers
 │       ├── Linux -> install.sh (ed25519-verified, self-updating)

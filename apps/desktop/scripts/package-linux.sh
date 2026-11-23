@@ -4,7 +4,8 @@
 #
 #   package-linux.sh <executable> <version> <x64|arm64> <dist>
 #
-# writes <dist>/wordink_<amd64|arm64>.deb and <dist>/wordink-<x86_64|aarch64>.rpm
+# writes <dist>/wordink-package-debian-<arch>.deb and
+# <dist>/wordink-package-fedora-<arch>.rpm (see release-asset-names.sh)
 # and prints their paths. The names carry no version, so
 # `releases/latest/download/<name>` always fetches the newest one; the package
 # metadata carries the version. The Desktop release workflow publishes both.
@@ -12,6 +13,8 @@
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+# shellcheck source=../packaging/linux/release-asset-names.sh
+. "$root/packaging/linux/release-asset-names.sh"
 [ $# -eq 4 ] || {
   echo "Usage: $0 <executable> <version> <x64|arm64> <dist>" >&2
   exit 1
@@ -48,8 +51,20 @@ package_version=$(printf '%s' "$version" | sed -e 's/-/~/' -e 's/-/./g')
 
 for format in deb rpm; do
   case "$format" in
-    deb) arch=$deb_arch target="$dist/wordink_$deb_arch.deb" ;;
-    rpm) arch=$deb_arch target="$dist/wordink-$rpm_arch.rpm" ;;
+    deb)
+      arch=$deb_arch
+      case "$deb_arch" in
+        amd64) target="$dist/$WORDINK_ASSET_DEB_AMD64" ;;
+        arm64) target="$dist/$WORDINK_ASSET_DEB_ARM64" ;;
+      esac
+      ;;
+    rpm)
+      arch=$deb_arch
+      case "$rpm_arch" in
+        x86_64) target="$dist/$WORDINK_ASSET_RPM_X86_64" ;;
+        aarch64) target="$dist/$WORDINK_ASSET_RPM_AARCH64" ;;
+      esac
+      ;;
   esac
   (
     cd "$temporary"

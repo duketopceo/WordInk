@@ -8,6 +8,10 @@
 # Environment: WORDINK_VERSION.
 set -euo pipefail
 
+here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=release-asset-names.sh
+. "$here/release-asset-names.sh"
+
 dist=${1:?Usage: check-release-files.sh <dist>}
 : "${WORDINK_VERSION:?Set WORDINK_VERSION}"
 v=$WORDINK_VERSION
@@ -16,10 +20,11 @@ expected=$(printf '%s\n' \
   "wordink-$v-linux-arm64" "wordink-$v-linux-arm64.tar.gz" \
   "wordink-$v-windows-x64.zip" "wordink-$v-macos-arm64.zip" \
   "wordink-$v.sbom.cdx.json" \
-  install.sh install-macos.sh install.ps1 \
-  WordInk-Setup-windows-x64.exe WordInk-macos-arm64.dmg \
-  WordInk-linux-x86_64.AppImage WordInk-linux-aarch64.AppImage \
-  wordink_amd64.deb wordink_arm64.deb wordink-x86_64.rpm wordink-aarch64.rpm | LC_ALL=C sort)
+  "$WORDINK_ASSET_INSTALL_SH" "$WORDINK_ASSET_INSTALL_MACOS_SH" "$WORDINK_ASSET_INSTALL_PS1" \
+  "$WORDINK_ASSET_WINDOWS_SETUP" "$WORDINK_ASSET_DMG" \
+  "$WORDINK_ASSET_APPIMAGE_X86_64" "$WORDINK_ASSET_APPIMAGE_AARCH64" \
+  "$WORDINK_ASSET_DEB_AMD64" "$WORDINK_ASSET_DEB_ARM64" \
+  "$WORDINK_ASSET_RPM_X86_64" "$WORDINK_ASSET_RPM_AARCH64" | LC_ALL=C sort)
 found=$(find "$dist" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
 if [ "$expected" != "$found" ]; then
   echo "::error::unexpected release files (- expected, + found)" >&2
