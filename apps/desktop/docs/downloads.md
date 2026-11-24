@@ -33,8 +33,11 @@ github.com/anomalyco/hex/releases/tag/v<version>       identical-byte mirror of 
 |---|---|
 | Windows 10/11 (x64) | [`WordInk-for-Windows-Setup.exe`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Windows-Setup.exe): per user, no admin, Start Menu shortcut, uninstall from Apps & Features |
 | macOS 15+ (Apple silicon) | [`WordInk-for-Mac-Apple-Silicon.dmg`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Mac-Apple-Silicon.dmg): drag WordInk to Applications |
-| Linux x86_64 | [`WordInk-for-Linux-x86_64.AppImage`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Linux-x86_64.AppImage), [`wordink-package-debian-amd64.deb`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-debian-amd64.deb), [`wordink-package-fedora-x86_64.rpm`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-fedora-x86_64.rpm) |
-| Linux aarch64 | [`WordInk-for-Linux-ARM64.AppImage`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Linux-ARM64.AppImage), [`wordink-package-debian-arm64.deb`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-debian-arm64.deb), [`wordink-package-fedora-aarch64.rpm`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-fedora-aarch64.rpm) |
+| Linux x86_64 | [`WordInk-for-Linux-x86_64.AppImage`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Linux-x86_64.AppImage) |
+| Linux aarch64 | [`WordInk-for-Linux-ARM64.AppImage`](https://github.com/duketopceo/WordInk/releases/latest/download/WordInk-for-Linux-ARM64.AppImage) |
+| iPhone | [Hex on the App Store](https://apps.apple.com/us/app/hex-voice-dictation-keyboard/id6836837368) (a separate app by Anomaly; WordInk has no iOS app) |
+
+Linux packages, for package-manager installs: [`wordink-package-debian-amd64.deb`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-debian-amd64.deb), [`wordink-package-debian-arm64.deb`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-debian-arm64.deb), [`wordink-package-fedora-x86_64.rpm`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-fedora-x86_64.rpm), [`wordink-package-fedora-aarch64.rpm`](https://github.com/duketopceo/WordInk/releases/latest/download/wordink-package-fedora-aarch64.rpm).
 
 `docs/releasing.md` describes the Worker config, the workflow that publishes
 these, the credentials, and the transition from Kit's bucket.
@@ -72,6 +75,8 @@ On September 11, 2026, a HEAD request for the pinned default Parakeet Unified
 English artifact followed `huggingface.co` to `us.aws.cdn.hf.co` and returned
 HTTP 200. This is an observed delivery host, not a permanent exhaustive CDN list.
 No model body was downloaded for that check.
+
+People need only the table above. The other files on a release page are for the updater and the one-line installers (executables and `.sig` files, tarballs, zips, `stable.json`, `dev.json`, the installer scripts) and for verification (`SHA256SUMS`, its `.sig`, the SBOM); do not rename or remove them.
 
 Each `desktop-vX.Y.Z` release carries: the per-architecture Linux executables and tarballs, AppImages, `.deb` and `.rpm` packages, `wordink-V-macos-arm64.zip` and `WordInk-for-Mac-Apple-Silicon.dmg`, `wordink-V-windows-x64.zip` and `WordInk-for-Windows-Setup.exe`, the three one-line installers, a CycloneDX SBOM, `stable.json` (final releases) and `dev.json`, `SHA256SUMS` and its ed25519 signature `SHA256SUMS.sig`. The exact table is in [`releasing.md`](../../../docs/releasing.md).
 

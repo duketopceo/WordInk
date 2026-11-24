@@ -23,8 +23,6 @@ mod transport;
 pub(crate) mod voice_filter;
 #[cfg(target_os = "windows")]
 mod wasapi_capture;
-#[cfg(target_os = "windows")]
-pub(crate) mod devices_cli;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
