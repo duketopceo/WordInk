@@ -606,6 +606,21 @@ impl GgufTranscriber {
             result => result,
         }
     }
+
+    fn stream_trailing_silence(&self) -> usize {
+        0
+    }
+
+    fn timestamps(&self) -> crate::transcription::transcript::TimestampLevel {
+        use crate::transcription::transcript::TimestampLevel;
+        match self.finest_timestamps {
+            TimestampKind::None => TimestampLevel::None,
+            TimestampKind::Segment => TimestampLevel::Segment,
+            TimestampKind::Word | TimestampKind::Auto | TimestampKind::Token => {
+                TimestampLevel::Word
+            }
+        }
+    }
 }
 
 /// The engine's local model: a GGUF model on the GPU or CPU, or on Linux on
@@ -811,6 +826,37 @@ impl LocalTranscriber {
     pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {
         self.transcribe_served(samples).map(|served| served.text)
     }
+
+    pub fn model_id(&self) -> crate::transcription::models::TranscriptionModelId {
+        match &self.inner {
+            Inner::Gguf(gguf) => gguf.selection.model,
+            #[cfg(target_os = "linux")]
+            Inner::Ane(ane) => ane.selection().model,
+        }
+    }
+
+    pub fn stream_trailing_silence(&self) -> usize {
+        match &self.inner {
+            Inner::Gguf(gguf) => gguf.stream_trailing_silence(),
+            #[cfg(target_os = "linux")]
+            Inner::Ane(_) => 0,
+        }
+    }
+
+    pub fn transcribe_timed(
+        &mut self,
+        samples: Vec<f32>,
+    ) -> Result<crate::transcription::transcript::Transcript> {
+        self.transcribe_segments(samples)
+    }
+
+    pub fn timestamps(&self) -> crate::transcription::transcript::TimestampLevel {
+        match &self.inner {
+            Inner::Gguf(gguf) => gguf.timestamps(),
+            #[cfg(target_os = "linux")]
+            Inner::Ane(_) => crate::transcription::transcript::TimestampLevel::Word,
+        }
+    }
 }
 
 /// Whether `error` is a decode stopped at its output limit.
@@ -980,6 +1026,34 @@ impl ModelSwap {
         self.device = transcriber.preference();
         Some(transcriber)
     }
+
+    /// An in-place model reload the engine asked for while nothing records.
+    pub(crate) fn take_reload(&mut self) -> Option<TranscriptionSelection> {
+        None
+    }
+}
+
+pub fn gpu_after_restart() -> bool {
+    false
+}
+
+pub fn transcribe_wav_bytes(wav: &[u8], selection: &TranscriptionSelection) -> Result<String> {
+    transcribe_wav_with_selection(wav, selection)
+}
+
+pub fn transcribe_wav_with_selection(
+    wav: &[u8],
+    selection: &TranscriptionSelection,
+) -> Result<String> {
+    use std::io::Cursor;
+    let reader = hound::WavReader::new(Cursor::new(wav)).wrap_err("could not read the WAV")?;
+    let samples = reader
+        .into_samples::<i16>()
+        .map(|sample| sample.map(|sample| sample as f32 / i16::MAX as f32))
+        .collect::<Result<Vec<_>, _>>()
+        .wrap_err("could not read WAV samples")?;
+    let mut transcriber = LocalTranscriber::load(selection)?;
+    transcriber.transcribe_clip(samples)
 }
 
 /// A model change that failed to load; the listener still runs `kept`.

@@ -62,17 +62,13 @@ pub(super) enum Pane {
     Output,
     /// The old per-app editor, kept for its scenes until it is removed.
     Modes,
-    /// The Global mode's spoken-phrase corrections.
-    Replacements,
-    /// Sound volume and sound set.
-    Sounds,
     /// Recorded calls and their settings, or the opt-in (macOS beta).
     Meetings,
     History,
-    /// What leaves this computer, where keys live, what is kept.
-    Privacy,
-    /// Words, sessions, time saved and estimated cost per provider.
-    Usage,
+    /// The shots and recordings Labs › Screenshots saved (macOS, while
+    /// it's on).
+    #[cfg(hex_capture)]
+    Captures,
     /// Annotate (Scrawl's captures inside Hex): the switch, shortcuts,
     /// permission, transcriber, folder, retention, and Scrawl's own app.
     /// Dev builds, macOS and Linux only.
@@ -93,12 +89,10 @@ impl Pane {
         Pane::General,
         Pane::Output,
         Pane::Modes,
-        Pane::Replacements,
-        Pane::Sounds,
         Pane::Meetings,
         Pane::History,
-        Pane::Privacy,
-        Pane::Usage,
+        #[cfg(hex_capture)]
+        Pane::Captures,
         #[cfg(hex_capture)]
         Pane::Annotate,
         Pane::VoiceFilter,
@@ -111,10 +105,13 @@ impl Pane {
         match self {
             Pane::Modes | Pane::HudLab | Pane::Activity => false,
             Pane::Meetings => caps.meetings && meetings::available(ui),
-            // On from Labs, or kept by a driver apps already use.
+            // On from Labs (dev builds), or while its driver is installed.
             Pane::VoiceFilter => caps.fun && fun::running(ui),
             #[cfg(hex_capture)]
             Pane::Annotate => ui.platform.scrawl.is_some(),
+            // The Lab turns on only on macOS.
+            #[cfg(hex_capture)]
+            Pane::Captures => ui.settings.labs.screenshots,
             _ => true,
         }
     }
@@ -124,11 +121,9 @@ impl Pane {
             Pane::General => tr("General"),
             Pane::Output => tr("Output"),
             Pane::Modes => tr("Modes"),
-            Pane::Replacements => tr("Replacements"),
-            Pane::Sounds => tr("Sounds"),
             Pane::History => tr("History"),
-            Pane::Privacy => tr("Privacy"),
-            Pane::Usage => tr("Usage"),
+            #[cfg(hex_capture)]
+            Pane::Captures => tr("Captures"),
             Pane::Meetings => tr("Meetings"),
             #[cfg(hex_capture)]
             Pane::Annotate => tr("Annotate"),
@@ -143,11 +138,9 @@ impl Pane {
             Pane::General => "nav-general",
             Pane::Output => "nav-output",
             Pane::Modes => "nav-modes",
-            Pane::Replacements => "nav-replacements",
-            Pane::Sounds => "nav-sounds",
             Pane::History => "nav-history",
-            Pane::Privacy => "nav-privacy",
-            Pane::Usage => "nav-usage",
+            #[cfg(hex_capture)]
+            Pane::Captures => "nav-captures",
             Pane::Meetings => "nav-meetings",
             #[cfg(hex_capture)]
             Pane::Annotate => "nav-annotate",
@@ -162,11 +155,9 @@ impl Pane {
             Pane::General => &SETTINGS_ICON,
             Pane::Output => &OUTPUT_ICON,
             Pane::Modes => &MODES_ICON,
-            Pane::Replacements => &icons::REFRESH,
-            Pane::Sounds => &icons::SPEAKER,
             Pane::History => &HISTORY_ICON,
-            Pane::Privacy => &icons::LOCK,
-            Pane::Usage => &ACTIVITY_ICON,
+            #[cfg(hex_capture)]
+            Pane::Captures => &captures::CAPTURES_ICON,
             Pane::Meetings => &MEETINGS_ICON,
             #[cfg(hex_capture)]
             Pane::Annotate => &SCRAWL_ICON,
@@ -200,6 +191,31 @@ pub(super) fn title_bar(element: El) -> El {
     }
 }
 
+/// The title bar of the content panel: the title, a view switch that stays
+/// beside it, and the pane's actions on the right. The title is the pane's
+/// level 1 heading.
+pub(super) fn pane_header(p: Paint, title: &str, switch: Option<El>, actions: Vec<El>) -> El {
+    title_bar(row())
+        .key("pane-header")
+        .h(52.0)
+        .px(METRICS.gutter)
+        .gap(8.0)
+        .center_y()
+        .child(
+            text(title)
+                .key("pane-title")
+                .role("heading")
+                .level(1)
+                .font(p.k.ty.body_medium)
+                .color(p.text())
+                .shrink()
+                .truncate(),
+        )
+        .children(switch.map(|switch| switch.ml(8.0)))
+        .child(el().key("header-spacer").grow(1.0))
+        .children(actions)
+}
+
 pub(super) fn sidebar(ui: &Ui, p: Paint) -> El {
     let mut nav = lists::source_list(col().key("nav"));
     for pane in labs::main_panes(ui) {
@@ -226,7 +242,7 @@ pub(super) fn sidebar(ui: &Ui, p: Paint) -> El {
         .child(el().key("spacer").grow(1.0))
         .children(sidebar_update::control(ui, p))
         .children(sidebar_update::notes(ui, p))
-        .child(super::meetings::sidebar_control(ui, p))
+        .children(sidebar_update::blocked(ui, p))
         .children(host::QUIT_IN_WINDOW.then(|| quit_item(p)))
         .child(footer(ui, p))
 }
@@ -263,21 +279,40 @@ fn footer(ui: &Ui, p: Paint) -> El {
             | DesktopUpdateStatus::ReadyToRestart
             | DesktopUpdateStatus::SwitchAvailable { .. },
         ) => None,
-        Some(DesktopUpdateStatus::Current | DesktopUpdateStatus::Failed) => Some(
-            line("update-status", tr("Check for updates"), c.text_muted)
-                .role("button")
-                .label(tr("Check for updates"))
-                .hover(c.hover)
-                .press(c.pressed)
-                .focusable(true)
-                .focus_ring(2.0, -2.0, c.border_focus)
-                .on_press(|ui: &mut Ui| ui.send(Request::Desktop(DesktopAction::CheckForUpdates))),
-        ),
-        // The same words, quieter, while it checks: the hourly check and a
-        // pressed one read the same and never swap the line's words.
+        // After a check the person asked for, the line says how it went
+        // (#1120); the hourly check alone never changes its words.
+        Some(status @ (DesktopUpdateStatus::Current | DesktopUpdateStatus::Failed)) => {
+            let words = match status {
+                DesktopUpdateStatus::Current if ui.update_asked => tr("Hex is up to date"),
+                DesktopUpdateStatus::Failed if ui.update_asked => tr("Couldn't check for updates"),
+                _ => tr("Check for updates"),
+            };
+            Some(
+                line("update-status", words, c.text_muted)
+                    .role("button")
+                    .label(tr("Check for updates"))
+                    .hover(c.hover)
+                    .press(c.pressed)
+                    .focusable(true)
+                    .focus_ring(2.0, -2.0, c.border_focus)
+                    .on_press(|ui: &mut Ui| {
+                        ui.update_asked = true;
+                        ui.send(Request::Desktop(DesktopAction::CheckForUpdates));
+                    }),
+            )
+        }
+        // Quieter while it checks; the hourly check keeps the line's words.
         Some(DesktopUpdateStatus::Checking) => Some(
-            line("update-status", tr("Check for updates"), p.faint())
-                .label(tr("Checking for updates…")),
+            line(
+                "update-status",
+                if ui.update_asked {
+                    tr("Checking for updates…")
+                } else {
+                    tr("Check for updates")
+                },
+                p.faint(),
+            )
+            .label(tr("Checking for updates…")),
         ),
         Some(DesktopUpdateStatus::Managed) => Some(line(
             "update-status",
@@ -320,7 +355,56 @@ fn footer(ui: &Ui, p: Paint) -> El {
             line("version", &version_label(), p.faint()),
         ))
         .children(status)
-        .child(line("credits", "Based on Hex by Anomaly (MIT)", p.faint()))
+        .children(release_notes_link(ui, p))
+}
+
+/// This build's release notes, under the version and status while Labs ›
+/// Release notes link is on. Unlike What's new, it needs no staged update.
+fn release_notes_link(ui: &Ui, p: Paint) -> Option<El> {
+    if !crate::labs::Feature::ReleaseNotesLink.on(&ui.settings) {
+        return None;
+    }
+    // A source or test build has no published notes for its code.
+    if ui.build_preview.unwrap_or_else(build_kind) != BuildKind::Release {
+        return None;
+    }
+    // Goldens pin the version, as the version label does.
+    let version = if cfg!(test) {
+        "0.0.0-dev-12"
+    } else {
+        crate::VERSION
+    };
+    let url = crate::updater::notes::release_notes_url(version)?;
+    let c = &p.k.c;
+    Some(
+        row()
+            .key("release-notes")
+            .h(FOOTER_LINE)
+            .px(6.0)
+            .center_y()
+            .self_start()
+            .radius(p.k.radius.sm)
+            .role("link")
+            .label(tr("Release notes"))
+            .hover(c.hover)
+            .press(c.pressed)
+            .focusable(true)
+            .focus_ring(2.0, -2.0, c.border_focus)
+            .on_press(move |ui: &mut Ui| {
+                if ui.live()
+                    && let Err(error) = crate::desktop::opencode_catalog::open_url(&url)
+                {
+                    ui.error = Some(format!("{error:#}"));
+                }
+            })
+            .child(
+                text(tr("Release notes"))
+                    .key("label")
+                    .font(p.k.ty.small)
+                    .color(c.text_muted)
+                    .truncate(),
+            ),
+    )
 }
 
 /// A local or test build marks itself beside the version, quietly: an outline
@@ -407,6 +491,8 @@ fn version_label() -> String {
 fn nav_slot(p: Paint, pane: Pane, on: bool, above: f32, below: f32) -> El {
     col()
         .key(format!("{}-slot", pane.key()))
+        // Assistive technology sees the item alone.
+        .role("none")
         .pt(above)
         .pb(below)
         .hover_group()
@@ -427,9 +513,10 @@ fn select_on_down(ui: &mut Ui, d: &mut rune::Drag, tx: &mut Tx, pane: Pane) {
 
 fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
     let c = &p.k.c;
+    // A row of the navigation list, selected while its pane shows.
     let mut item = row()
         .key(pane.key())
-        .role("button")
+        .role("listitem")
         .label(pane.title())
         .h(NAV_ROW_HEIGHT)
         .px(6.0)
@@ -447,34 +534,37 @@ fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
                 .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
                 .radius(p.k.radius.sm)
                 .fill(c.hover)
-                .group_opacity(0.0, 1.0),
+                .group_opacity(0.0, 1.0)
+                .a11y_hidden(),
         )
-        .child(icon(pane.icon(), 16.0).key("icon").color(if on {
-            c.icon_accent
-        } else {
-            c.icon_muted
-        }))
+        .child(
+            icon(pane.icon(), 16.0)
+                .key("icon")
+                .color(if on { c.icon_base } else { c.icon_muted })
+                .a11y_hidden(),
+        )
         .child(
             text(pane.title())
                 .key("label")
                 .font(p.k.ty.ui)
                 .color(if on { c.text_base } else { c.text_muted })
-                .truncate(),
+                .truncate()
+                .a11y_hidden(),
         );
     if on {
-        item = item.fill(brand::selected_fill(p.k));
+        item = item.fill(c.layer_02);
     }
     lists::source_item(item, on)
 }
 
-/// Linux has no tray: the window's way to stop WordInk. Closing the window
-/// keeps WordInk dictating.
+/// Linux has no tray: the window's way to stop Hex. Closing the window
+/// keeps Hex dictating.
 fn quit_item(p: Paint) -> El {
     let c = &p.k.c;
     row()
         .key("quit")
         .role("button")
-        .label(tr("Quit WordInk"))
+        .label(tr("Quit Hex"))
         .h(NAV_ROW_HEIGHT)
         .px(6.0)
         .mt(NAV_ROW_GAP)
@@ -486,10 +576,11 @@ fn quit_item(p: Paint) -> El {
         .focusable(true)
         .focus_ring(2.0, -2.0, c.border_focus)
         .child(
-            text(tr("Quit WordInk"))
+            text(tr("Quit Hex"))
                 .key("label")
                 .font(p.k.ty.ui)
                 .color(c.text_muted)
-                .truncate(),
+                .truncate()
+                .a11y_hidden(),
         )
 }

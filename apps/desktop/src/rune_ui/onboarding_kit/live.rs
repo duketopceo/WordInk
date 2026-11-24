@@ -1,6 +1,6 @@
 //! Hex's first run: the onboarding story, the one onboarding on every OS.
 //! A new install (or an upgrade whose setup isn't ready) opens it at
-//! launch, and Run setup again and `wordink onboarding reset` replay it. The
+//! launch, and Run setup again and `hex onboarding reset` replay it. The
 //! window's tour ([`onboarding`](super::super::onboarding)) is the state
 //! machine underneath: it starts the model download, asks for the
 //! permissions, relaunches when macOS needs it, watches the practice
@@ -16,7 +16,7 @@
 //! downloading by itself.
 
 use crate::desktop::i18n::tr;
-use std::sync::OnceLock;
+use std::sync::Mutex;
 use std::time::Instant;
 
 use rune::{El, TextEdit, Transition, Tx, text};
@@ -27,7 +27,7 @@ use super::super::paste_access::{self, PasteAccess};
 use super::super::platform::Os;
 use super::super::{Request, Ui, onboarding};
 use super::fixture::{Language, Speech};
-use super::mic_line::{Listing, MicPick};
+use super::permissions::{FLOAT_OFF, GRANTED_BEAT};
 use super::pill::set_other_label;
 use super::stories::{FRAME, Flow, Onboard, Step, advance_to};
 use crate::desktop::onboarding::{
@@ -37,8 +37,6 @@ use crate::transcription::models::{
     self as transcription_models, TranscriptionModelId, TranscriptionSelection,
 };
 
-/// How long both permission checks show before the page moves on.
-const GRANTED_BEAT: f64 = 0.7;
 /// How often the first run looks at the model on disk and the permissions.
 const CHECK_EVERY: f64 = 0.25;
 /// A download that gained no bytes for this long has stalled.
@@ -48,6 +46,9 @@ const STALL_AFTER: f64 = 30.0;
 pub(crate) struct Live {
     /// Hex's own dictation records.
     pub(crate) listening: bool,
+    /// The listener runs but its model, microphone, and shortcuts aren't up
+    /// yet, so the practice waits instead of inviting a hold.
+    pub(crate) warming: bool,
     /// The model download stopped with an error.
     pub(crate) failed: bool,
     /// Why, in one line, such as a proxy or certificate (#894).
@@ -60,6 +61,9 @@ pub(crate) struct Live {
     pub(crate) using_file: bool,
     pub(crate) microphone: ItemStatus,
     pub(crate) accessibility: ItemStatus,
+    /// General's "Turn off the mic when not dictating" was on when the
+    /// first run opened, so the microphone opens only while you dictate.
+    pub(crate) release_microphone: bool,
     /// Every permission is on and one applies only after Hex restarts.
     pub(crate) restart: bool,
     /// macOS asks for Microphone and Accessibility; Windows only shows the
@@ -84,19 +88,18 @@ pub(crate) struct Live {
     /// The scan for models on this computer hasn't answered yet.
     scanning: bool,
     pub(crate) practice: Practice,
-    /// This run has the engine and hotkey steps, so the story is the short
-    /// first run: welcome, one demo, permissions, then the test dictation in
-    /// a plain field, with "Finish later" on the permissions.
+    /// The WordInk tour shows engine and hotkey steps after permissions.
     pub(crate) engine_steps: bool,
     /// The model and language this run downloads.
     choice: TranscriptionSelection,
+    /// The other selection the language capsule switches to; `None` when
+    /// the system language recommends English.
+    alternate: Option<TranscriptionSelection>,
     granted_at: Option<f64>,
+    mic_granted_at: Option<f64>,
     checked: Option<Checked>,
-    /// The input Hex records from and the inputs to pick from, from the
-    /// same listing and `microphone` setting as Settings › General.
-    pub(crate) mic: MicPick,
-    /// The microphone capsule's menu is open.
-    pub(crate) mic_open: bool,
+    /// A scene: the game deals the same messages every time.
+    pub(crate) fixture: bool,
     /// Dictation streams send their live words to the practice field.
     _live_words: crate::dictation::live_text::Demand,
 }
@@ -114,6 +117,13 @@ pub(crate) enum ModelStep {
 }
 
 impl Live {
+    /// macOS keeps showing the mic in use: Hex holds it open between
+    /// dictations unless "Turn off the mic when not dictating" is on. A
+    /// listener that failed to start holds nothing.
+    pub(crate) fn mic_stays_open(&self) -> bool {
+        self.accessibility_row && !self.release_microphone && !self.reopen && !self.relaunch_failed
+    }
+
     /// The story waits on the download page for the model step.
     pub(crate) fn holds(&self) -> bool {
         self.scanning
@@ -122,6 +132,12 @@ impl Live {
                 ModelStep::Choosing => true,
                 ModelStep::Chosen => !self.pick_started,
             }
+    }
+
+    /// The language capsule switches languages only when the system
+    /// language recommends a model other than English.
+    pub(crate) fn switches_language(&self) -> bool {
+        self.alternate.is_some()
     }
 }
 
@@ -148,21 +164,85 @@ impl Live {
     }
 
     pub(crate) fn granted_for(&self, now: f64) -> bool {
-        self.granted_at.is_some_and(|at| now - at >= GRANTED_BEAT)
+        self.granted_at
+            .is_some_and(|at| now - at >= GRANTED_BEAT + FLOAT_OFF)
+    }
+
+    pub(crate) fn mic_granted_for(&self, now: f64) -> bool {
+        self.mic_granted_at
+            .is_some_and(|at| now - at >= GRANTED_BEAT + FLOAT_OFF)
+    }
+
+    /// How far an allowed permission's card has floated off at `now`.
+    pub(crate) fn floated(&self, accessibility: bool, now: f64) -> f32 {
+        let at = if accessibility {
+            self.granted_at
+        } else {
+            self.mic_granted_at
+        };
+        at.map_or(0.0, |at| {
+            ((now - at - GRANTED_BEAT) / FLOAT_OFF).clamp(0.0, 1.0) as f32
+        })
     }
 }
 
 /// Where a fixture's clock starts.
 const FIXTURE_START: f64 = 100.0;
 
+/// The most one drawn frame moves the first run's clock: two 30 Hz frames.
+const MAX_STEP: f64 = 1.0 / 15.0;
+
+/// The first run's clock, which runs on drawn frames rather than the wall.
+/// It stands still until the window draws its first frame, and a slow frame
+/// moves it at most [`MAX_STEP`]. A cold launch spends most of a second on
+/// its first frames (the GPU's pipelines, fonts and glyphs), and a beat's
+/// first frame can be slow the same way; on the wall's time the opening
+/// and the Launch Room's growth would play out unseen behind them and jump.
+struct StoryClock {
+    /// Story seconds at `last`.
+    story: f64,
+    last: Option<Instant>,
+}
+
+impl StoryClock {
+    fn frame_drawn(&mut self, at: Instant) {
+        self.story = self.at(at);
+        self.last = Some(at);
+    }
+
+    /// Story seconds at `at`, after the last drawn frame.
+    fn at(&self, at: Instant) -> f64 {
+        self.story
+            + self.last.map_or(0.0, |last| {
+                at.saturating_duration_since(last)
+                    .as_secs_f64()
+                    .min(MAX_STEP)
+            })
+    }
+}
+
+static STORY_CLOCK: Mutex<StoryClock> = Mutex::new(StoryClock {
+    story: 0.0,
+    last: None,
+});
+
+/// The window drew a frame.
+pub(in crate::rune_ui) fn frame_drawn() {
+    if let Ok(mut clock) = STORY_CLOCK.lock() {
+        clock.frame_drawn(Instant::now());
+    }
+}
+
 /// Seconds on the first run's own clock. Fixtures keep the story's own
 /// time, so a scene shows one settled moment.
 fn clock(ui: &Ui) -> f64 {
-    static START: OnceLock<Instant> = OnceLock::new();
     if ui.is_fixture() {
         return ui.first_run.as_ref().map_or(FIXTURE_START, |s| s.now);
     }
-    START.get_or_init(Instant::now).elapsed().as_secs_f64() + 1.0
+    STORY_CLOCK
+        .lock()
+        .map_or(0.0, |clock| clock.at(Instant::now()))
+        + 1.0
 }
 
 /// Every permission is ready, the desktop's paste permission included
@@ -174,36 +254,36 @@ fn granted(status: SetupStatus, paste: Option<PasteAccess>) -> bool {
         && paste.is_none_or(PasteAccess::settled)
 }
 
-fn english(selection: &TranscriptionSelection) -> bool {
+fn english_language(selection: &TranscriptionSelection) -> bool {
     selection.language == "en"
 }
 
-/// The selection the language capsule switches to.
-fn other_selection(current: &TranscriptionSelection) -> TranscriptionSelection {
-    if english(current) {
-        let v3 = transcription_models::definition(TranscriptionModelId::ParakeetV3);
-        let preferred = crate::desktop::i18n::preferred_language();
-        let language = if preferred != "en" && v3.supports_language(&preferred) {
-            preferred
-        } else {
-            "fr".to_owned()
-        };
-        TranscriptionSelection {
-            model: TranscriptionModelId::ParakeetV3,
-            language,
-        }
+fn english_selection() -> TranscriptionSelection {
+    TranscriptionSelection {
+        model: TranscriptionModelId::ParakeetUnifiedEnglish,
+        language: "en".into(),
+    }
+}
+
+/// The other selection the language capsule offers: the model recommended
+/// for the person's language while English is selected, English otherwise.
+/// `None` when that recommendation is English too, so an English system has
+/// nothing to switch to.
+fn alternate_selection(
+    current: &TranscriptionSelection,
+    preferred: &str,
+) -> Option<TranscriptionSelection> {
+    if english_language(current) {
+        let recommended = transcription_models::recommended_selection(preferred);
+        (!english_language(&recommended)).then_some(recommended)
     } else {
-        TranscriptionSelection {
-            model: TranscriptionModelId::ParakeetV3,
-            language: "en".into(),
-        }
+        Some(english_selection())
     }
 }
 
 fn installed(ui: &Ui, selection: &TranscriptionSelection) -> bool {
     transcription_models::validate(selection)
         .is_ok_and(|model| ui.picker.installed(model, &selection.language))
-        || onboarding::cloud_ready(ui)
 }
 
 /// Opens the first run over the tour, at the tour's step: at launch when
@@ -212,38 +292,37 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     let Some(tour_step) = ui.tour.as_ref().map(|tour| tour.flow.step()) else {
         return;
     };
-    let engine_steps = ui
-        .tour
-        .as_ref()
-        .is_some_and(|tour| tour.flow.view().engine.is_some());
     if ui.first_run.is_some() {
         return;
     }
     let choice = ui.settings.transcription.clone();
-    let wants = if english(&choice) {
+    let wants = if english_language(&choice) {
         Language::English
     } else {
         Language::Other
     };
-    let other = if english(&choice) {
-        other_selection(&choice)
+    let alternate = alternate_selection(&choice, &ui.preferred_language());
+    let other = if english_language(&choice) {
+        alternate.as_ref()
     } else {
-        choice.clone()
+        Some(&choice)
     };
-    set_other_label(transcription_models::language_name(&other.language));
+    // Replaces the previous run's label; an English-only run clears it.
+    set_other_label(other.map(|other| transcription_models::language_name(&other.language)));
+    let engine_steps = ui.tour.as_ref().is_some_and(|tour| tour.engine_steps());
     let had_model = installed(ui, &choice);
     let status = ui.platform.setup_status(had_model);
+    let mic_granted = status.microphone == crate::desktop::onboarding::PermissionState::Ready;
     let granted = granted(status, ui.platform.paste);
 
     let mut s = Onboard::new(Flow::FirstRun);
     s.speech = Speech::AfterDownload;
+    s.toggle = ui.settings.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
     s.wants = wants;
     s.caps = ui.settings.dictation_hotkey.keycaps();
     s.had_model = had_model;
     s.granted = granted;
-    // One test dictation in a plain field; the practice game stays in the
-    // code for a later "Replay tour".
-    s.practice_field = engine_steps;
+    s.mic_granted = mic_granted;
     s.home = match ui.platform.caps.os {
         Os::Macos => super::landing::Home::MenuBar,
         Os::Windows => super::landing::Home::Tray,
@@ -251,6 +330,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     };
     s.live = Some(Live {
         listening: false,
+        warming: false,
         failed: false,
         failure: None,
         stalled: false,
@@ -258,6 +338,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         using_file: false,
         microphone: ItemStatus::Todo,
         accessibility: ItemStatus::Todo,
+        release_microphone: ui.settings.release_microphone_while_idle,
         restart: false,
         accessibility_row: ui.platform.caps.permissions,
         accessibility_renamed: ui.platform.accessibility_renamed,
@@ -271,31 +352,25 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         practice: Practice::Waiting,
         engine_steps,
         choice,
+        alternate,
         granted_at: None,
+        mic_granted_at: None,
         checked: None,
-        mic: microphone(ui),
-        mic_open: false,
+        fixture: ui.is_fixture(),
         _live_words: crate::dictation::live_text::demand(),
     });
     let now = clock(ui);
     s.now = now;
     match tour_step {
-        // With the engine steps, the story opens on the welcome page; the
-        // model (or a key) is chosen after the permissions.
         TourStep::Welcome if engine_steps => s.step = Step::Pick,
         TourStep::Welcome => s.begin_live(now),
         TourStep::Demo => s.jump_to_demo(),
-        TourStep::Setup | TourStep::Engine | TourStep::Hotkey => s.jump_to_permissions(),
+        TourStep::Setup | TourStep::Engine | TourStep::Hotkey => s.resume_setup(),
         TourStep::TryIt if had_model => s.jump_to_try(),
         TourStep::TryIt => s.jump_to_waiting(),
         TourStep::Done => s.jump_to_ready(),
     }
     ui.first_run = Some(s);
-    // A resumed run keeps its step for the next quit; a fresh one starts at
-    // Welcome.
-    if !ui.is_fixture() {
-        crate::desktop::onboarding::record_step(tour_step);
-    }
     // The tour waits at setup, where it asks for permissions, while the
     // story plays; with everything granted it goes on to the practice.
     if tour_step == TourStep::Welcome && !engine_steps {
@@ -306,18 +381,31 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
 /// A page of the first run, for scenes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::rune_ui) enum Page {
-    /// `"Setting up WordInk"`, or the model step when models were found.
+    /// `"Setting up Hex"`, or the model step when models were found.
     Download,
-    /// The demo, finished: `"Twice as fast"` and Continue.
+    /// The demo, finished: `"With Hex"`'s happy ending.
     Demo,
-    /// The short first run's demo while it plays, with Skip.
-    Playing,
+    /// The first permission the run still asks for: the microphone, else
+    /// Accessibility (or the desktop's paste permission).
     Permissions,
     /// `"Almost ready"`: the model still downloads.
     Waiting,
     /// `"Your turn"`: the practice game.
     Try,
     Ready,
+}
+
+/// The page the first run shows, for the window tests (Linux only).
+#[cfg(all(test, target_os = "linux"))]
+pub(in crate::rune_ui) fn page(ui: &Ui) -> Option<Page> {
+    Some(match ui.first_run.as_ref()?.step {
+        Step::Pick | Step::Started => Page::Download,
+        Step::Parked | Step::YourTurn | Step::Hearing | Step::Heard | Step::Done => Page::Demo,
+        Step::Microphone | Step::Accessibility => Page::Permissions,
+        Step::Waiting => Page::Waiting,
+        Step::Try | Step::TryHearing | Step::TryHeard => Page::Try,
+        Step::Ready => Page::Ready,
+    })
 }
 
 /// Scenes: the first run over the tour a fixture walked, played on its own
@@ -344,9 +432,8 @@ pub(in crate::rune_ui) fn fixture_resume(ui: &mut Ui, page: Page) {
     };
     let reached = |s: &Onboard| match page {
         Page::Download => matches!(s.step, Step::Pick | Step::Started),
-        Page::Demo => s.step == Step::Done,
-        Page::Playing => s.step == Step::Heard,
-        Page::Permissions => s.step == Step::Permissions,
+        Page::Demo => s.step == Step::Heard,
+        Page::Permissions => matches!(s.step, Step::Microphone | Step::Accessibility),
         Page::Waiting => s.step == Step::Waiting,
         Page::Try => s.step == Step::Try,
         Page::Ready => s.step == Step::Ready,
@@ -377,7 +464,12 @@ pub(in crate::rune_ui) fn fixture_resume(ui: &mut Ui, page: Page) {
     poll(ui, &mut tx);
 }
 
-/// "Run setup again" and `wordink onboarding reset`: forgets that onboarding
+/// "Finish later" on the permissions and engine pages.
+pub(in crate::rune_ui) fn finish_later(ui: &mut Ui) {
+    onboarding::input(ui, Input::Defer);
+}
+
+/// "Run setup again" and `hex onboarding reset`: forgets that onboarding
 /// finished and opens it now. Settings, history, models, and permissions
 /// stay as they are, so the run finds them ready and passes their steps.
 pub(crate) fn restart(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {
@@ -394,7 +486,7 @@ pub(crate) fn restart(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {
     open(ui);
     tx.settle();
     if ui.first_run.is_none() {
-        return Err("WordInk could not open onboarding".into());
+        return Err("Hex could not open onboarding".into());
     }
     Ok(())
 }
@@ -416,6 +508,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     let started = found_choice::started(ui, tour_model);
     let scanning = ui.found.scanning();
     let caps = ui.settings.dictation_hotkey.keycaps();
+    let toggle = ui.settings.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
     let Some(choice) = ui
         .first_run
         .as_ref()
@@ -425,6 +518,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         return false;
     };
     let model = transcription_models::validate(&choice).ok();
+    let warming = ui.view.as_ref().is_some_and(|view| view.listener.warming);
     let (preparing, downloaded_bytes, errored) =
         ui.view.as_ref().map_or((false, 0, false), |view| {
             let t = &view.transcription;
@@ -461,7 +555,6 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         checked.installed || tour_model == ItemStatus::Ready,
         checked.status,
     );
-    follow_story(ui);
     // Setup that is already ready never moves the tour past it by itself,
     // and the tour watches the practice dictation only once it has.
     if status.ready()
@@ -472,28 +565,23 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     {
         onboarding::input(ui, Input::Continue);
     }
-    let engine_hold = ui
-        .tour
-        .as_ref()
-        .is_some_and(|tour| matches!(tour.flow.step(), TourStep::Engine | TourStep::Hotkey));
     let asks_permissions = ui.platform.caps.permissions;
+    let login = super::login::of(&ui.platform);
     let accessibility_renamed = ui.platform.accessibility_renamed;
     let relaunch_failed = ui.platform.relaunch_failed;
     let paste = ui.platform.paste;
     let live_window = !ui.is_fixture();
-    let mic = microphone(ui);
     let Some(s) = ui.first_run.as_mut() else {
         return false;
     };
+    if s.login.set(login, now) {
+        s.sfx.on_login(now);
+    }
     let Some(live) = s.live.as_mut() else {
         return false;
     };
+    live.warming = warming;
     live.checked = Some(checked);
-    live.mic = mic;
-    if !live.mic.shown.picks() {
-        live.mic_open = false;
-    }
-    s.engine_hold = engine_hold;
     // Linux and Windows ask for no permissions: both rows are ready.
     if !asks_permissions {
         live.microphone = ItemStatus::Ready;
@@ -512,10 +600,19 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
             }
         }
         live.restart = view.restart;
+        if view.practice == Practice::TooShort && live.practice != Practice::TooShort {
+            s.taps = s.taps.saturating_add(1);
+        }
         live.accessibility_renamed = accessibility_renamed;
         live.relaunch_failed = relaunch_failed;
         live.reopen = view.reopen;
         live.practice = view.practice;
+    }
+    let mic_granted = status.microphone == crate::desktop::onboarding::PermissionState::Ready;
+    if mic_granted {
+        live.mic_granted_at.get_or_insert(now);
+    } else {
+        live.mic_granted_at = None;
     }
 
     // The model step: shown on the download page once the scan found
@@ -523,9 +620,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     live.models = models;
     live.pick_started = started;
     live.scanning = scanning;
-    // The short first run has no model step: its welcome page is not the
-    // download page.
-    let downloading_page = !live.engine_steps && matches!(s.step, Step::Pick | Step::Started);
+    let downloading_page = matches!(s.step, Step::Pick | Step::Started);
     match live.model_step {
         ModelStep::None if offered && downloading_page => live.model_step = ModelStep::Choosing,
         ModelStep::Choosing if !offered => live.model_step = ModelStep::None,
@@ -559,7 +654,9 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     live.failure = failure;
     live.using_file = using_file;
     s.granted = granted;
+    s.mic_granted = mic_granted;
     s.caps = caps;
+    s.toggle = toggle;
     if let Some(download) = s.download.as_mut() {
         if let Some(total) = model.and_then(|m| m.download_bytes()) {
             download.total = total;
@@ -569,6 +666,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         } else if preparing {
             download.downloaded = downloaded_bytes.min(download.total.saturating_sub(1));
         }
+        s.replay.show(download, now);
     }
 
     // Hex's state arrives between frames, so the first run keeps polling;
@@ -584,82 +682,19 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
 pub(in crate::rune_ui) fn overlay(ui: &Ui, p: Paint, reduced: bool) -> Option<El> {
     let s = ui.first_run.as_ref()?;
     s.reduced.set(reduced);
-    s.popups.take();
-    // The engine and hotkey steps cover the story, which waits underneath.
-    if let Some(page) = super::engine_setup::overlay(ui, p) {
-        return Some(page);
-    }
+    // Scenes are the release first run, without the replay strip.
+    let strip = (!ui.is_fixture())
+        .then(|| super::stories::strip(p, s))
+        .flatten();
     Some(
         super::flows::view(p, s)
+            .children(strip)
             .key("first-run")
             .role("dialog")
+            .label(tr("Setting up Hex"))
             .absolute(0.0, 0.0)
             .on_press(|_: &mut Ui| {}),
     )
-}
-
-/// The microphone the first run shows: the listing Settings › General
-/// keeps (`settings::refresh_microphones`), with the saved `microphone`.
-fn microphone(ui: &Ui) -> MicPick {
-    // A scene's listing is set by hand; a live one counts once it ran.
-    let listed = ui.is_fixture() || ui.microphones_route.is_some();
-    let listing = match &ui.microphones {
-        Err(_) => Listing::Failed,
-        Ok(devices)
-            if listed && (ui.microphones_listing.is_none() || !devices.names.is_empty()) =>
-        {
-            Listing::Listed(devices)
-        }
-        Ok(_) => Listing::Pending,
-    };
-    super::mic_line::pick(
-        listing,
-        ui.settings.microphone.as_deref(),
-        &ui.settings.device_names,
-    )
-}
-
-/// The microphone capsule: opens its menu, listing the inputs again, or
-/// closes it.
-pub(super) fn toggle_microphones(ui: &mut Ui) {
-    let Some(live) = ui.first_run.as_mut().and_then(|s| s.live.as_mut()) else {
-        return;
-    };
-    live.mic_open = !live.mic_open && live.mic.shown.picks();
-    if live.mic_open {
-        super::super::settings::refresh_microphones(ui);
-    }
-}
-
-pub(super) fn close_microphones(ui: &mut Ui) {
-    if let Some(live) = ui.first_run.as_mut().and_then(|s| s.live.as_mut()) {
-        live.mic_open = false;
-    }
-}
-
-/// Saves the input chosen in the capsule's menu as `microphone`, the
-/// setting Settings › General picks: `None` is System default.
-pub(super) fn choose_microphone(id: Option<String>) -> impl Fn(&mut Ui) + 'static {
-    move |ui: &mut Ui| {
-        close_microphones(ui);
-        if ui.settings.microphone != id {
-            let id = id.clone();
-            ui.update(|settings| settings.microphone = id);
-        }
-        let mic = microphone(ui);
-        if let Some(live) = ui.first_run.as_mut().and_then(|s| s.live.as_mut()) {
-            live.mic = mic;
-        }
-    }
-}
-
-/// The capsule menu's popups, built with the first run's page, to draw above
-/// it.
-pub(in crate::rune_ui) fn popups(ui: &Ui) -> Vec<El> {
-    ui.first_run
-        .as_ref()
-        .map(|s| s.popups.take())
-        .unwrap_or_default()
 }
 
 /// A story handler run on the window's first run.
@@ -673,59 +708,17 @@ pub(super) fn on_ui(f: fn(&mut Onboard)) -> impl Fn(&mut Ui) + 'static {
 
 pub(super) fn press_continue(ui: &mut Ui) {
     if let Some(s) = ui.first_run.as_mut() {
-        // The test dictation landed: on to the last page. Every other page
-        // moves on as the story does.
-        if s.step == Step::TryHeard {
-            s.press_continue();
-        } else {
-            s.move_on();
-        }
+        s.move_on();
     }
 }
 
-/// The tour follows the story's pages: the demo ending (or skipped) ends its
-/// Demo step, and the test dictation (or Skip on it) ends TryIt.
-fn follow_story(ui: &mut Ui) {
-    let Some(story) = ui.first_run.as_ref().map(|s| s.step) else {
-        return;
-    };
-    let moved = match ui.tour.as_ref().map(|tour| tour.flow.step()) {
-        Some(TourStep::Demo) => story >= Step::Permissions,
-        Some(TourStep::TryIt) => story == Step::Ready,
-        _ => false,
-    };
-    if moved {
-        onboarding::input(ui, Input::Skip);
-    }
-}
-
-/// Continue on the welcome page: the one short demo plays.
-pub(in crate::rune_ui) fn begin_demo(ui: &mut Ui) {
-    onboarding::input(ui, Input::Continue);
+/// Skip on the demo or the practice: passes over that part to the next
+/// step setup still needs. It never records completion; only Hex is ready
+/// (or Continue without a model) does.
+pub(in crate::rune_ui) fn skip(ui: &mut Ui) {
     if let Some(s) = ui.first_run.as_mut() {
-        s.jump_to_demo();
+        s.skip_optional();
     }
-}
-
-/// Skip on the demo: on to the permissions.
-pub(in crate::rune_ui) fn skip_demo(ui: &mut Ui) {
-    onboarding::input(ui, Input::Skip);
-    if let Some(s) = ui.first_run.as_mut() {
-        s.jump_to_permissions();
-    }
-}
-
-/// Skip on the test dictation: straight to the last page.
-pub(super) fn skip_try(ui: &mut Ui) {
-    onboarding::input(ui, Input::Skip);
-    if let Some(s) = ui.first_run.as_mut() {
-        s.jump_to_ready();
-    }
-}
-
-/// "Finish later" on the permissions and engine pages.
-pub(in crate::rune_ui) fn finish_later(ui: &mut Ui) {
-    onboarding::input(ui, Input::Defer);
 }
 
 /// "Continue without a model", once the download failed or stalled (#894):
@@ -749,18 +742,15 @@ pub(in crate::rune_ui) fn continue_without_model(ui: &mut Ui) {
     ui.tour = None;
 }
 
-/// "Start using WordInk": closes the first run and the tour under it.
+/// "Start using Hex": closes the first run and the tour under it.
 pub(super) fn finish(ui: &mut Ui) {
-    let installed = onboarding::engine_installed(ui);
+    let installed = ui.picker.selected_installed(&ui.settings);
     if ui.live()
         && ui.platform.setup_status(installed).ready()
         && !crate::desktop::onboarding::completion_recorded()
         && let Err(error) = crate::desktop::onboarding::record_completion()
     {
         tracing::warn!(%error, "could not record onboarding completion");
-    }
-    if !ui.is_fixture() {
-        crate::desktop::onboarding::clear_step();
     }
     ui.first_run = None;
     ui.tour = None;
@@ -779,11 +769,14 @@ pub(super) fn cycle_language(ui: &mut Ui) {
     let Some(s) = ui.first_run.as_mut() else {
         return;
     };
+    let Some(next) = s.live.as_ref().and_then(|live| live.alternate.clone()) else {
+        return;
+    };
     s.cycle_language();
     let Some(live) = s.live.as_mut() else {
         return;
     };
-    live.choice = other_selection(&live.choice);
+    live.alternate = Some(std::mem::replace(&mut live.choice, next));
     live.failed = false;
     live.stalled = false;
     live.progress = None;
@@ -885,15 +878,31 @@ pub(super) fn practice_changed(ui: &mut Ui, tx: &mut Tx) {
     }
 }
 
+/// What the practice says in place of the shortcut invitation while the
+/// listener loads its model, microphone, and shortcuts.
+pub(super) fn warming_copy() -> &'static str {
+    tr("Getting Hex ready to listen…")
+}
+
 /// What the practice dictation's last try needs said.
 pub(super) fn hint_copy(live: &Live) -> Option<&'static str> {
     Some(match live.practice {
-        Practice::TooShort => tr("Hold the shortcut a little longer while you speak."),
-        Practice::NothingHeard => tr("WordInk didn't hear any words. Try again a little louder."),
+        Practice::TooShort => "Keep holding the shortcut while you talk, then let go.",
+        Practice::NothingHeard => tr("Hex didn't hear any words. Try again a little louder."),
         Practice::Failed => tr("That didn't work. Try again."),
         Practice::Transcribing => tr("Typing what you said…"),
         _ => return None,
     })
+}
+
+/// The practice's `Use tap to start`: the shortcut starts and stops
+/// dictation from now on, as General's setting would.
+pub(super) fn use_toggle(ui: &mut Ui) {
+    ui.update(|settings| settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle);
+    if let Some(s) = ui.first_run.as_mut() {
+        s.toggle = true;
+        s.practice.focused = true;
+    }
 }
 
 /// [`hint_copy`] under the practice field.
@@ -906,4 +915,97 @@ pub(super) fn hint(p: Paint, live: &Live) -> Option<El> {
             .color(p.muted())
             .transition(Transition::opacity()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn selection(model: TranscriptionModelId, language: &str) -> TranscriptionSelection {
+        TranscriptionSelection {
+            model,
+            language: language.into(),
+        }
+    }
+
+    #[test]
+    fn the_language_switch_follows_the_system_language() {
+        let english = english_selection();
+        assert_eq!(
+            alternate_selection(&english, "en"),
+            None,
+            "an English system has no other language"
+        );
+
+        for model in [
+            TranscriptionModelId::CohereTranscribe,
+            TranscriptionModelId::WhisperLargeV3Turbo,
+            TranscriptionModelId::ParakeetV3,
+        ] {
+            let current = selection(model, "en");
+            assert_eq!(
+                alternate_selection(&current, "en"),
+                None,
+                "{model:?} is English on an English system"
+            );
+            assert_eq!(
+                alternate_selection(&current, "fr"),
+                Some(transcription_models::recommended_selection("fr")),
+                "{model:?} still switches to the system's French recommendation"
+            );
+        }
+
+        for language in ["fr", "de"] {
+            let alternate =
+                alternate_selection(&english, language).expect("a v3-supported alternate");
+            assert_eq!(
+                alternate,
+                transcription_models::recommended_selection(language),
+                "{language} gets its own recommendation"
+            );
+            assert_eq!(alternate.model, TranscriptionModelId::ParakeetV3);
+            assert_eq!(alternate.language, language);
+        }
+
+        let japanese = alternate_selection(&english, "ja").expect("a Japanese alternate");
+        assert_eq!(
+            japanese,
+            transcription_models::recommended_selection("ja"),
+            "Japanese gets its own recommendation, not French"
+        );
+        assert_eq!(japanese.language, "ja");
+        assert_eq!(japanese.model, TranscriptionModelId::WhisperLargeV3Turbo);
+
+        assert_eq!(
+            alternate_selection(&japanese, "ja"),
+            Some(english),
+            "a non-English selection switches back to English"
+        );
+    }
+
+    #[test]
+    fn the_story_waits_for_the_first_frame_and_slow_frames_dont_skip_it() {
+        let open = Instant::now();
+        let mut clock = StoryClock {
+            story: 0.0,
+            last: None,
+        };
+        // A cold first frame takes most of a second: the story stands still.
+        assert_eq!(clock.at(open + Duration::from_millis(700)), 0.0);
+        let first = open + Duration::from_millis(700);
+        clock.frame_drawn(first);
+        assert_eq!(clock.story, 0.0);
+        // Frames at 60 Hz move it on the wall's time.
+        let frame = Duration::from_micros(16_667);
+        clock.frame_drawn(first + frame);
+        assert!((clock.story - frame.as_secs_f64()).abs() < 1e-9);
+        // A 400 ms frame moves it one step, and time between frames
+        // never runs ahead of the next frame.
+        let slow = first + frame + Duration::from_millis(400);
+        let between = clock.at(slow);
+        clock.frame_drawn(slow);
+        assert!((clock.story - (frame.as_secs_f64() + MAX_STEP)).abs() < 1e-9);
+        assert!(between <= clock.story);
+    }
 }

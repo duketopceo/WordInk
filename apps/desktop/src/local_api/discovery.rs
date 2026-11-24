@@ -59,11 +59,11 @@ pub fn call_developer(
     let (status, body) = post_json("/dev/control", &body, DEVELOPER_CONTROL_TIMEOUT, 64 * 1024)?;
     if status != 200 {
         bail!(
-            "WordInk developer control failed: {}",
+            "Hex developer control failed: {}",
             error_code(status, &body)
         );
     }
-    serde_json::from_slice(&body).wrap_err("WordInk developer response is invalid")
+    serde_json::from_slice(&body).wrap_err("Hex developer response is invalid")
 }
 
 /// Sends one `hex` control request to the running app.
@@ -83,17 +83,17 @@ pub fn call_control(
         let code = error_code(status, &body);
         bail!(match code.as_str() {
             "control-unavailable" => {
-                "the running WordInk doesn't accept control commands; update WordInk".to_string()
+                "the running Hex doesn't accept control commands; update Hex".to_string()
             }
-            "control-busy" => "WordInk is busy with other control commands; try again".into(),
-            "control-timeout" => "WordInk didn't answer in time; check `wordink status`".into(),
+            "control-busy" => "Hex is busy with other control commands; try again".into(),
+            "control-timeout" => "Hex didn't answer in time; check `hex status`".into(),
             "invalid-control-command" => {
-                "the running WordInk doesn't know this command; update WordInk".into()
+                "the running Hex doesn't know this command; update Hex".into()
             }
-            _ => format!("WordInk refused the request ({code})"),
+            _ => format!("Hex refused the request ({code})"),
         });
     }
-    serde_json::from_slice(&body).wrap_err("WordInk sent an invalid control reply")
+    serde_json::from_slice(&body).wrap_err("Hex sent an invalid control reply")
 }
 
 /// The running app's process id, if its local API is live.
@@ -107,16 +107,16 @@ pub(super) fn live_discovery() -> Result<DiscoveryDocument> {
     let bytes = match fs::read(&path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            bail!("WordInk is not running")
+            bail!("Hex is not running")
         }
         Err(error) => {
             return Err(error).wrap_err_with(|| format!("could not read {}", path.display()));
         }
     };
     let document: DiscoveryDocument =
-        serde_json::from_slice(&bytes).wrap_err("WordInk's local API discovery file is invalid")?;
+        serde_json::from_slice(&bytes).wrap_err("Hex's local API discovery file is invalid")?;
     if !valid_discovery(&document) || !discovery_is_live(&document) {
-        bail!("WordInk is not running");
+        bail!("Hex is not running");
     }
     Ok(document)
 }
@@ -127,31 +127,73 @@ pub(super) fn post_json(
     read_timeout: Duration,
     max_response: usize,
 ) -> Result<(u16, Vec<u8>)> {
+    post(path, "application/json", body, read_timeout, max_response)
+}
+
+/// Sends one WAV to the running Hex's `POST /transcriptions`.
+pub(crate) fn post_wav(
+    path: &str,
+    body: &[u8],
+    read_timeout: Duration,
+    max_response: usize,
+) -> Result<(u16, Vec<u8>)> {
+    post(path, "audio/wav", body, read_timeout, max_response)
+}
+
+fn post(
+    path: &str,
+    content_type: &str,
+    body: &[u8],
+    read_timeout: Duration,
+    max_response: usize,
+) -> Result<(u16, Vec<u8>)> {
     let document = live_discovery()?;
-    let address = SocketAddr::from(([127, 0, 0, 1], document.port));
+    send(
+        SocketAddr::from(([127, 0, 0, 1], document.port)),
+        &document.token,
+        path,
+        content_type,
+        body,
+        read_timeout,
+        max_response,
+    )
+}
+
+fn send(
+    address: SocketAddr,
+    token: &str,
+    path: &str,
+    content_type: &str,
+    body: &[u8],
+    read_timeout: Duration,
+    max_response: usize,
+) -> Result<(u16, Vec<u8>)> {
     let mut stream = TcpStream::connect_timeout(&address, CONNECTION_TIMEOUT)
-        .wrap_err("could not connect to WordInk's local API")?;
+        .wrap_err("could not connect to Hex's local API")?;
     stream.set_read_timeout(Some(read_timeout))?;
     stream.set_write_timeout(Some(CONNECTION_TIMEOUT))?;
     write!(
         stream,
-        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        document.token,
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len(),
     )?;
-    stream.write_all(body)?;
-    stream.flush()?;
-
+    // Hex answers before reading a body it rejects (an unknown model, a full
+    // queue); keep that answer when the connection then resets.
+    let upload = stream.write_all(body).and_then(|()| stream.flush());
     let mut response = Vec::new();
-    (&mut stream)
+    let read = (&mut stream)
         .take(max_response as u64 + 1)
-        .read_to_end(&mut response)
-        .wrap_err("WordInk didn't answer")?;
+        .read_to_end(&mut response);
+    if response.is_empty() {
+        read.wrap_err("Hex didn't answer")?;
+        upload.wrap_err("Hex didn't take the upload")?;
+        bail!("Hex didn't answer");
+    }
     if response.len() > max_response {
-        bail!("WordInk's response is too large");
+        bail!("Hex's response is too large");
     }
     let Some(header_end) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
-        bail!("WordInk's response is malformed");
+        bail!("Hex's response is malformed");
     };
     let headers = std::str::from_utf8(&response[..header_end])?;
     let status = headers
@@ -159,11 +201,11 @@ pub(super) fn post_json(
         .next()
         .and_then(|line| line.split_ascii_whitespace().nth(1))
         .and_then(|status| status.parse::<u16>().ok())
-        .ok_or_else(|| eyre!("WordInk's response has no HTTP status"))?;
+        .ok_or_else(|| eyre!("Hex's response has no HTTP status"))?;
     Ok((status, response.split_off(header_end + 4)))
 }
 
-pub(super) fn error_code(status: u16, body: &[u8]) -> String {
+pub(crate) fn error_code(status: u16, body: &[u8]) -> String {
     serde_json::from_slice::<serde_json::Value>(body)
         .ok()
         .and_then(|value| value.get("code")?.as_str().map(str::to_owned))
@@ -281,5 +323,57 @@ pub(super) fn process_is_alive(pid: u32) -> bool {
         let alive = GetExitCodeProcess(process, &mut code) != 0 && code == STILL_ACTIVE as u32;
         CloseHandle(process);
         alive
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::io::{BufRead, BufReader, Write as _};
+    use std::net::{Ipv4Addr, TcpListener};
+    use std::thread;
+    use std::time::Duration;
+
+    use super::send;
+
+    /// Hex answers before reading a body it rejects and closes; the answer
+    /// must survive a body too large for the socket buffers.
+    #[test]
+    fn a_refusal_survives_a_large_upload() {
+        const BODY: &[u8] = br#"{"code":"model-not-ready"}"#;
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).unwrap() <= 2 {
+                    break;
+                }
+            }
+            let mut response = format!(
+                "HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\n\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n",
+                BODY.len()
+            )
+            .into_bytes();
+            response.extend_from_slice(BODY);
+            stream.write_all(&response).unwrap();
+        });
+        let upload = vec![0_u8; 4 * 1024 * 1024];
+        let (status, body) = send(
+            address,
+            "hex_test",
+            "/transcriptions?model=parakeet_v2",
+            "audio/wav",
+            &upload,
+            Duration::from_secs(10),
+            1024 * 1024,
+        )
+        .unwrap();
+        server.join().unwrap();
+        assert_eq!(status, 409);
+        assert_eq!(body, BODY);
     }
 }

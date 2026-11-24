@@ -62,6 +62,10 @@ impl Tour {
     }
 
     /// The tour from Welcome, as on a new install: Run setup again.
+    pub(super) fn engine_steps(&self) -> bool {
+        self.flow.engine_setup_enabled()
+    }
+
     pub(super) fn replay(
         settings: &AppSettings,
         platform: &PlatformState,
@@ -508,6 +512,8 @@ pub(super) enum MacStep {
     SetupDenied,
     /// Every permission on, Accessibility waiting for a restart.
     SetupRestart,
+    /// Every permission on, the model still downloading.
+    SetupWaiting,
     TryIt,
     /// The shortcut listener failed after setup.
     TryItReopen,
@@ -537,6 +543,11 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
         MacStep::SetupRestart => crate::desktop::onboarding::SetupStatus {
             microphone: Ready,
             accessibility: NeedsRestart,
+            ..fresh
+        },
+        MacStep::SetupWaiting => crate::desktop::onboarding::SetupStatus {
+            microphone: Ready,
+            accessibility: Ready,
             ..fresh
         },
         _ => crate::desktop::onboarding::SetupStatus {

@@ -3,10 +3,12 @@
 //!
 //! Exit codes: 0 when the command ran (or there was nothing to change), 1
 //! when Hex refused or failed it, 2 for usage errors (clap), 3 when Hex
-//! isn't running, and 4 when `dictation stop --print` heard no speech. Nothing here launches Hex except `start` and `restart`.
+//! isn't running, and 4 when `dictation stop --print` or `hex transcribe`
+//! heard no speech. Nothing here launches Hex except `start` and `restart`.
 
 use std::io::Write;
 mod human;
+mod transcribe;
 
 use clap::{Args, Subcommand};
 
@@ -60,10 +62,10 @@ pub enum ControlCli {
         #[command(flatten)]
         output: Output,
     },
-    /// Start, stop, or toggle a dictation, as the shortcut would.
+    /// Start, stop, toggle, or cancel a dictation, as the shortcut would.
     ///
-    /// `start` locks the recording: `stop` or the shortcut finishes it.
-    /// Repeating a command changes nothing.
+    /// `start` locks the recording: `stop` or the shortcut finishes it,
+    /// `cancel` discards it. Repeating a command changes nothing.
     Dictation {
         #[arg(value_enum)]
         action: CaptureAction,
@@ -81,6 +83,39 @@ pub enum ControlCli {
     },
     /// Paste the last dictation at the current focus (Option-Shift-V).
     PasteLast {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Run the focused field's text through its Output steps and replace it
+    /// (Labs › Transform typed text, Linux).
+    ///
+    /// Sends Ctrl+A and Ctrl+C, so it is not meant for terminals.
+    TypedText {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Transcribe a WAV file with the selected model and print it
+    /// (Labs › Transcribe files).
+    ///
+    /// Nothing is pasted, saved to History, or processed.
+    Transcribe {
+        /// The WAV file to transcribe.
+        file: std::path::PathBuf,
+        /// A model id from `hex model list` (default: the selected model).
+        #[arg(long)]
+        model: Option<String>,
+        /// A language the model supports (default: the saved language).
+        #[arg(long)]
+        language: Option<String>,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Take a screenshot of the display under the pointer and print its
+    /// path (Labs › Screenshots, macOS).
+    Screenshot {
+        /// Open the area and window picker instead, as its shortcut does.
+        #[arg(long)]
+        pick: bool,
         #[command(flatten)]
         output: Output,
     },
@@ -126,11 +161,6 @@ pub enum ControlCli {
     /// it in the running Hex (`hex history clear --yes`).
     #[command(args_conflicts_with_subcommands = true)]
     History(crate::control::transcript_cli::HistoryArgs),
-    /// Add up usage: words, audio, cost, and each engine's p50 and p95
-    /// transcription time, real-time factor, error rate and cost per audio
-    /// hour. Reads History and the cloud request log; Hex need not be
-    /// running.
-    Usage(crate::control::usage_cli::UsageArgs),
     /// Read and search recorded meetings without starting the app; record
     /// and stop them in the running Hex.
     Meetings {
@@ -168,39 +198,12 @@ pub enum ControlCli {
         #[command(subcommand)]
         command: CaptureCommand,
     },
-    /// Developer tool: run one WAV through several engines and show their
-    /// texts side by side with a word diff, latency, real-time factor,
-    /// request size and cost; `--report` ranks every logged run. Rows go to
-    /// compare.jsonl in the logs folder. Spends real money on cloud engines.
-    #[command(hide = true)]
-    Compare(CompareArgs),
-    /// Print a plain-text summary for a bug report: version, channel, OS,
-    /// architecture, engine, install method and recent errors. Never audio,
-    /// transcripts, file paths or keys; nothing is sent anywhere, and Hex
-    /// need not be running.
-    Diagnostics,
     /// Print Hex's recent log lines; works without Hex running.
     Logs {
         /// Read process.log (Rust and native diagnostics) instead of the
         /// live.ndjson event log.
         #[arg(long)]
         process: bool,
-        /// Read the debug log: every stage of a dictation with timings.
-        /// From the running WordInk it includes what was captured silently
-        /// before you asked, and with --follow streams new events live;
-        /// without one it tails debug.log (written in developer mode).
-        #[arg(long, conflicts_with = "process")]
-        debug: bool,
-        /// With --debug: show this level and below (info, debug or trace).
-        #[arg(long, requires = "debug", value_parser = parse_level)]
-        level: Option<crate::debug_log::DebugLevel>,
-        /// With --debug: only these subsystems (audio, bluetooth, vad,
-        /// engine, output, media, hotkeys, settings, updater); repeatable.
-        #[arg(long, requires = "debug", value_delimiter = ',')]
-        subsystem: Vec<String>,
-        /// With --debug: one JSON object per line, for machines.
-        #[arg(long, requires = "debug")]
-        json: bool,
         /// How many lines from the end.
         #[arg(short = 'n', long, default_value_t = 50)]
         lines: usize,
@@ -208,58 +211,6 @@ pub enum ControlCli {
         #[arg(short, long)]
         follow: bool,
     },
-}
-
-/// `wordink compare`.
-#[derive(Args, Debug)]
-pub struct CompareArgs {
-    /// A WAV file; it is resampled to 16 kHz mono. Not used with --report.
-    pub wav: Option<std::path::PathBuf>,
-    /// Comma-separated engines as provider:model, such as
-    /// groq:whisper-large-v3-turbo,openrouter:microsoft/mai-transcribe-2,local:parakeet-v3.
-    /// Default: every cloud engine with a key at its default model, and the
-    /// selected local model when installed.
-    #[arg(long)]
-    pub engines: Option<String>,
-    /// A text file with the true transcript: rows get a word error rate
-    /// against it, and --report ranks by it.
-    #[arg(long)]
-    pub reference: Option<std::path::PathBuf>,
-    /// Rank the rows already in compare.jsonl instead of running anything.
-    #[arg(long)]
-    pub report: bool,
-    /// With --report: only the runs of this clip id (printed by a run).
-    #[arg(long, requires = "report")]
-    pub clip: Option<String>,
-    /// The speech language to tell the engines (default: the setting).
-    #[arg(long)]
-    pub language: Option<String>,
-    /// Where local engines run: auto, gpu or cpu (default: Settings › Speech engine).
-    #[arg(long, value_enum)]
-    pub device: Option<DeviceArg>,
-    /// Do not append this run to compare.jsonl.
-    #[arg(long)]
-    pub no_log: bool,
-    #[command(flatten)]
-    pub output: Output,
-}
-
-/// Where a local engine runs.
-#[derive(Clone, Copy, Debug, clap::ValueEnum)]
-pub enum DeviceArg {
-    Auto,
-    Gpu,
-    Cpu,
-}
-
-impl From<DeviceArg> for crate::app_settings::TranscriptionDevice {
-    fn from(device: DeviceArg) -> Self {
-        match device {
-            DeviceArg::Auto => Self::Auto,
-            DeviceArg::Gpu => Self::Gpu,
-            DeviceArg::Cpu => Self::Cpu,
-        }
-    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -363,10 +314,6 @@ pub enum ModelCommand {
         model: Option<String>,
         #[arg(long)]
         language: Option<String>,
-        /// Where the model runs: auto, gpu or cpu (default: Settings › Speech engine). Prints the
-        /// device, load time, run time and real-time factor on stderr.
-        #[arg(long, value_enum)]
-        device: Option<DeviceArg>,
     },
     /// Copy a GGUF speech model into Hex after checking its header,
     /// and print its id. The original is left as it is.
@@ -450,12 +397,6 @@ pub enum VocabularyCommand {
         #[command(flatten)]
         output: Output,
     },
-    /// Words you might add: your replacements' outputs and unusual words
-    /// that recur in History (local only; nothing is added or sent).
-    Suggest {
-        #[command(flatten)]
-        output: Output,
-    },
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -505,20 +446,23 @@ pub fn run(command: ControlCli) -> u8 {
             raw,
             output,
         } => {
-            if let Err(error) = super::check_flags(action.into(), print, raw) {
+            if let Err(error) = super::check_flags(action, print, raw) {
                 eprintln!("hex: {}", error.message);
                 return 2;
             }
-            send(
-                ControlCommand::Dictation {
-                    action: action.into(),
-                    print,
-                    raw,
-                },
-                output,
-            )
+            send(ControlCommand::Dictation { action, print, raw }, output)
         }
         ControlCli::PasteLast { output } => send(ControlCommand::PasteLast, output),
+        ControlCli::TypedText { output } => send(ControlCommand::TypedText, output),
+        ControlCli::Transcribe {
+            file,
+            model,
+            language,
+            output,
+        } => transcribe::run(file, model, language, output),
+        ControlCli::Screenshot { pick, output } => {
+            send(ControlCommand::Screenshot { pick }, output)
+        }
         ControlCli::Settings { command } => settings(command),
         ControlCli::Model { command } => match command {
             ModelCommand::List { output } => send(ControlCommand::ModelList, output),
@@ -553,7 +497,7 @@ pub fn run(command: ControlCli) -> u8 {
                     == crate::transcription::models::TranscriptionModelId::Custom(id)
                 {
                     color_eyre::eyre::bail!(
-                        "{} is the selected model; choose another with `wordink model use` first",
+                        "{} is the selected model; choose another with `hex model use` first",
                         id.as_str()
                     );
                 }
@@ -608,40 +552,17 @@ pub fn run(command: ControlCli) -> u8 {
             VocabularyCommand::Remove { term, output } => {
                 send(ControlCommand::VocabularyRemove { term }, output)
             }
-            VocabularyCommand::Suggest { output } => suggest_vocabulary(output),
         },
-        ControlCli::Compare(args) => report(compare(args)),
-        ControlCli::Diagnostics => diagnostics(),
-        ControlCli::Logs {
-            debug: true,
-            process: _,
-            level,
-            subsystem,
-            json,
-            lines,
-            follow,
-        } => debug_logs(
-            crate::debug_log::Filter {
-                level: level.unwrap_or(crate::debug_log::DebugLevel::Trace),
-                subsystems: subsystem,
-                search: String::new(),
-            },
-            json,
-            lines,
-            follow,
-        ),
         ControlCli::Logs {
             process,
             lines,
             follow,
-            ..
-        } => logs(process, false, lines, follow),
+        } => logs(process, lines, follow),
         ControlCli::History(crate::control::transcript_cli::HistoryArgs {
             action: Some(crate::control::transcript_cli::HistoryAction::Clear { yes, output }),
             ..
         }) => clear_history(yes, output),
         ControlCli::History(args) => report(crate::control::transcript_cli::history(&args)),
-        ControlCli::Usage(args) => report(crate::control::usage_cli::run(&args)),
         ControlCli::Meetings { command } => meetings(command),
         ControlCli::Mcp { meetings_dir } => report(mcp(meetings_dir)),
         ControlCli::Commands { command } => report(match command {
@@ -658,7 +579,7 @@ pub fn run(command: ControlCli) -> u8 {
 }
 
 /// `hex model install`: the running Hex downloads in the background;
-/// without one, Linux and Windows download here.
+/// without one, Linux and Windows download and select here.
 fn install_model(model: Option<String>, language: Option<String>, output: Output) -> u8 {
     let model = match model {
         Some(model) => model,
@@ -669,14 +590,96 @@ fn install_model(model: Option<String>, language: Option<String>, output: Output
     };
     #[cfg(not(target_os = "macos"))]
     if !running() {
-        return report(selection(Some(model), language).and_then(|selection| {
-            crate::transcription::local_transcriber::install(
-                &selection,
-                &std::sync::atomic::AtomicBool::new(false),
-            )
-        }));
+        let selection = match selection(Some(model), language) {
+            Ok(selection) => selection,
+            Err(error) => return fail(&format!("{error:#}")),
+        };
+        if let Err(error) = crate::transcription::local_transcriber::install(
+            &selection,
+            &std::sync::atomic::AtomicBool::new(false),
+        ) {
+            return fail(&format!("{error:#}"));
+        }
+        return select_installed(&selection, output);
     }
     send(ControlCommand::ModelInstall { model, language }, output)
+}
+
+/// `model install` with no Hex running: make the switch the app would have
+/// made. A Hex that started while the model downloaded takes the choice;
+/// otherwise it is saved under the service lock `settings apply` uses, so a
+/// starting Hex is never written behind. An unchanged selection needs neither.
+#[cfg(not(target_os = "macos"))]
+fn select_installed(
+    selection: &crate::transcription::models::TranscriptionSelection,
+    output: Output,
+) -> u8 {
+    if crate::app_settings::AppSettings::read()
+        .is_ok_and(|settings| settings.transcription == *selection)
+    {
+        let name = crate::transcription::models::definition(selection.model).name;
+        println!("{name} ({}) is already selected", selection.language);
+        return 0;
+    }
+    let handoff = hand_off(
+        || select_in_running_hex(selection, output),
+        || match save_selection(selection) {
+            Ok(message) => {
+                println!("{message}");
+                0
+            }
+            Err(error) => fail(&format!(
+                "the model is installed, but selecting it failed: {error:#}"
+            )),
+        },
+    );
+    match handoff {
+        Handoff::Done(code) => code,
+        #[cfg(target_os = "linux")]
+        Handoff::OlderHex => fail(&format!(
+            "the model is installed, but an older Hex is still running; \
+             run `hex restart`, then `hex model use {}`",
+            selection.model.as_str()
+        )),
+        Handoff::Deadline => fail(&format!(
+            "the model is installed, but Hex is starting and holds its settings; \
+             run `hex model use {}` once it answers",
+            selection.model.as_str()
+        )),
+    }
+}
+
+/// Hands a downloaded model to a Hex that started while it downloaded.
+#[cfg(not(target_os = "macos"))]
+fn select_in_running_hex(
+    selection: &crate::transcription::models::TranscriptionSelection,
+    output: Output,
+) -> u8 {
+    send(
+        ControlCommand::ModelUse {
+            model: selection.model.as_str().to_owned(),
+            language: Some(selection.language.clone()),
+        },
+        output,
+    )
+}
+
+/// Records a downloaded model as the selected one, as the app's own switch
+/// does. An unchanged selection is left alone.
+#[cfg(not(target_os = "macos"))]
+fn save_selection(
+    selection: &crate::transcription::models::TranscriptionSelection,
+) -> color_eyre::Result<String> {
+    let name = crate::transcription::models::definition(selection.model).name;
+    let mut settings = crate::app_settings::AppSettings::load()?;
+    if settings.transcription == *selection {
+        return Ok(format!(
+            "{name} ({}) is already selected",
+            selection.language
+        ));
+    }
+    settings.save_transcription(selection.clone())?;
+    Ok(format!("Switched to {name} ({})", selection.language))
 }
 
 /// `hex model import`: checks, copies, and records the file here, in this
@@ -695,7 +698,7 @@ fn imported(model: &str) -> color_eyre::Result<crate::transcription::models::Cus
     crate::transcription::models::CustomModelId::parse(model)
         .filter(|id| custom_models::is_registered(*id))
         .ok_or_else(|| {
-            color_eyre::eyre::eyre!("no imported model is {model}; run `wordink model list`")
+            color_eyre::eyre::eyre!("no imported model is {model}; run `hex model list`")
         })
 }
 
@@ -751,30 +754,17 @@ fn offline_model(command: ModelCommand) -> u8 {
             wav,
             model,
             language,
-            device,
         } => {
-            use crate::transcription::local_transcriber as local;
-            let settings = crate::app_settings::AppSettings::read().unwrap_or_default();
-            local::set_device(device.map_or(settings.transcription_device, Into::into));
-            let selection = selection(model, language)?;
-            let samples = local::read_wav_for_parakeet(&wav)?;
-            let loading = std::time::Instant::now();
-            let mut transcriber = local::LocalTranscriber::load(&selection)?;
-            let load_ms = loading.elapsed().as_millis();
-            let running = std::time::Instant::now();
-            let text = transcriber.transcribe(&samples)?;
-            let run_ms = running.elapsed().as_millis();
-            println!("{text}");
-            eprintln!(
-                "device={} load_ms={load_ms} warm_ms={} run_ms={run_ms} audio_s={:.2} rtf={:.3}",
-                transcriber.device_label(),
-                transcriber.warm_ms(),
-                samples.len() as f64 / 16_000.0,
-                run_ms as f64 / 1000.0 / (samples.len() as f64 / 16_000.0)
+            println!(
+                "{}",
+                crate::transcription::local_transcriber::transcribe_wav_with_selection(
+                    &std::fs::read(&wav)?,
+                    &selection(model, language)?,
+                )?
             );
             Ok(())
         }
-        _ => unreachable!("WordInk carries out the other model commands"),
+        _ => unreachable!("Hex carries out the other model commands"),
     })())
 }
 
@@ -784,92 +774,10 @@ fn offline_model(_: ModelCommand) -> u8 {
     print(
         ControlReply::error(
             "unsupported",
-            "this `wordink model` command is for Linux and Windows; use `wordink model list`",
+            "this `hex model` command is for Linux and Windows; use `hex model list`",
         ),
         Output::default(),
     )
-}
-
-/// `wordink compare`: runs here, never in the running app.
-fn compare(args: CompareArgs) -> color_eyre::Result<()> {
-    use crate::transcription::compare;
-    let log = compare::log_path();
-    let reference = args
-        .reference
-        .as_deref()
-        .map(std::fs::read_to_string)
-        .transpose()
-        .map_err(|error| color_eyre::eyre::eyre!("could not read the reference: {error}"))?;
-    if args.report {
-        let path = log.ok_or_else(|| color_eyre::eyre::eyre!("no logs folder"))?;
-        let rows = compare::read(&path).map_err(|error| {
-            color_eyre::eyre::eyre!("no comparison log at {}: {error}", path.display())
-        })?;
-        let ranked = compare::rank(&rows, reference.as_deref(), args.clip.as_deref());
-        if args.output.json {
-            println!("{}", compare::ranking_json(&ranked));
-        } else {
-            print!("{}", compare::report_text(&ranked));
-        }
-        return Ok(());
-    }
-    let wav = args
-        .wav
-        .as_deref()
-        .ok_or_else(|| color_eyre::eyre::eyre!("give a WAV file, or --report"))?;
-    let samples = compare::read_wav(wav)?;
-    let specs = match &args.engines {
-        Some(list) => {
-            compare::EngineSpec::parse_list(list).map_err(|error| color_eyre::eyre::eyre!(error))?
-        }
-        None => compare::default_specs(),
-    };
-    // Gateway URL and engine as the settings have them, as the app applies them.
-    let settings = crate::app_settings::AppSettings::read().unwrap_or_default();
-    crate::transcription::cloud::set_engine(
-        settings.engine,
-        settings.engine_model.as_deref(),
-        settings.gateway_url.as_deref(),
-    );
-    #[cfg(not(target_os = "macos"))]
-    crate::transcription::local_transcriber::set_device(
-        args.device
-            .map_or(settings.transcription_device, Into::into),
-    );
-    #[cfg(target_os = "macos")]
-    let _ = args.device;
-    let rows = compare::run_specs(
-        &specs,
-        &samples,
-        reference.as_deref(),
-        args.language.as_deref(),
-    );
-    if args.output.json {
-        println!("{}", serde_json::to_string_pretty(&rows)?);
-    } else {
-        let width = std::env::var("COLUMNS")
-            .ok()
-            .and_then(|columns| columns.parse().ok())
-            .unwrap_or(160);
-        println!(
-            "clip {} ({:.1} s of audio)\n",
-            rows.first().map_or("", |row| row.clip.as_str()),
-            samples.len() as f64 / 16_000.0
-        );
-        print!(
-            "{}",
-            compare::comparison_text(&rows, reference.as_deref(), width)
-        );
-    }
-    if !args.no_log
-        && let Some(path) = compare::log_path()
-    {
-        match compare::append(&path, &rows) {
-            Ok(()) => eprintln!("appended {} rows to {}", rows.len(), path.display()),
-            Err(error) => eprintln!("wordink: could not write {}: {error}", path.display()),
-        }
-    }
-    Ok(())
 }
 
 /// The exit code of a command that runs here rather than in Hex.
@@ -943,6 +851,12 @@ pub enum CaptureCommand {
     },
     /// What records, what is being written, and the last capture.
     Status {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Export the last 15 s from the rolling screen buffer into a capture
+    /// bundle (`labs.annotate_replay`, macOS 27+).
+    Replay {
         #[command(flatten)]
         output: Output,
     },
@@ -1035,6 +949,7 @@ pub fn capture(command: CaptureCommand) -> u8 {
         CaptureCommand::Cancel { output } => (C::ScrawlCapture { action: A::Cancel }, output),
         CaptureCommand::Toggle { output } => (C::ScrawlCapture { action: A::Toggle }, output),
         CaptureCommand::Status { output } => (C::ScrawlCapture { action: A::Status }, output),
+        CaptureCommand::Replay { output } => (C::ScrawlCapture { action: A::Replay }, output),
         CaptureCommand::List { limit, output } => (C::ScrawlCaptureList { limit }, output),
         CaptureCommand::Show { capture, output } => (C::ScrawlCaptureShow { capture }, output),
         CaptureCommand::Send {
@@ -1107,6 +1022,45 @@ pub fn settings(command: SettingsCommand) -> u8 {
     }
 }
 
+/// How handing settings to a running Hex went, or why it couldn't wait.
+enum Handoff {
+    /// The running Hex took the work, or the lock was free and the work was
+    /// written here; holds that command's exit code.
+    Done(u8),
+    /// On Linux, a Hex too old for `hex` commands answers on its socket.
+    #[cfg(target_os = "linux")]
+    OlderHex,
+    /// A Hex held the settings lock and didn't answer before the deadline.
+    Deadline,
+}
+
+/// `settings apply`'s wait, shared with `model install`: a Hex that holds the
+/// service lock may have read settings.json already, so hand the work to the
+/// Hex that answers (`send`), or write it here while the lock is held
+/// (`write`). Only a lock that never answers gives up.
+fn hand_off(send: impl FnOnce() -> u8, write: impl FnOnce() -> u8) -> Handoff {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(35);
+    loop {
+        if running() {
+            return Handoff::Done(send());
+        }
+        // A Hex that holds the service lock may have read settings.json
+        // already; wait for it to answer instead of writing behind it.
+        #[cfg(target_os = "linux")]
+        let lock = crate::desktop::instance::acquire("service");
+        #[cfg(not(target_os = "linux"))]
+        let lock: color_eyre::Result<()> = Ok(());
+        match lock {
+            Ok(_lock) if !running() => return Handoff::Done(write()),
+            Ok(_) => {}
+            #[cfg(target_os = "linux")]
+            Err(_) if crate::linux::service::instance_answers() => return Handoff::OlderHex,
+            Err(_) if std::time::Instant::now() >= deadline => return Handoff::Deadline,
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    }
+}
+
 /// `hex settings apply`: the running Hex saves and adopts the settings, so
 /// it never overwrites them from memory; with no Hex running they are
 /// written to settings.json here.
@@ -1126,35 +1080,28 @@ fn apply_settings(file: &std::path::Path, output: Output) -> u8 {
         Ok(values) => values,
         Err(error) => return fail(&format!("expected a JSON object of settings: {error}")),
     };
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(35);
-    loop {
-        if running() {
-            return send(ControlCommand::SettingsApply { values }, output);
-        }
-        // A Hex that holds the service lock may have read settings.json
-        // already; wait for it to answer instead of writing behind it.
+    let handoff = hand_off(
+        || {
+            send(
+                ControlCommand::SettingsApply {
+                    values: values.clone(),
+                },
+                output,
+            )
+        },
+        || print(apply_offline(&values), output),
+    );
+    match handoff {
+        Handoff::Done(code) => code,
         #[cfg(target_os = "linux")]
-        let lock = crate::desktop::instance::acquire("service");
-        #[cfg(not(target_os = "linux"))]
-        let lock: color_eyre::Result<()> = Ok(());
-        match lock {
-            Ok(_lock) if !running() => return print(apply_offline(&values), output),
-            Ok(_) => {}
-            #[cfg(target_os = "linux")]
-            Err(_) if crate::linux::service::instance_answers() => {
-                return print(older_hex(), output);
-            }
-            Err(_) if std::time::Instant::now() >= deadline => {
-                return print(
-                    ControlReply::error(
-                        "busy",
-                        "WordInk is starting but didn't answer; run `wordink settings apply` again",
-                    ),
-                    output,
-                );
-            }
-            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
-        }
+        Handoff::OlderHex => print(older_hex(), output),
+        Handoff::Deadline => print(
+            ControlReply::error(
+                "busy",
+                "Hex is starting but didn't answer; run `hex settings apply` again",
+            ),
+            output,
+        ),
     }
 }
 
@@ -1218,16 +1165,6 @@ pub(crate) fn set_in_running_hex(key: &str, value: &str) -> Option<ControlReply>
     })
 }
 
-/// `hex settings set key value` with Hex stopped: writes settings.json
-/// directly. `json` is the value as JSON.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-pub(crate) fn set_offline(key: &str, json: &str) -> ControlReply {
-    match serde_json::from_str(json) {
-        Ok(value) => apply_offline(&serde_json::Map::from_iter([(key.to_owned(), value)])),
-        Err(error) => ControlReply::error("invalid-value", error.to_string()),
-    }
-}
-
 fn call(request: ControlRequest) -> Result<ControlResponse, ControlReply> {
     if !running() {
         return Err(absent());
@@ -1237,7 +1174,7 @@ fn call(request: ControlRequest) -> Result<ControlResponse, ControlReply> {
 }
 
 pub(crate) fn not_running() -> ControlReply {
-    ControlReply::error("not-running", "WordInk is not running; run `wordink start`")
+    ControlReply::error("not-running", "Hex is not running; run `hex start`")
 }
 
 /// Why no Hex answered `/control`: on Linux an older Hex an update left
@@ -1255,7 +1192,7 @@ fn absent() -> ControlReply {
 fn older_hex() -> ControlReply {
     ControlReply::error(
         "outdated",
-        "an older WordInk is still running (WordInk was updated) and doesn't take `hex` commands; run `wordink restart`",
+        "an older Hex is still running (Hex was updated) and doesn't take `hex` commands; run `hex restart`",
     )
 }
 
@@ -1268,7 +1205,7 @@ fn restart_older_hex() -> ControlReply {
     if !crate::linux::service::supervised() {
         return ControlReply::error(
             "failed",
-            "an older WordInk is running outside its systemd unit; quit it from its window or tray, then run `wordink start`",
+            "an older Hex is running outside its systemd unit; quit it from its window or tray, then run `hex start`",
         );
     }
     if let Err(error) = crate::linux::service::restart() {
@@ -1277,11 +1214,11 @@ fn restart_older_hex() -> ControlReply {
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(20) {
         if running() {
-            return ControlReply::done("Restarted WordInk");
+            return ControlReply::done("Restarted Hex");
         }
         std::thread::sleep(Duration::from_millis(200));
     }
-    ControlReply::done("Restarted WordInk; it isn't answering yet (it may be loading its model)")
+    ControlReply::done("Restarted Hex; it isn't answering yet (it may be loading its model)")
 }
 
 #[cfg(target_os = "macos")]
@@ -1290,7 +1227,7 @@ fn start(output: Output) -> u8 {
 
     if let Some(pid) = crate::local_api::running_pid() {
         return print(
-            ControlReply::unchanged(format!("WordInk is already running (pid {pid})")),
+            ControlReply::unchanged(format!("Hex is already running (pid {pid})")),
             output,
         );
     }
@@ -1306,7 +1243,7 @@ fn start(output: Output) -> u8 {
         Ok(status) if status.success() => {}
         Ok(_) | Err(_) => {
             return print(
-                ControlReply::error("failed", "couldn't open WordInk.app; is it installed?"),
+                ControlReply::error("failed", "couldn't open Hex.app; is it installed?"),
                 output,
             );
         }
@@ -1315,14 +1252,14 @@ fn start(output: Output) -> u8 {
     while started.elapsed() < Duration::from_secs(20) {
         if let Some(pid) = crate::local_api::running_pid() {
             return print(
-                ControlReply::done(format!("Started WordInk (pid {pid})")),
+                ControlReply::done(format!("Started Hex (pid {pid})")),
                 output,
             );
         }
         std::thread::sleep(Duration::from_millis(200));
     }
     print(
-        ControlReply::done("Opened WordInk; it isn't answering yet (setup may be waiting)"),
+        ControlReply::done("Opened Hex; it isn't answering yet (setup may be waiting)"),
         output,
     )
 }
@@ -1340,7 +1277,7 @@ fn start_reply() -> ControlReply {
     use std::time::{Duration, Instant};
 
     if running() {
-        return ControlReply::unchanged("WordInk is already running");
+        return ControlReply::unchanged("Hex is already running");
     }
     #[cfg(target_os = "linux")]
     if crate::linux::service::instance_answers() {
@@ -1366,16 +1303,16 @@ fn start_reply() -> ControlReply {
         command.creation_flags(0x0000_0008 | 0x0000_0200);
     }
     if let Err(error) = command.spawn() {
-        return ControlReply::error("failed", format!("couldn't start WordInk: {error}"));
+        return ControlReply::error("failed", format!("couldn't start Hex: {error}"));
     }
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(20) {
         if running() {
-            return ControlReply::done("Started WordInk");
+            return ControlReply::done("Started Hex");
         }
         std::thread::sleep(Duration::from_millis(200));
     }
-    ControlReply::done("Started WordInk; it isn't answering yet (it may be loading its model)")
+    ControlReply::done("Started Hex; it isn't answering yet (it may be loading its model)")
 }
 
 /// After a restart's quit on Linux and Windows: waits for the old Hex to
@@ -1386,14 +1323,14 @@ fn reopen_after_restart() -> ControlReply {
 
     #[cfg(target_os = "linux")]
     if crate::linux::service::supervised() {
-        return ControlReply::done("Restarting WordInk");
+        return ControlReply::done("Restarting Hex");
     }
     let started = Instant::now();
     while running() {
         if started.elapsed() > Duration::from_secs(30) {
             return ControlReply::error(
                 "failed",
-                "WordInk is still finishing its work; run `wordink start` once it quits",
+                "Hex is still finishing its work; run `hex start` once it quits",
             );
         }
         std::thread::sleep(Duration::from_millis(200));
@@ -1402,7 +1339,7 @@ fn reopen_after_restart() -> ControlReply {
 }
 
 /// `open` arguments for `hex start`: the caller's `HEX_*` environment, then
-/// the WordInk.app this `hex` belongs to, or the installed app by bundle id.
+/// the Hex.app this `hex` belongs to, or the installed app by bundle id.
 #[cfg(target_os = "macos")]
 fn open_arguments(
     bundle: Option<&std::path::Path>,
@@ -1415,9 +1352,9 @@ fn open_arguments(
         None => arguments.extend([
             "-b".into(),
             if test_build {
-                "io.github.duketopceo.wordink.test"
+                "anomaly.hex.test"
             } else {
-                "io.github.duketopceo.wordink"
+                "anomaly.hex"
             }
             .into(),
         ]),
@@ -1425,7 +1362,7 @@ fn open_arguments(
     arguments
 }
 
-/// The WordInk.app this `hex` belongs to, when it runs from (or links into) one.
+/// The Hex.app this `hex` belongs to, when it runs from (or links into) one.
 #[cfg(target_os = "macos")]
 fn installed_bundle() -> Option<std::path::PathBuf> {
     let executable = std::fs::canonicalize(std::env::current_exe().ok()?).ok()?;
@@ -1436,167 +1373,11 @@ fn installed_bundle() -> Option<std::path::PathBuf> {
         .map(ToOwned::to_owned)
 }
 
-/// `hex diagnostics`: the summary Privacy's Copy diagnostics row shows, read
-/// in this process from the saved settings and the event log.
-fn diagnostics() -> u8 {
-    use crate::transcription::cloud::{Provider, route_for};
-    let engine = crate::app_settings::AppSettings::read()
-        .unwrap_or_default()
-        .engine;
-    let groq_key = crate::keys::resolve(Provider::Groq.id(), Provider::Groq.key_env()).is_some();
-    let log = crate::app_paths::logs_dir()
-        .ok()
-        .map(|directory| directory.join("live.ndjson"));
-    let diagnostics =
-        crate::diagnostics::Diagnostics::collect(route_for(engine, groq_key), log.as_deref())
-            .with_requests(&crate::diagnostics::recent_requests());
-    print!("{}", diagnostics.text());
-    0
-}
-
-/// `wordink vocabulary suggest`: reads the saved settings and History
-/// directly, like `wordink history`, so the app needn't be running.
-fn suggest_vocabulary(output: Output) -> u8 {
-    let read =
-        || -> color_eyre::Result<Vec<crate::dictation::vocabulary_suggestions::Suggestion>> {
-            let root = crate::app_paths::support_dir()?;
-            let (settings, _) =
-                crate::app_settings::AppSettings::read_from(&root.join("settings.json"))?;
-            let history = crate::history::read_snapshot(&root.join("history.json"))?;
-            let rules: Vec<_> = settings
-                .dictation_processing
-                .default_mode
-                .replacements
-                .iter()
-                .chain(
-                    settings
-                        .dictation_processing
-                        .modes
-                        .iter()
-                        .flat_map(|mode| &mode.replacements),
-                )
-                .cloned()
-                .collect();
-            // Newest first, as History lists them.
-            let history: Vec<_> = history.into_iter().rev().collect();
-            Ok(crate::dictation::vocabulary_suggestions::local(
-                &rules,
-                &history,
-                &settings.vocabulary,
-                &settings.vocabulary_dismissed,
-            ))
-        };
-    let found = match read() {
-        Ok(found) => found,
-        Err(error) => return fail(&format!("{error:#}")),
-    };
-    if output.json {
-        let rows: Vec<_> = found
-            .iter()
-            .map(|suggestion| {
-                serde_json::json!({
-                    "word": suggestion.word,
-                    "sounds_like": suggestion.sounds_like,
-                    "reason": suggestion_reason(suggestion),
-                })
-            })
-            .collect();
-        println!(
-            "{}",
-            serde_json::json!({"version": 4, "status": "vocabulary-suggestions", "suggestions": rows})
-        );
-    } else if found.is_empty() {
-        println!("No suggestions.");
-    } else {
-        for suggestion in &found {
-            println!("{}\t{}", suggestion.word, suggestion_reason(suggestion));
-        }
-    }
-    0
-}
-
-/// Why a word is proposed, in plain English for the terminal.
-fn suggestion_reason(suggestion: &crate::dictation::vocabulary_suggestions::Suggestion) -> String {
-    use crate::dictation::vocabulary_suggestions::Reason;
-    match &suggestion.reason {
-        Reason::Replacement { fired } if *fired > 0 => {
-            format!("a replacement of yours produces it (it fired {fired} times)")
-        }
-        Reason::Replacement { .. } => "a replacement of yours produces it".into(),
-        Reason::Recurring { count } => format!("heard {count} times"),
-        Reason::Ai { reason, .. } => format!("AI guess: {reason}"),
-    }
-}
-
-fn parse_level(text: &str) -> Result<crate::debug_log::DebugLevel, String> {
-    crate::debug_log::DebugLevel::parse(text)
-        .ok_or_else(|| "expected info, debug or trace".to_owned())
-}
-
-/// `wordink logs --debug`: from the running WordInk, its buffered history
-/// and (with `follow`) new events as they happen, polled over the control
-/// socket by sequence number; with none running, the tail of `debug.log`.
-fn debug_logs(filter: crate::debug_log::Filter, json: bool, lines: usize, follow: bool) -> u8 {
-    use std::io::Write;
-    if !running() {
-        if json {
-            return fail("--json needs a running WordInk; debug.log holds text lines");
-        }
-        return logs(false, true, lines, follow);
-    }
-    let redactions = crate::diagnostics::Redactions::from_environment();
-    let mut after = 0;
-    let mut stdout = std::io::stdout().lock();
-    loop {
-        let request = ControlRequest::new(ControlCommand::DebugLogs {
-            after,
-            filter: filter.clone(),
-            limit: if after == 0 { lines.max(1) } else { 1_000 },
-        });
-        match call(request) {
-            Ok(ControlResponse {
-                reply: ControlReply::DebugLogs { events, next },
-                ..
-            }) => {
-                after = next;
-                for event in &events {
-                    let line = if json {
-                        crate::debug_log::format_json(event, &redactions)
-                    } else {
-                        crate::debug_log::format_text(event, &redactions)
-                    };
-                    if writeln!(stdout, "{line}").is_err() {
-                        return 0;
-                    }
-                }
-                let _ = stdout.flush();
-            }
-            Ok(ControlResponse {
-                reply: ControlReply::Error { message, .. },
-                ..
-            }) => return fail(&message),
-            Ok(_) => return fail("the running WordInk answered unexpectedly"),
-            Err(reply) => {
-                return match reply {
-                    ControlReply::Error { message, .. } => fail(&message),
-                    _ => fail("could not reach WordInk"),
-                };
-            }
-        }
-        if !follow {
-            return 0;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(250));
-    }
-}
-
-fn logs(process: bool, debug: bool, lines: usize, follow: bool) -> u8 {
+fn logs(process: bool, lines: usize, follow: bool) -> u8 {
     use std::io::{BufRead, Seek, SeekFrom};
 
     let path = match crate::app_paths::logs_dir() {
-        Ok(directory) => directory.join(if debug {
-            crate::debug_log::LOG_NAME
-        } else if process {
+        Ok(directory) => directory.join(if process {
             "process.log"
         } else {
             "live.ndjson"
@@ -1605,11 +1386,6 @@ fn logs(process: bool, debug: bool, lines: usize, follow: bool) -> u8 {
     };
     let mut file = match std::fs::File::open(&path) {
         Ok(file) => file,
-        Err(_) if debug => {
-            return fail(
-                "there is no debug log yet; turn on developer mode with `wordink settings set developer_mode on`",
-            );
-        }
         Err(error) => return fail(&format!("couldn't read {}: {error}", path.display())),
     };
     let length = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
@@ -1715,7 +1491,7 @@ mod tests {
         assert_eq!(exit_code(&reply), EXIT_REFUSED);
         assert!(matches!(
             &reply,
-            ControlReply::Error { code, message } if code == "outdated" && message.contains("wordink restart")
+            ControlReply::Error { code, message } if code == "outdated" && message.contains("hex restart")
         ));
     }
 
@@ -1742,18 +1518,18 @@ mod tests {
             "--env",
             "HEX_RETAIN_DICTATION_AUDIO=1",
         ];
-        let bundle = std::path::Path::new("/Applications/WordInk.app");
+        let bundle = std::path::Path::new("/Applications/Hex.app");
         assert_eq!(
             strings(open_arguments(Some(bundle), false, vars())),
-            [&env[..], &["/Applications/WordInk.app"]].concat()
+            [&env[..], &["/Applications/Hex.app"]].concat()
         );
         assert_eq!(
             strings(open_arguments(None, false, vars())),
-            [&env[..], &["-b", "io.github.duketopceo.wordink"]].concat()
+            [&env[..], &["-b", "anomaly.hex"]].concat()
         );
         assert_eq!(
             strings(open_arguments(None, true, [])),
-            ["-b", "io.github.duketopceo.wordink.test"]
+            ["-b", "anomaly.hex.test"]
         );
     }
 

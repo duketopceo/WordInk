@@ -195,7 +195,9 @@ pub(in crate::rune_ui) fn overlay(ui: &Ui, p: Paint) -> Option<El> {
         Step::Engine => engine_page(ui, p),
         _ => hotkey_page(ui, p),
     };
-    let top = super::super::title_bar(row().key("top-bar").w_full().h(TOP_BAR).px(20.0).center_y());
+    let top = super::super::sidebar::title_bar(
+        row().key("top-bar").w_full().h(TOP_BAR).px(20.0).center_y(),
+    );
     Some(
         col()
             .key("first-run")
@@ -372,7 +374,7 @@ fn finish_later(p: Paint) -> El {
     row().key("later").h(32.0).center().child(
         Button::new(tr("Finish later"))
             .variant(ButtonVariant::Ghost)
-            .on_press(super::live::finish_later)
+            .on_press(|ui: &mut Ui| super::live::finish_later(ui))
             .build_push(p.k)
             .key("finish-later"),
     )

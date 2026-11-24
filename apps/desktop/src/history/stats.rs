@@ -175,7 +175,12 @@ mod tests {
             audio_ms,
             inference_ms: 0,
             total_ms: 0,
+            recording_bytes: 0,
             usage: None,
+            model: None,
+            language: None,
+            text_ms: None,
+            versions: Vec::new(),
         }
     }
 
@@ -274,6 +279,8 @@ mod tests {
             audio_ms: 0,
             inference_ms: 0,
             total_ms: 0,
+            recording: None,
+            model: None,
             usage: None,
         };
         store.record(draft("old words"), 1_000).unwrap();

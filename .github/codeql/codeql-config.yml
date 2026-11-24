@@ -1,0 +1,7 @@
+# Procedural noise in the onboarding playground (from vendored Hex) uses parameters
+# named `salt` and fixed mix constants for GPU visuals, not credentials or KDFs.
+# CodeQL's hard-coded-cryptographic-value query flags those literals on large syncs.
+paths-ignore:
+  - apps/desktop/src/rune_ui/onboarding_kit/game.rs
+  - apps/desktop/src/rune_ui/onboarding_kit/game/fx.rs
+  - apps/desktop/src/rune_ui/onboarding_kit/typing.rs

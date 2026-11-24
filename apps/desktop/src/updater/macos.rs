@@ -48,6 +48,11 @@ fn installed_bundle() -> Option<PathBuf> {
     .then(|| bundle.to_path_buf())
 }
 
+/// Only Windows explains beside Download update why it can't update itself.
+pub fn blocked() -> Option<&'static str> {
+    None
+}
+
 pub fn method() -> Method {
     let Some(bundle) = installed_bundle() else {
         // A bare binary from a checkout.
@@ -229,6 +234,11 @@ pub fn install_on_quit(staged: &Staged) {
     }
 }
 
+/// Only Linux AppImages need their own update route.
+pub fn running_appimage() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,9 +375,4 @@ mod tests {
         assert!(!replaceable(Path::new("/System/Applications/WordInk.app")));
         let _ = fs::remove_dir_all(root);
     }
-}
-
-/// Only Linux AppImages need their own update route.
-pub fn running_appimage() -> bool {
-    false
 }

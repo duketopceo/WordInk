@@ -14,7 +14,9 @@
 //! manifest's SHA-256, and (macOS, Windows) the code signature are the
 //! integrity checks.
 
-mod notes;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub mod legacy;
+pub(crate) mod notes;
 #[cfg_attr(target_os = "linux", path = "updater/linux.rs")]
 #[cfg_attr(target_os = "macos", path = "updater/macos.rs")]
 #[cfg_attr(target_os = "windows", path = "updater/windows.rs")]
@@ -320,6 +322,8 @@ struct Shared {
     /// What the staged dev build changed, when the dev notes said.
     notes: Mutex<Option<UpdateNotes>>,
     restart: Mutex<Restart>,
+    /// Why this install cannot update itself, from the platform probe.
+    blocked: Mutex<Option<&'static str>>,
 }
 
 impl Shared {
@@ -334,6 +338,7 @@ impl Shared {
             staged: Mutex::new(None),
             notes: Mutex::new(None),
             restart: Mutex::new(Restart::Idle),
+            blocked: Mutex::new(None),
         }
     }
 }
@@ -386,6 +391,9 @@ impl Updater {
             },
             matches!(method, Method::Package(_)),
         ));
+        if matches!(method, Method::Unknown) {
+            *lock(&shared.blocked) = platform::blocked();
+        }
         if checks {
             let worker = shared.clone();
             if let Err(error) = std::thread::Builder::new()
@@ -452,6 +460,13 @@ impl Updater {
     pub fn stop(&self) {
         lock(&self.shared.wake).stop = true;
         self.shared.signal.notify_all();
+    }
+
+    /// What the sidebar shows when this install cannot update itself.
+    pub fn blocked(&self) -> Option<&'static str> {
+        matches!(*lock(&self.shared.state), State::Download { .. })
+            .then(|| *lock(&self.shared.blocked))
+            .flatten()
     }
 
     /// What the staged dev build changed, while Restart to update shows.
@@ -770,6 +785,14 @@ fn check(
         }
         Decision::None { .. } => {
             transport::prune(&updates, None);
+            #[cfg(target_os = "windows")]
+            if matches!(method, Method::Direct { .. }) && platform::console_missing() {
+                let installed = download_console(&manifest, &manifest_url, &user_agent, &updates)
+                    .and_then(|file| file.map_or(Ok(()), |file| platform::install_console(&file)));
+                if let Err(error) = installed {
+                    tracing::warn!(error = %format!("{error:#}"), "could not add wordink.com to this install");
+                }
+            }
             Ok(State::Current)
         }
         Decision::Notify {
@@ -815,7 +838,12 @@ fn check(
             #[cfg(target_os = "linux")]
             verify_linux_signature(&manifest, &manifest_url, &user_agent, &target, &updates)?;
             let file = transport::download(&url, &user_agent, &target, &updates)?;
-            let staged = platform::stage(&file, &version)
+            #[cfg(target_os = "windows")]
+            let staged = download_console(&manifest, &manifest_url, &user_agent, &updates)
+                .and_then(|console| platform::stage(&file, console.as_deref(), &version));
+            #[cfg(not(target_os = "windows"))]
+            let staged = platform::stage(&file, &version);
+            let staged = staged
                 .wrap_err_with(|| format!("could not stage WordInk {version}"))?;
             *lock(&shared.staged) = Some(StagedUpdate {
                 staged,
@@ -878,6 +906,27 @@ fn fetch_notes(shared: &Shared, channel: &str, user_agent: &str, updates: &Path,
     }
     let notes = notes::fetch(user_agent, &updates.join("notes"), crate::VERSION, version);
     *lock(&shared.notes) = notes;
+}
+
+/// Fetches the console entry point (`hex.com` / `wordink.com`) when the
+/// manifest names a separate target; none when the release has no console
+/// artifact or the download fails.
+#[cfg(target_os = "windows")]
+fn download_console(
+    manifest: &str,
+    manifest_url: &str,
+    user_agent: &str,
+    updates: &Path,
+) -> Result<Option<PathBuf>> {
+    let Some(manifest) = protocol::parse_manifest(manifest) else {
+        return Ok(None);
+    };
+    let Some(target) = manifest.release.target(platform::CONSOLE_TARGET) else {
+        return Ok(None);
+    };
+    let url = protocol::resolve_url(manifest_url, &target.url)
+        .ok_or_else(|| eyre!("the console URL {} is not usable", target.url))?;
+    transport::download(&url, user_agent, target, updates).map(Some)
 }
 
 /// Checks the manifest's `<target>-sig` file: Anomaly's release key signing
@@ -999,8 +1048,9 @@ fn receipt_channel(root: &Path) -> Option<String> {
         method: String,
         root: PathBuf,
     }
-    let receipt: Receipt =
-        serde_json::from_slice(&std::fs::read(root.join("install.json")).ok()?).ok()?;
+    let bytes = std::fs::read(root.join("install.json")).ok()?;
+    let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes);
+    let receipt: Receipt = serde_json::from_slice(bytes).ok()?;
     let canonical = |path: &Path| path.canonicalize().ok();
     (receipt.app == APP
         && receipt.artifact == ARTIFACT

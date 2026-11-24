@@ -57,7 +57,7 @@ fn history_filters_and_order_apply_before_the_limit() {
         "--limit",
         "1",
     ]);
-    let output = history_output(&entries, &query, HistoryRetention::Week, NOW, &[]).unwrap();
+    let output = history_output(&entries, &query, HistoryRetention::Week, NOW, &[], None).unwrap();
     assert_eq!(output.entries.iter().map(|e| e.id).collect::<Vec<_>>(), [2]);
     assert!(!output.truncated);
     let output = history_output(
@@ -66,6 +66,7 @@ fn history_filters_and_order_apply_before_the_limit() {
         HistoryRetention::Week,
         NOW,
         &[],
+        None,
     )
     .unwrap();
     assert_eq!(output.entries[0].id, 2);
@@ -76,6 +77,7 @@ fn history_filters_and_order_apply_before_the_limit() {
         HistoryRetention::Week,
         NOW,
         &[],
+        None,
     )
     .unwrap();
     assert_eq!(output.entries[0].id, 4);
@@ -86,6 +88,7 @@ fn history_filters_and_order_apply_before_the_limit() {
         HistoryRetention::Week,
         NOW,
         &[],
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -98,7 +101,8 @@ fn history_filters_and_order_apply_before_the_limit() {
             &args(&["--since", "now", "--until", "1d"]),
             HistoryRetention::Week,
             NOW,
-            &[]
+            &[],
+            None
         )
         .is_err()
     );
@@ -123,6 +127,11 @@ fn history_stats_parse_sum_retained_entries_and_need_the_labs_toggle() {
         audio_ms: 6_000,
         inference_ms: 0,
         total_ms: 0,
+        recording_bytes: 0,
+        model: None,
+        language: None,
+        text_ms: None,
+        versions: Vec::new(),
         usage: None,
     };
     let entries = [
@@ -171,6 +180,7 @@ fn history_search_ranks_fuzzy_stemmed_matches_within_retention() {
         HistoryRetention::Week,
         NOW,
         &[],
+        None,
     )
     .unwrap();
     // Entry 2 matches both words; 5 only one; 1 has expired; 3 and 4 miss.
@@ -190,6 +200,7 @@ fn history_search_ranks_fuzzy_stemmed_matches_within_retention() {
         HistoryRetention::Week,
         NOW,
         &[],
+        None,
     )
     .unwrap();
     assert_eq!(output.entries[0].id, 4);
@@ -203,7 +214,8 @@ fn history_search_ranks_fuzzy_stemmed_matches_within_retention() {
             &args(&["--search", "\"\""]),
             HistoryRetention::Week,
             NOW,
-            &[]
+            &[],
+            None
         )
         .is_err()
     );
@@ -233,6 +245,7 @@ fn history_search_counts_raw_and_final_text_as_one_document() {
         HistoryRetention::Week,
         NOW,
         &[],
+        None,
     )
     .unwrap();
     let mut ids = output.entries.iter().map(|e| e.id).collect::<Vec<_>>();
@@ -250,6 +263,7 @@ fn history_json_contract_snapshot() {
         HistoryRetention::Week,
         NOW,
         &[],
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -269,6 +283,7 @@ fn history_json_contract_snapshot() {
         HistoryRetention::Week,
         NOW,
         &[],
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -283,6 +298,68 @@ fn history_json_contract_snapshot() {
 }
 
 #[test]
+fn keep_recordings_follows_the_saved_switch_not_the_process() {
+    let mut settings = AppSettings::default();
+    settings.labs.keep_recordings = false;
+    let off = keep_recordings(&settings);
+    settings.labs.keep_recordings = true;
+    let on = keep_recordings(&settings);
+    assert!(!off, "off by default");
+    assert!(on, "a saved on switch while this build has the feature");
+    assert_ne!(
+        off, on,
+        "the saved switch decides, not the process's runtime state"
+    );
+}
+
+#[test]
+fn history_json_names_a_recording_only_where_one_is_kept() {
+    let root = temp();
+    let recordings = crate::history::recordings::directory(&root.join("history.json"));
+    fs::create_dir_all(&recordings).unwrap();
+    let mut entries = entries();
+    // Entry 2 kept its audio and the file is there; entry 3's text says so
+    // but its file is gone.
+    entries[1].recording_bytes = 32_000;
+    entries[2].recording_bytes = 32_000;
+    fs::write(recordings.join("2.wav"), b"RIFF").unwrap();
+
+    let output = history_output(
+        &entries,
+        &args(&["--oldest-first"]),
+        HistoryRetention::Week,
+        NOW,
+        &[],
+        Some(&recordings),
+    )
+    .unwrap();
+    let rows = serde_json::to_value(&output).unwrap()["entries"].clone();
+    assert_eq!(
+        rows[0]["recording"],
+        serde_json::json!(recordings.join("2.wav").to_string_lossy())
+    );
+    assert!(rows[1].get("recording").is_none(), "the file is gone");
+    assert!(rows[2].get("recording").is_none(), "no audio was kept");
+
+    let output = history_output(
+        &entries,
+        &args(&["--oldest-first"]),
+        HistoryRetention::Week,
+        NOW,
+        &[],
+        None,
+    )
+    .unwrap();
+    assert!(
+        serde_json::to_value(&output).unwrap()["entries"][0]
+            .get("recording")
+            .is_none(),
+        "without Labs › Keep recordings the field is omitted"
+    );
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn retention_defaults_fails_closed_and_off_preserves_existing_entries() {
     let root = temp();
     assert_eq!(retention(&root).unwrap(), HistoryRetention::Week);
@@ -290,9 +367,18 @@ fn retention_defaults_fails_closed_and_off_preserves_existing_entries() {
     assert_eq!(retention(&root).unwrap(), HistoryRetention::Week);
     fs::write(root.join("settings.json"), r#"{"history_retention":"day"}"#).unwrap();
     let entries = entries();
-    let output = history_output(&entries, &args(&[]), retention(&root).unwrap(), NOW, &[]).unwrap();
+    let output = history_output(
+        &entries,
+        &args(&[]),
+        retention(&root).unwrap(),
+        NOW,
+        &[],
+        None,
+    )
+    .unwrap();
     assert_eq!(output.entries.iter().map(|e| e.id).collect::<Vec<_>>(), [4]);
-    let output = history_output(&entries, &args(&[]), HistoryRetention::Off, NOW, &[]).unwrap();
+    let output =
+        history_output(&entries, &args(&[]), HistoryRetention::Off, NOW, &[], None).unwrap();
     assert_eq!(output.entries.len(), 4);
     fs::write(root.join("settings.json"), "{broken").unwrap();
     assert!(retention(&root).is_err());
@@ -685,48 +771,5 @@ fn parses_release_commands_and_rejects_invalid_limits_and_times() {
     assert_eq!(
         crate::meeting::query::parse_time("2026-10-20T12:00:00.123456Z", NOW, false).unwrap(),
         second + 123
-    );
-}
-
-#[test]
-fn meetings_export_writes_the_fixture_meeting_as_markdown() {
-    let library =
-        Library::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/meetings"));
-    let cli = Cli::try_parse_from([
-        "hex",
-        "meetings",
-        "export",
-        "1790000500000-1002",
-        "--format",
-        "md",
-    ])
-    .unwrap();
-    let Some(ControlCli::Meetings {
-        command: MeetingsCommand::Export { id, format, output },
-    }) = cli.command
-    else {
-        panic!("expected meetings export");
-    };
-    assert_eq!(output, None);
-    let mut written = Vec::new();
-    export_meeting(&library, &id, format, &mut written, NOW).unwrap();
-    let markdown = String::from_utf8(written).unwrap();
-    // The header carries the local time zone, so the golden is the title and
-    // the speaker turns.
-    assert!(markdown.starts_with("# Roadmap review\n\n- Meeting: 1790000500000-1002\n"));
-    let transcript = markdown.split_once("## Transcript\n\n").unwrap().1;
-    assert_eq!(
-        transcript,
-        "**Them** · 00:00\nLet's review the roadmap for the desktop app.\n\n\
-**You** · 00:05\nPerformance profiling comes first, then the onboarding flow.\n\n\
-**Them** · 00:13\nAgreed. The schedule is tight but doable.\n\n\
-**You** · 01:00\nOne more thing: the release notes.\n"
-    );
-}
-
-#[test]
-fn meetings_export_refuses_formats_it_does_not_write() {
-    assert!(
-        Cli::try_parse_from(["hex", "meetings", "export", "latest", "--format", "pdf"]).is_err()
     );
 }

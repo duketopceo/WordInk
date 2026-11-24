@@ -15,10 +15,11 @@ const LIST_SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys";
 const ENTRY_SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding";
 const BASE: &str = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/";
 /// Every entry Hex may write, by path name.
-const ENTRIES: [&str; 3] = [
-    "wordink-dictation",
-    "wordink-paste-last",
-    "wordink-annotate",
+const ENTRIES: [&str; 4] = [
+    "hex-dictation",
+    "hex-paste-last",
+    "hex-typed-text",
+    "hex-annotate",
 ];
 
 /// One custom shortcut: its path name, its name in GNOME Settings, the `hex`
@@ -116,22 +117,31 @@ fn entries(settings: &AppSettings) -> Vec<Entry> {
         }
     };
     add(
-        "wordink-dictation",
-        "WordInk: dictation",
+        "hex-dictation",
+        "Hex: dictation",
         "dictation toggle",
         Some(&settings.dictation_hotkey),
     );
     add(
-        "wordink-paste-last",
-        "WordInk: paste last dictation",
+        "hex-paste-last",
+        "Hex: paste last dictation",
         "paste-last",
         settings.paste_last_hotkey.as_ref(),
     );
+    // Only while Labs › Transform typed text is on and its key is bound.
+    if settings.labs.typed_text {
+        add(
+            "hex-typed-text",
+            "Hex: transform typed text",
+            "typed-text",
+            settings.active_typed_text_hotkey(),
+        );
+    }
     #[cfg(hex_capture)]
     if settings.capture.enabled {
         add(
-            "wordink-annotate",
-            "WordInk: annotate",
+            "hex-annotate",
+            "Hex: annotate",
             "annotate toggle",
             Some(&settings.capture.hotkey),
         );
@@ -270,11 +280,42 @@ mod tests {
         };
         let entries = entries(&settings);
         assert_eq!(entries[0].arguments, "dictation toggle");
-        assert!(entries.iter().all(|entry| entry.id != "wordink-paste-last"));
+        assert!(entries.iter().all(|entry| entry.id != "hex-paste-last"));
         assert_eq!(
             shell_word("/home/a/.local/bin/hex"),
             "/home/a/.local/bin/hex"
         );
         assert_eq!(shell_word("/home/a b/hex"), "'/home/a b/hex'");
+    }
+
+    /// Transform typed text gets a `hex typed-text` entry only while its lab
+    /// is on and its shortcut is bound; paste-last stays as it was.
+    #[test]
+    fn typed_text_joins_the_commands_only_while_its_lab_is_on() {
+        let mut settings = AppSettings {
+            dictation_hotkey: chord(HotkeyModifiers::control(), "space"),
+            paste_last_hotkey: Some(chord(HotkeyModifiers::control_option(), "v")),
+            typed_text_hotkey: Some(chord(HotkeyModifiers::control_option(), "t")),
+            ..AppSettings::default()
+        };
+        let off = entries(&settings);
+        assert!(off.iter().all(|entry| entry.id != "hex-typed-text"));
+        assert!(off.iter().any(|entry| entry.id == "hex-paste-last"));
+
+        settings.labs.typed_text = true;
+        let on = entries(&settings);
+        let typed = on
+            .iter()
+            .find(|entry| entry.id == "hex-typed-text")
+            .expect("typed text entry");
+        assert_eq!(typed.arguments, "typed-text");
+        assert_eq!(typed.accelerator, "<Control><Alt>t");
+
+        settings.typed_text_hotkey = None;
+        assert!(
+            entries(&settings)
+                .iter()
+                .all(|entry| entry.id != "hex-typed-text")
+        );
     }
 }

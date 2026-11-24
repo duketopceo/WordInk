@@ -106,7 +106,14 @@ pub(crate) fn pick(
         }
         Listing::Listed(devices) => devices,
     };
-    let label = |id: &str| devices.label(aliases, id);
+    let label = |id: &str| devices.label(id).map(|label| label.to_owned());
+    let display = |id: &str| {
+        aliases
+            .get(id)
+            .cloned()
+            .or_else(|| label(id))
+            .unwrap_or_else(|| id.to_owned())
+    };
     let is_listed = |id: &str| {
         devices.names.iter().any(|name| name == id)
             || devices.devices.iter().any(|device| device.id == id)
@@ -116,10 +123,10 @@ pub(crate) fn pick(
         .system_default
         .as_deref()
         .filter(|id| !crate::audio::hex_microphone::is_hex_virtual_device_name(id))
-        .map(label);
+        .and_then(label);
     let in_use = saved.filter(|saved| is_listed(saved) && off != Some(*saved));
     let shown = match (in_use, &default_name) {
-        (Some(saved), _) => Shown::Device(label(saved)),
+        (Some(saved), _) => Shown::Device(display(saved)),
         (None, Some(name)) => Shown::Device(name.clone()),
         (None, None) if devices.names.is_empty() => Shown::NoInput,
         (None, None) => Shown::Device(tr("System default").to_owned()),
@@ -139,7 +146,7 @@ pub(crate) fn pick(
             .iter()
             .any(|device| device.id == id && device.kind == DeviceKind::Bluetooth);
         MicChoice {
-            label: label(id),
+            label: label(id).unwrap_or_else(|| id.to_owned()),
             detail: if off == Some(id) {
                 Some(tr("off while the lid is closed").to_owned())
             } else {
@@ -151,7 +158,7 @@ pub(crate) fn pick(
     }));
     if let Some(saved) = saved.filter(|saved| !is_listed(saved)) {
         choices.push(MicChoice {
-            label: label(saved),
+            label: label(saved).unwrap_or_else(|| saved.to_owned()),
             detail: Some(tr("not connected").to_owned()),
             id: Some(saved.to_owned()),
             selected: true,

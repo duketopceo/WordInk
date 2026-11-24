@@ -156,7 +156,7 @@ jobs:
       - name: Clippy
         # Hex's own CI lints the same way; tests are linted on Linux, where
         # the suite runs in full.
-        run: cargo clippy --locked --bin wordink ${{ runner.os == 'Linux' && '--tests' || '' }} -- -D warnings
+        run: cargo clippy --locked --bin wordink --tests -- -D warnings
       - run: cargo build --locked --release
       # Split, because tests/keyboard_layout.rs has its own harness that
       # rejects libtest's --skip.
