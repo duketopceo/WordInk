@@ -14,7 +14,6 @@ This page lists themes, not tickets. "Done" means merged to `master`.
 
 ## Next
 
-- Make Parakeet v3 the installed local default (today it is Parakeet Unified).
 - Find the roughly 9 s of app overhead on Groq requests.
 - Pick the top three OpenRouter engines per use: dictation (Groq turbo, MAI-Transcribe 2, hosted Parakeet v3) and meetings (Nemotron 3.5, Voxtral Small 3, MAI-Transcribe 2).
 - Show Groq quota in the app.
@@ -48,7 +47,7 @@ This page lists themes, not tickets. "Done" means merged to `master`.
 |---|---|---|
 | Groq `whisper-large-v3-turbo` | Desktop app, `wordink-dictd`, gateway, web relay | Done. Default when a Groq key is set |
 | OpenRouter | Desktop app | Done. Audio-chat models and the transcription endpoint (29 models, including MAI-Transcribe 2 and Nemotron 3.5), with p50/p95 latency in Usage |
-| Parakeet (local, no key) | Desktop app | Done. v3 is recommended; the installed default is Parakeet Unified until the switch. GPU through Vulkan on Linux |
+| Parakeet (local, no key) | Desktop app | Done. v3 is the installed default; Parakeet Unified stays offered as the fastest English model. GPU through Vulkan on Linux |
 | OpenAI transcription, Deepgram | Gateway, web relay | Done; live-API check still to do |
 | Moonshine (in the browser, offline) | `@wordink/local` | Done |
 

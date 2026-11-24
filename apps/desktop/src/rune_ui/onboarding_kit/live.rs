@@ -259,10 +259,7 @@ fn english_language(selection: &TranscriptionSelection) -> bool {
 }
 
 fn english_selection() -> TranscriptionSelection {
-    TranscriptionSelection {
-        model: TranscriptionModelId::ParakeetUnifiedEnglish,
-        language: "en".into(),
-    }
+    transcription_models::recommended_selection("en")
 }
 
 /// The other selection the language capsule offers: the model recommended

@@ -175,7 +175,7 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │       it stays installed. No check; `macos_rune::quit_legacy_hex`
 ├── Setting up Hex -> speech model download starts at once  // setup.background-download
 │   ├── Model -> the selection recommended for the system's first preferred
-│   │            language (English -> Parakeet Unified English; e.g. French ->
+│   │            language (English -> Parakeet v3; e.g. French ->
 │   │            Parakeet v3, Japanese -> Whisper large-v3-turbo); when that
 │   │            language isn't English, the language capsule switches between
 │   │            English and its recommended model with one press, with no
