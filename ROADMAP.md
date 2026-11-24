@@ -20,8 +20,7 @@ This page lists themes, not tickets. "Done" means merged to `master`.
 - Show Groq quota in the app.
 - Larger chunks for cloud meeting transcription.
 - A Compare engines screen, building on `wordink compare`.
-- **SDK:** publish the web SDK and gateway to npm (the workflow exists; publishing is off until the `@wordink` scope is set up), document the desktop app's local API, and add a small `@wordink/desktop` client so other apps can ask the running WordInk to dictate or transcribe. No native library. Plan: `docs/plans/2026-11-03-1800-feat-sdk-and-omarchy-plugin-plan.md`.
-- **Omarchy bar plugin:** a WordInk mic icon in the Omarchy bar that shows state, toggles dictation on click, and opens a small panel (engine, mic picker, last dictations, weekly usage). Ships in the omarchy-plugins catalog, not inside the app. Same plan.
+- Publish the `@wordink/*` packages to npm — code ready; blocked on the owner's npmjs.com setup (`@wordink` org, trusted publishing for `release.yml`, then `NPM_PUBLISH_ENABLED=true`). Plan: `docs/plans/2026-11-03-1800-feat-sdk-and-omarchy-plugin-plan.md`.
 
 ## Later
 
@@ -56,7 +55,9 @@ This page lists themes, not tickets. "Done" means merged to `master`.
 
 - **Desktop app 1.0 line.** App merged (#111), terminal auto-paste (#126), usage stats (#123), vocabulary suggestions (#125), copy diagnostics and download counts (#132), Bluetooth earbuds and clean mic names (#134), shorter first run (#138), FLAC uploads and `wordink compare` (#143), developer-mode debug logs, coded errors and earbud reliability (#139), OpenRouter transcription engine and p50/p95 latency (#142), cross-OS installers and release workflow.
 - **Foundation.** Monorepo tooling, CI, docs site with live demo, open-source basics.
-- **Web SDK.** `@wordink/core`, `<wordink-mic>`, `useDictation`, the credential relay.
+- **Web SDK.** `@wordink/core`, `<wordink-mic>`, `useDictation`, the credential relay. Packaged for npm (LICENSE, install lines, changeset in #177).
+- **Local API and desktop client.** `local-api.md` documents the app's owner-only loopback API; `@wordink/desktop` is a typed Node client for it (`packages/desktop`).
+- **Omarchy bar plugin.** `io.github.duketopceo.wordink` in omarchy-plugins (state icon, click to dictate, engine/mic/usage panel); standalone repo `duketopceo/omarchy-wordink`.
 - **Gateway.** `wordink-gateway`: OpenAI-compatible endpoint, provider fallback, per-device tokens, runtime vocabulary.
 - **Python tooling.** `wordink` CLI and `wordink-mcp`; `wordink-dictd`.
 
