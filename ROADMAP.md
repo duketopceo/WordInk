@@ -27,7 +27,6 @@ This page lists themes, not tickets. "Done" means merged to `master`.
 
 - Signed macOS (notarization) and Windows (Authenticode) builds. Both need paid accounts.
 - Self-hosted release runners.
-- A lightweight iOS rebuild. The earlier app is preserved on branch `archive/ios-2026-11-03`.
 - Vocabulary generation during onboarding.
 - Live-API hardening for OpenAI and Deepgram in the web SDK; stronger local engines in the browser SDK.
 
@@ -38,7 +37,7 @@ This page lists themes, not tickets. "Done" means merged to `master`.
 | Linux x86_64, aarch64 (Wayland; glibc 2.39+, OpenSSL 3) | 1.0.0 | `install.sh` one-liner | ed25519-verified; self-updating |
 | macOS, Apple silicon | 1.0.0 | `install-macos.sh` one-liner (`WordInk.app` in `~/Applications`) | Unsigned, not notarized; updates are download-only |
 | Windows x64 | 1.0.0 | `install.ps1` one-liner (per-user) | Unsigned (SmartScreen warns); updates are download-only |
-| iOS | Paused | n/a | Preserved on `archive/ios-2026-11-03` |
+| iOS | Use [Hex on the App Store](https://apps.apple.com/us/app/hex-voice-dictation-keyboard/id6836837368) (separate app by Anomaly) | App Store | WordInk's own earlier app is preserved on `archive/ios-2026-11-03` |
 | Web | Separate product (`packages/*`) | `<wordink-mic>` and React; not on npm yet | n/a |
 
 `wordink-dictd` still works on Linux, Windows and macOS (`examples/*-dictation`).
