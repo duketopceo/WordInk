@@ -5,6 +5,10 @@ An offline speech engine for WordInk. [Moonshine tiny](https://huggingface.co/on
 Web Worker, on WebGPU when the browser has it and on WebAssembly otherwise. Once the model has loaded,
 dictation makes no network calls, and audio never leaves the device.
 
+```bash
+npm install @wordink/core @wordink/local
+```
+
 ```ts
 import { createDictation } from "@wordink/core";
 import { createLocalProvider } from "@wordink/local";
