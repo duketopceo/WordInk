@@ -5,6 +5,10 @@ small TypeScript host that captures the microphone (AudioWorklet), talks to the 
 reports state, levels, interim and final text. Most apps use `<wordink-mic>` (`@wordink/web`) or the
 React hook instead; use this package directly to build your own UI.
 
+```bash
+npm install @wordink/core
+```
+
 ```ts
 import { createDictation } from "@wordink/core";
 
