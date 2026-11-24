@@ -29,6 +29,24 @@ pub const DEFAULT_MODEL: &str = "google/gemini-2.5-flash-lite";
 /// 15.3% for Groq's turbo, at $0.10 per audio hour).
 pub const MEETING_MODEL: &str = "microsoft/mai-transcribe-2";
 
+/// Dictation's best three OpenRouter models, in order: the picks WordInk's
+/// engine comparison made for dictation (Groq's turbo, MAI-Transcribe 2,
+/// hosted Parakeet v3). The model list leads with them.
+pub const DICTATION_PICKS: [&str; 3] = [
+    "openai/whisper-large-v3-turbo",
+    "microsoft/mai-transcribe-2",
+    "nvidia/parakeet-tdt-0.6b-v3",
+];
+
+/// A meeting's best three, in order (Nemotron 3.5, Voxtral Small 3,
+/// MAI-Transcribe 2). The meeting model list leads with the ones the
+/// transcription endpoint has.
+pub const MEETING_PICKS: [&str; 3] = [
+    "nvidia/nemotron-3.5-transcribe",
+    "mistralai/voxtral-small-transcribe-3-0",
+    "microsoft/mai-transcribe-2",
+];
+
 /// What the model is told. Fixed: the transcript is the whole reply.
 pub const INSTRUCTION: &str = "Transcribe this audio exactly as spoken. Reply with only the transcript text: no quotes, no commentary, no translation. If there is no speech, reply with nothing.";
 
