@@ -1048,8 +1048,9 @@ fn receipt_channel(root: &Path) -> Option<String> {
         method: String,
         root: PathBuf,
     }
-    let receipt: Receipt =
-        serde_json::from_slice(&std::fs::read(root.join("install.json")).ok()?).ok()?;
+    let bytes = std::fs::read(root.join("install.json")).ok()?;
+    let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes);
+    let receipt: Receipt = serde_json::from_slice(bytes).ok()?;
     let canonical = |path: &Path| path.canonicalize().ok();
     (receipt.app == APP
         && receipt.artifact == ARTIFACT

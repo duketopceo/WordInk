@@ -30,7 +30,7 @@ use crate::desktop::events::{
 use crate::transcription::local_transcriber::LocalTranscriber;
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection, validate};
 
-const DEFAULT_MODEL: &str = "parakeet_v3";
+const DEFAULT_MODEL: &str = "parakeet_unified_en";
 const DEFAULT_LANGUAGE: &str = "en";
 
 #[derive(Parser)]
