@@ -6,7 +6,7 @@ topic: sdk-and-omarchy-plugin
 artifact_contract: ce-unified-plan/v1
 product_contract_source: ce-plan-bootstrap
 execution: code
-status: planned
+status: in-progress
 ---
 
 # WordInk SDK and Omarchy bar plugin - Plan
