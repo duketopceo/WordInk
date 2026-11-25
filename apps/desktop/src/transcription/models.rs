@@ -32,9 +32,9 @@ pub use super::model_benchmarks::{BenchmarkRecord, benchmark};
 /// keeps the default for it without rewriting the file (#744).
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum TranscriptionModelId {
-    #[default]
     ParakeetUnifiedEnglish,
     ParakeetV2,
+    #[default]
     ParakeetV3,
     ParakeetV3Ane,
     Orukeet,
@@ -687,7 +687,8 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
     let choices: &[(TranscriptionModelId, Recommendation)] = match language {
         AUTO_LANGUAGE => &[(WhisperLargeV3Turbo, Recommended), (Qwen3Asr06B, Fastest)],
         "en" => &[
-            (ParakeetUnifiedEnglish, Recommended),
+            (ParakeetV3, Recommended),
+            (ParakeetUnifiedEnglish, Fastest),
             (CohereTranscribe, MostAccurate),
             (WhisperLargeV3Turbo, Vocabulary),
         ],
@@ -1297,7 +1298,7 @@ fn verification_receipt_path(model_path: &Path) -> PathBuf {
 
 /// The best starting selection for a dictation language: its first
 /// recommended runtime model. Unknown languages fall back to English, so an
-/// English system starts with Parakeet Unified English.
+/// English system starts with Parakeet v3.
 pub fn recommended_selection(language: &str) -> TranscriptionSelection {
     let language = LANGUAGES
         .iter()
@@ -1599,13 +1600,15 @@ mod tests {
     #[test]
     fn recommendations_are_language_specific() {
         let english = choices_for_runtime("en");
+        assert_eq!(english[0].model.id, TranscriptionModelId::ParakeetV3);
+        assert_eq!(english[0].recommendation, Recommendation::Recommended);
         assert_eq!(
-            english[0].model.id,
+            english[1].model.id,
             TranscriptionModelId::ParakeetUnifiedEnglish
         );
-        assert_eq!(english[0].recommendation, Recommendation::Recommended);
-        assert_eq!(english[1].model.id, TranscriptionModelId::CohereTranscribe);
-        assert_eq!(english[1].recommendation, Recommendation::MostAccurate);
+        assert_eq!(english[1].recommendation, Recommendation::Fastest);
+        assert_eq!(english[2].model.id, TranscriptionModelId::CohereTranscribe);
+        assert_eq!(english[2].recommendation, Recommendation::MostAccurate);
         let mandarin = choices_for_runtime("zh");
         assert_eq!(mandarin[0].model.id, TranscriptionModelId::Qwen3Asr06B);
         assert_eq!(mandarin[1].model.id, TranscriptionModelId::SenseVoiceSmall);

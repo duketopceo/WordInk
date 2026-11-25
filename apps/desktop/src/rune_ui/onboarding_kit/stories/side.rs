@@ -163,7 +163,7 @@ pub(super) fn side(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
     let note = if s.interactive_try() {
         "On Your turn, hold ⌥ and speak into your Mac's mic — your running Hex pastes your real words into the card."
     } else {
-        "English: Parakeet Unified English, 731 MB, streams. French: Parakeet v3, 740 MB."
+        "Parakeet v3, 740 MB, covers English, French and 23 more languages."
     };
     out.child(
         text(note)
