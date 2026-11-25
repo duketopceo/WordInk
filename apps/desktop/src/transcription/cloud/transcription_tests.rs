@@ -546,7 +546,7 @@ fn the_endpoint_of_a_transcription_model_is_its_own_not_chat() {
     let ids: Vec<_> = transcription_models().into_iter().map(|m| m.id).collect();
     assert_eq!(
         ids,
-        ["assemblyai/universal-3-6-pro", "google/gemini-3.5-transcribe", MAI]
+        [MAI, "assemblyai/universal-3-6-pro", "google/gemini-3.5-transcribe"]
     );
 }
 

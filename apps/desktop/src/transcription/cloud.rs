@@ -360,11 +360,27 @@ fn endpoint_for(provider: Provider, gateway_url: Option<&str>) -> Result<String,
     }
 }
 
+/// The `picks` that are in `models`, first, then the rest in their own
+/// order: how a model list leads with its use's top three.
+fn picks_first(models: Vec<openrouter::Model>, picks: &[&'static str]) -> Vec<openrouter::Model> {
+    let mut ordered: Vec<openrouter::Model> = picks
+        .iter()
+        .filter_map(|pick| models.iter().find(|model| model.id == *pick).cloned())
+        .collect();
+    ordered.extend(
+        models
+            .into_iter()
+            .filter(|model| !picks.contains(&model.id.as_str())),
+    );
+    ordered
+}
+
 /// The models to offer for `provider`: its fixed list, or OpenRouter's
-/// audio-input catalogue (cache or bundled; never the network).
+/// audio-input catalogue (cache or bundled; never the network), leading
+/// with dictation's picks.
 pub fn models_for(provider: Provider) -> Vec<(String, String)> {
     match provider {
-        Provider::OpenRouter => openrouter_models()
+        Provider::OpenRouter => picks_first(openrouter_models(), &openrouter::DICTATION_PICKS)
             .into_iter()
             .map(|model| (model.id, model.name))
             .collect(),
@@ -377,12 +393,15 @@ pub fn models_for(provider: Provider) -> Vec<(String, String)> {
 }
 
 /// OpenRouter's transcription models (the dedicated `/audio/transcriptions`
-/// ones), cache or bundled; never the network.
+/// ones), cache or bundled; never the network. A meeting's picks lead.
 pub fn transcription_models() -> Vec<openrouter::Model> {
-    openrouter_models()
-        .into_iter()
-        .filter(|model| model.kind == openrouter::Kind::Transcription)
-        .collect()
+    picks_first(
+        openrouter_models()
+            .into_iter()
+            .filter(|model| model.kind == openrouter::Kind::Transcription)
+            .collect(),
+        &openrouter::MEETING_PICKS,
+    )
 }
 
 /// The audio-hour price of `provider`'s `model`: OpenRouter's catalogue
@@ -3045,6 +3064,45 @@ mod tests {
                 .any(|(id, _)| id == openrouter::DEFAULT_MODEL)
         );
         assert_eq!(models_for(Provider::OpenAi).len(), 2);
+    }
+
+    #[test]
+    fn the_per_use_picks_lead_their_openrouter_model_lists() {
+        let dictation = models_for(Provider::OpenRouter);
+        let picks = openrouter::DICTATION_PICKS
+            .iter()
+            .filter(|pick| dictation.iter().any(|(id, _)| id == *pick))
+            .count();
+        let leading: Vec<&str> = dictation
+            .iter()
+            .take(picks)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(
+            leading,
+            openrouter::DICTATION_PICKS[..picks].to_vec(),
+            "dictation picks lead the dictation model list in order"
+        );
+        assert!(picks >= 3, "the bundled catalogue has every dictation pick");
+
+        let meeting: Vec<String> = transcription_models()
+            .into_iter()
+            .map(|model| model.id)
+            .collect();
+        let present: Vec<&str> = openrouter::MEETING_PICKS
+            .iter()
+            .filter(|pick| meeting.iter().any(|id| id == *pick))
+            .copied()
+            .collect();
+        assert_eq!(
+            meeting[..present.len()],
+            present
+                .iter()
+                .map(|pick| pick.to_string())
+                .collect::<Vec<_>>()[..],
+            "meeting picks lead the meeting model list in order"
+        );
+        assert!(present.contains(&openrouter::MEETING_MODEL));
     }
 
     #[test]
