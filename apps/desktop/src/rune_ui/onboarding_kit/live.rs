@@ -33,9 +33,7 @@ use super::stories::{FRAME, Flow, Onboard, Step, advance_to};
 use crate::desktop::onboarding::{
     Input, ItemStatus, Practice, SetupItem, SetupStatus, Step as TourStep,
 };
-use crate::transcription::models::{
-    self as transcription_models, TranscriptionModelId, TranscriptionSelection,
-};
+use crate::transcription::models::{self as transcription_models, TranscriptionSelection};
 
 /// How often the first run looks at the model on disk and the permissions.
 const CHECK_EVERY: f64 = 0.25;
@@ -917,6 +915,7 @@ pub(super) fn hint(p: Paint, live: &Live) -> Option<El> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcription::models::TranscriptionModelId;
     use std::time::{Duration, Instant};
 
     fn selection(model: TranscriptionModelId, language: &str) -> TranscriptionSelection {
