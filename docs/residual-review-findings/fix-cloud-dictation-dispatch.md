@@ -8,7 +8,19 @@ Reviewer coverage: correctness, testing, standards/plan (partial — reviewer di
 
 - minor — `apps/desktop/src/dictation/audio.rs:1098` — A macOS `/dictations` service capture never calls `engine.begin()`, so a stranded `routed` decision from a discarded hotkey capture can be consumed by the next service finish (audio uploaded per a discarded capture's decision). Suggested: clear `routed` on capture cancel/discard, or key the decision to a capture generation. Pre-sync parity; plan Open Questions.
 - minor — `apps/desktop/src/linux/dictation.rs:1195` (+ `windows/dictation.rs:903`, `audio.rs:902`) — `begin_stream` retries `engine.begin()` per audio chunk; under a cloud route or non-streaming model `begin()` returns None every chunk, so `routed` is overwritten per chunk and the finish uses the last chunk's decision rather than recording-start's. Drift vs the documented "decided once at begin" invariant; pre-sync retry shape.
-- minor — `apps/desktop/src/transcription/engine.rs:541-560` — `PendingTranscript::wait` retries on ANY local `Err`, including abandonment and timeout: a cancelled/timed-out dictation still uploads to the cloud provider on the output thread. Accepted parity (plan).
+- minor — `apps/desktop/src/transcription/engine.rs:541-560` — `PendingTranscript::wait` retries on ANY local `Err`, including abandonment and timeout: a cancelled/timed-out dictation still uploads to the cloud provider on the output thread. Accepted parity (plan). Adversarial reviewer elevated this to major (consent surface): cancel reads to users as "send nothing"; a small error enum or cancel-class filter is the fix.
+
+## Adversarial-review additions (in-process, post-commit)
+
+- minor — `engine.rs:831` — `streams()` consults `decide()`, so a resolved cloud dictation route suppresses `/streams` yielding streams even with a loaded streaming-capable local model; pushed-audio windows degrade to `foreground`. Route-suppression arguably belongs only in `begin()`. Behavior change → separate PR.
+- minor — `app_settings.rs:815-825` — `set_clip_retention` (`sweep_failed_clips`) and `refresh_catalogue_in_background` spawn per-settings-save threads with no dedupe flag, unlike `refresh_key_in_background`'s `refreshing` AtomicBool. Bounded work; benign races on `remove_file`.
+- minor — `engine.rs:876` — `finish_cloud` shares `self.stalled`; a >180 s cloud hang can poison the worker-wedged flag while the local worker is healthy. Rare (REQUEST_TIMEOUT 60 s + 1 retry < JOB_DEADLINE 180 s + clip allowance).
+- minor — `linux/dictation.rs:335` — `refresh_key()` blocks the listener worker on every restart (≤ ~10 s worst, bounded by KEYRING_BACKOFF), and `warm_providers()` always seeds Groq even for pure-local users.
+- minor — `linux/app.rs` `skips_model_install_check` reads a cold key cache at enable-time, so `Auto` + keyring key can transiently show "Model required" until the background refresh lands.
+- minor — fallback runs synchronously on the output worker (`PendingTranscript::wait`); a ~120 s worst-case fallback stalls the ordered output pipeline.
+- nit — `stream_bench`/`HEX_STREAM_WAVS` bench funnel through `begin()`/`finish`: a bench under `Auto` + Groq key uploads the wav and measures cloud latency. Parity.
+- nit — `served` is only populated on the offline path; streamed clips report `served: None` so `attribute()` misattributes GPU-served streamed dictations. History accuracy gap (Linux ANE).
+- nit — `finish_routed` reads the finish-time `language_hint`/`selection`, not begin-time — a mid-recording language change pairs the new hint with the old route.
 
 ## Nits (report-only)
 
