@@ -437,8 +437,23 @@ type Held = Arc<Mutex<Option<crate::transcription::models::TranscriptionSelectio
 
 /// A cloud transcription of one clip: its text and usage, or the text for
 /// the pill.
-pub(crate) type CloudRun =
+type CloudRun =
     Box<dyn FnOnce(&[f32]) -> Result<(String, crate::history::UsageRecord), String> + Send>;
+
+/// Maps a cloud run's outcome into the transcript it returns: the usage and
+/// the cloud source mark it either way.
+fn cloud_transcribed(
+    started: Instant,
+    result: Result<(String, crate::history::UsageRecord), String>,
+) -> Result<Transcribed, String> {
+    result.map(|(text, usage)| Transcribed {
+        text: text.trim().to_string(),
+        source: Source::Cloud,
+        finish_ms: started.elapsed().as_millis() as u64,
+        usage: Some(usage),
+        served: None,
+    })
+}
 
 /// A live stream for one capture. Feed it the capture's 16 kHz audio in order,
 /// then either [`TranscriptionEngine::finish`] or drop it to cancel.
@@ -536,13 +551,7 @@ impl PendingTranscript {
             "local transcription failed; retrying once on the cloud fallback"
         );
         let started = Instant::now();
-        let result = (fallback.run)(&fallback.clip).map(|(text, usage)| Transcribed {
-            text: text.trim().to_string(),
-            source: Source::Cloud,
-            finish_ms: started.elapsed().as_millis() as u64,
-            usage: Some(usage),
-            served: None,
-        });
+        let result = cloud_transcribed(started, (fallback.run)(&fallback.clip));
         tracing::info!(
             provider = fallback.provider.id(),
             ok = result.is_ok(),
@@ -764,7 +773,7 @@ impl TranscriptionEngine {
 
     /// [`Self::begin`] for a dictation routed to `cloud`: a cloud engine
     /// takes the whole clip, so it never streams.
-    pub(crate) fn begin_routed(
+    fn begin_routed(
         &self,
         cloud: Option<crate::transcription::cloud::Provider>,
     ) -> Option<LiveStream> {
@@ -830,7 +839,7 @@ impl TranscriptionEngine {
     /// Finishes a capture on a cloud provider: the clip goes whole to `run`
     /// on its own thread, never to the model, and the transcript carries its
     /// usage. The pill gets `run`'s error text as it is.
-    pub(crate) fn finish_cloud(
+    fn finish_cloud(
         &self,
         provider: crate::transcription::cloud::Provider,
         clip: Vec<f32>,
@@ -845,13 +854,7 @@ impl TranscriptionEngine {
             .spawn(move || {
                 let _ = reply.send(Reply::Started);
                 let started = Instant::now();
-                let result = run(&clip).map(|(text, usage)| Transcribed {
-                    text: text.trim().to_string(),
-                    source: Source::Cloud,
-                    finish_ms: started.elapsed().as_millis() as u64,
-                    usage: Some(usage),
-                    served: None,
-                });
+                let result = cloud_transcribed(started, run(&clip));
                 if thread_cancel.is_cancelled() {
                     // The waiter gave up; its answer is no longer wanted.
                     return;
@@ -917,24 +920,20 @@ impl TranscriptionEngine {
         cloud: CloudRunner,
     ) -> Result<PendingTranscript> {
         let routed = self.take_route();
+        let selection = crate::app_settings::transcription_selection().1;
         crate::debug_log::dlog!(
             Info,
             "engine.route",
             "transcription route chosen",
             route = routed.map_or("local", |provider| provider.id()),
-            local_model = routed.is_none().then(|| format!(
-                "{:?}",
-                crate::app_settings::transcription_selection().1.model
-            )),
+            local_model = routed.is_none().then(|| format!("{:?}", selection.model)),
             streamed = stream.is_some(),
             samples = clip.len(),
         );
         if let Some(provider) = routed {
             // A stream opened before the engine changed ends unused.
             drop(stream);
-            let language = crate::transcription::cloud::language_hint(
-                &crate::app_settings::transcription_selection().1.language,
-            );
+            let language = crate::transcription::cloud::language_hint(&selection.language);
             return self.finish_cloud(
                 provider,
                 clip,
@@ -944,9 +943,7 @@ impl TranscriptionEngine {
         // Opt-in: a local failure retries this clip once on the configured
         // provider. Never set when the setting is off or no key resolves.
         let fallback = crate::transcription::cloud::fallback_provider().map(|provider| {
-            let language = crate::transcription::cloud::language_hint(
-                &crate::app_settings::transcription_selection().1.language,
-            );
+            let language = crate::transcription::cloud::language_hint(&selection.language);
             CloudFallback {
                 provider,
                 clip: clip.clone(),
@@ -1218,6 +1215,18 @@ impl Drop for TranscriptionEngine {
         } else {
             tracing::error!("transcription engine did not stop in time; leaving it running");
         }
+    }
+}
+
+/// The model that answered the last clip, when it may not be the one the
+/// engine holds (Linux: the Neural Engine model's GPU fallback).
+fn take_served(model: &mut Model) -> Option<ServedBy> {
+    #[cfg(target_os = "linux")]
+    return model.take_served();
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = model;
+        None
     }
 }
 
@@ -1608,7 +1617,7 @@ impl Worker {
             source,
             finish_ms: started.elapsed().as_millis() as u64,
             usage: None,
-            served: None,
+            served: take_served(model),
         });
         // An offline run may switch the model (macOS activates a selection).
         self.publish_streams();
@@ -1667,6 +1676,31 @@ mod tests {
         assert!(engine.begin_routed(Some(Provider::Groq)).is_none());
         assert!(engine.streams_routed(None));
         assert!(!engine.streams_routed(Some(Provider::Groq)));
+    }
+
+    #[test]
+    fn a_routed_capture_finishes_on_the_cloud_provider() {
+        use crate::transcription::cloud::{Provider, force_route};
+        let (engine, commands) = TranscriptionEngine::for_test();
+        force_route(Some(Provider::Groq));
+        assert!(engine.begin().is_none(), "a cloud route opens no stream");
+        let done = engine
+            .finish_routed(
+                None,
+                vec![0.0; 16_000],
+                Box::new(|_, _| Ok(String::new())),
+                fake_cloud,
+            )
+            .unwrap()
+            .wait()
+            .unwrap();
+        assert_eq!(done.text, "from the cloud");
+        assert_eq!(done.source, Source::Cloud);
+        assert!(done.usage.is_some());
+        assert!(
+            commands.try_recv().is_err(),
+            "the model's queue saw nothing"
+        );
     }
 
     #[test]

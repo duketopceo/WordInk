@@ -259,16 +259,7 @@ impl DictationOutput {
                 recording,
             );
             // A cloud engine's own record, else the free local one.
-            draft.usage = Some(usage.unwrap_or_else(|| {
-                crate::history::UsageRecord::local(
-                    crate::app_settings::transcription_selection()
-                        .1
-                        .model
-                        .as_str(),
-                    audio_ms,
-                    &draft.raw_text,
-                )
-            }));
+            draft.usage = crate::history::usage_or_local(usage, audio_ms, &draft.raw_text);
             if printed {
                 draft.kind = crate::history::HistoryKind::Printed;
             } else if flavour.raw() {
@@ -623,7 +614,7 @@ pub(crate) fn run(
                 register |= shortcuts(&next) != shortcuts(&settings);
                 // A cloud engine loads no model; a listener that started on
                 // one loads the local model when settings switch to it.
-                if crate::transcription::cloud::route_with(cloud_only).is_none() || !cloud_only {
+                if !cloud_only || crate::transcription::cloud::route_with(true).is_none() {
                     model.want(&next.transcription);
                 }
                 toggle = next.shortcut_mode == crate::dictation::ShortcutMode::Toggle;

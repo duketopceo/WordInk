@@ -1101,13 +1101,8 @@ fn process_dictation_job(
                 job.recording.take(),
             );
             // A cloud engine's own record, else the free local one.
-            draft.usage = Some(usage.unwrap_or_else(|| {
-                crate::history::UsageRecord::local(
-                    crate::app_settings::transcription_selection().1.model.as_str(),
-                    job.audio_ms,
-                    &draft.raw_text,
-                )
-            }));
+            draft.usage =
+                crate::history::usage_or_local(usage, job.audio_ms, &draft.raw_text);
             if printed {
                 draft.kind = crate::history::HistoryKind::Printed;
             } else if job.flavour.raw() {
