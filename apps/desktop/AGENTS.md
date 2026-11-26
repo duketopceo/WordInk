@@ -1819,6 +1819,34 @@ Windows uses `%APPDATA%\hex`, with logs and models in `%LOCALAPPDATA%\hex`
 `~/.local/share/hex` (or under `XDG_DATA_HOME`). Hex keeps no compatibility with earlier `voice-control`
 folders or per-OS settings files.
 
+## WordInk Deltas Over Hex (Sync Tripwire)
+
+WordInk is a Hex fork. Periodic "Sync desktop to Hex" commits overwrite files
+upstream owns — and silently dropped the dictation→cloud dispatch once (#176).
+Before accepting a sync, verify these WordInk-only seams survived:
+
+- `transcription/cloud.rs`, `transcription/cloud/`, `transcription/recover.rs`:
+  wholly WordInk-owned; a sync should never touch them.
+- `app_settings.rs::apply_runtime`: must still call `cloud::set_engine`,
+  `set_local_fallback`, `set_meeting_engine`, `set_clip_retention`.
+- `transcription/engine.rs`: `cloud_only`, `routed`, `decide`/`take_route`,
+  `begin_routed`/`streams_routed`, `finish_routed`/`finish_cloud`,
+  `CloudFallback`/`CloudRun`/`CloudRunner`, `PendingTranscript.fallback`,
+  `start_without_model`, the `NO_LOCAL_MODEL` check in `run_offline`, and the
+  cloud-routing tests. Upstream `finish`/`finish_with` must funnel through
+  `finish_routed`.
+- `linux/dictation.rs`: `cloud::refresh_key()` + `cloud_only` start
+  (`start_without_model` ahead of `start_parked`), `ModelSwap::unloaded()`,
+  the `route_with(cloud_only)` gate on `model.want`, `attribute()` and
+  `draft.usage`.
+- `linux/app.rs`: `skips_model_install_check` on the "Model required" gate.
+- `windows/dictation.rs`: the `usage` capture + `draft.usage` record.
+- Shared `Source::Cloud`, `Transcribed.usage`, `served`, `UsageRecord` fields;
+  the `wordink keys|transcribe|meeting|compare|usage` CLI surface; Groq/
+  OpenRouter settings and the onboarding engine picker; `failed-dictations`
+  recovery. After a sync, grep the diff for these names disappearing from
+  files upstream also owns.
+
 ## Future Direction
 
 See `ROADMAP.md`. Do not add hypothetical seams for roadmap items. Introduce a

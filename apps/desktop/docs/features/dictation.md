@@ -308,6 +308,53 @@ does not prove the physical dictation shortcut; see the [feature index](README.m
 
 ## Sub-features
 
+### Cloud Engine
+
+Settings › Speech engine picks where each dictation transcribes: a local
+model, or a cloud provider (Groq `whisper-large-v3-turbo`, or an OpenRouter
+model). The engine decides once per capture, when the recording begins; the
+finish that follows uses the same decision.
+
+```ts
+Capture begins -> route decision (cloud::route_with)
+  ├── Auto (default) -> Cloud when that provider's key resolves, else local
+  │   // Auto means: any resolvable key sends dictation audio to that provider.
+  │   // A key set for meetings or the local fallback also routes dictation.
+  ├── Cloud -> That provider when its key resolves, else local
+  └── Local -> Always local
+  Cloud route -> No live stream opens (a cloud provider takes the whole clip);
+    release sends the complete 16 kHz clip over HTTPS and the transcript is
+    marked source=cloud with the provider's usage record
+  Local route -> The usual stream-or-offline finish; if the local run fails
+    and Labs › Cloud fallback is on with a resolvable key, the clip retries
+    once on that provider
+```
+
+Linux can dictate before any model is downloaded: when the listener starts
+with no prepared transcriber and a route resolves, the engine starts
+model-less and every dictation runs on the provider. The "Model required"
+gate skips the install prompt only when a route resolves and neither meetings
+nor captures are on — both still need the local model. Switching the engine
+to Local while a cloud-only listener runs loads the model in place.
+
+Consent boundary: under Auto, a resolvable key sends every dictation's audio
+to that provider — including a key set only for meetings or the local
+fallback. Choose Local to keep audio on the device. Keys live in the OS
+keyring (or `WORDINK_*_API_KEY` environment variables); `wordink keys status`
+shows which resolve.
+
+Checks: `a_capture_finishes_on_the_route_its_begin_chose`,
+`a_cloud_routed_capture_opens_no_stream_even_when_the_model_streams`,
+`a_cloud_finish_returns_the_text_and_usage_without_touching_the_model`,
+`a_failed_cloud_finish_carries_the_pill_text`,
+`a_local_failure_retries_once_on_the_cloud_when_on_with_a_key`,
+`a_local_failure_makes_no_cloud_call_while_the_fallback_is_off`,
+`a_local_failure_without_a_key_surfaces_the_error_and_sends_nothing`, and
+`a_failed_cloud_retry_surfaces_the_local_error` in transcription/engine.rs;
+(Linux) `a_model_less_engine_says_no_local_model_instead_of_a_reload_failure`
+in transcription/engine.rs and `only_dictation_skips_the_model_install_prompt`
+in linux/app.rs. All use a fake cloud runner; no live provider call is made.
+
 ### Dictate Without Processing
 
 A second, optional dictation shortcut (issue 451, suggested by @ksajan). It
