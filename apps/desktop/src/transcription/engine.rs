@@ -514,8 +514,9 @@ pub struct PendingTranscript {
     /// How long the job may run once started: its allowance plus the clip's.
     job: Duration,
     stream_finish: Duration,
-    /// The opt-in cloud retry for a local dictation that fails.
-    fallback: Option<CloudFallback>,
+    /// The opt-in cloud retry for a local dictation that fails. Boxed so
+    /// `PendingTranscript` stays small for the never-configured majority.
+    fallback: Option<Box<CloudFallback>>,
 }
 
 /// One cloud retry of the same clip, held for a local dictation. Present only
@@ -944,11 +945,11 @@ impl TranscriptionEngine {
         // provider. Never set when the setting is off or no key resolves.
         let fallback = crate::transcription::cloud::fallback_provider().map(|provider| {
             let language = crate::transcription::cloud::language_hint(&selection.language);
-            CloudFallback {
+            Box::new(CloudFallback {
                 provider,
                 clip: clip.clone(),
                 run: Box::new(move |samples| cloud(provider, samples, language.as_deref())),
-            }
+            })
         });
         let (stream, stream_cancel) = match stream {
             Some(mut stream) => {
