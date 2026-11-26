@@ -317,10 +317,9 @@ finish that follows uses the same decision.
 
 ```ts
 Capture begins -> route decision (cloud::route_with)
-  ├── Auto (default) -> Cloud when that provider's key resolves, else local
-  │   // Auto means: any resolvable key sends dictation audio to that provider.
-  │   // A key set for meetings or the local fallback also routes dictation.
-  ├── Cloud -> That provider when its key resolves, else local
+  ├── Auto (default) -> Groq when a Groq key resolves, else local
+  ├── Cloud -> Always that provider; a missing key fails the dictation
+  │   // with the provider's key error, it does not fall back to local
   └── Local -> Always local
   Cloud route -> No live stream opens (a cloud provider takes the whole clip);
     release sends the complete 16 kHz clip over HTTPS and the transcript is
@@ -337,9 +336,10 @@ gate skips the install prompt only when a route resolves and neither meetings
 nor captures are on — both still need the local model. Switching the engine
 to Local while a cloud-only listener runs loads the model in place.
 
-Consent boundary: under Auto, a resolvable key sends every dictation's audio
-to that provider — including a key set only for meetings or the local
-fallback. Choose Local to keep audio on the device. Keys live in the OS
+Consent boundary: under Auto, a resolvable Groq key sends every dictation's
+audio to Groq. Choose Local and keep Labs › Cloud fallback off to keep audio
+on the device — a configured fallback still retries a failed local run on its
+provider. Keys live in the OS
 keyring (or `WORDINK_*_API_KEY` environment variables); `wordink keys status`
 shows which resolve.
 
