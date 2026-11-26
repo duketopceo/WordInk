@@ -746,7 +746,19 @@ impl LinuxDesktopHost {
             return;
         }
         let model = crate::transcription::models::definition(self.settings.transcription.model);
-        if !crate::transcription::models::is_installed(model, &self.settings.transcription.language)
+        // Dictation alone can run with no local model, on a cloud engine.
+        // Meetings and captures transcribe on the listener's engine, so while
+        // either is on, the person is still asked to install a model.
+        let model_free = skips_model_install_check(
+            crate::transcription::cloud::route().is_some(),
+            self.settings.meetings.enabled,
+            self.settings.capture.enabled,
+        );
+        if !model_free
+            && !crate::transcription::models::is_installed(
+                model,
+                &self.settings.transcription.language,
+            )
         {
             self.status = "Model required".into();
             return;
@@ -1474,6 +1486,10 @@ impl LinuxDesktopHost {
     }
 }
 
+fn skips_model_install_check(dictation_on_cloud: bool, meetings: bool, captures: bool) -> bool {
+    dictation_on_cloud && !meetings && !captures
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1630,6 +1646,20 @@ mod tests {
         assert!(host.listen_when_ready);
         assert_eq!(host.status, "Model required");
         assert!(!host.is_running());
+    }
+
+    #[test]
+    fn only_dictation_skips_the_model_install_prompt() {
+        assert!(skips_model_install_check(true, false, false));
+        assert!(
+            !skips_model_install_check(true, true, false),
+            "meetings need a model"
+        );
+        assert!(
+            !skips_model_install_check(true, false, true),
+            "captures need a model"
+        );
+        assert!(!skips_model_install_check(false, false, false));
     }
 
     #[test]
