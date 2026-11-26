@@ -812,6 +812,17 @@ impl AppSettings {
         INDICATOR_POSITION.store(self.indicator_position as u8, Ordering::Relaxed);
         #[cfg(not(target_os = "macos"))]
         crate::transcription::local_transcriber::set_device(self.transcription_device);
+        crate::transcription::cloud::set_engine(
+            self.engine,
+            self.engine_model.as_deref(),
+            self.gateway_url.as_deref(),
+        );
+        crate::transcription::cloud::set_local_fallback(self.local_cloud_fallback);
+        crate::transcription::cloud::set_meeting_engine(
+            self.meeting_engine,
+            self.meeting_engine_model.as_deref(),
+        );
+        crate::transcription::cloud::set_clip_retention(self.history_retention);
         RECORDING_DUCK_VOLUME.store(self.recording_duck_volume.to_bits(), Ordering::Relaxed);
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);
         PAUSE_BROWSER_MEDIA.store(self.pause_browser_media, Ordering::Relaxed);

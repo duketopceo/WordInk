@@ -134,6 +134,26 @@ impl UsageRecord {
     }
 }
 
+/// The engine's own usage record, else a free local one named for the saved
+/// selection's model — what history stores for a dictation.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) fn usage_or_local(
+    usage: Option<UsageRecord>,
+    audio_ms: u64,
+    text: &str,
+) -> Option<UsageRecord> {
+    Some(usage.unwrap_or_else(|| {
+        UsageRecord::local(
+            crate::app_settings::transcription_selection()
+                .1
+                .model
+                .as_str(),
+            audio_ms,
+            text,
+        )
+    }))
+}
+
 /// One retained successful result.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct HistoryEntry {

@@ -205,6 +205,7 @@ impl DictationOutput {
         audio_ms: u64,
         inference_ms: u64,
         started: Instant,
+        usage: Option<crate::history::UsageRecord>,
         recording: Option<crate::history::Recording>,
         typing: Option<crate::linux::live_typing::Session>,
     ) -> Result<String> {
@@ -257,6 +258,8 @@ impl DictationOutput {
                 started.elapsed().as_millis() as u64,
                 recording,
             );
+            // A cloud engine's own record, else the free local one.
+            draft.usage = crate::history::usage_or_local(usage, audio_ms, &draft.raw_text);
             if printed {
                 draft.kind = crate::history::HistoryKind::Printed;
             } else if flavour.raw() {
@@ -319,13 +322,19 @@ pub(crate) fn run(
     updates: mpsc::Receiver<ListenerUpdate>,
 ) -> Result<()> {
     let mut settings = settings.clone();
+    // Dictation that runs on a cloud provider (a Groq key, by default) loads
+    // no local model, so it works before one is downloaded.
+    // Startup, on the listener's worker: the one place the key may be resolved
+    // and waited for. The hotkey loop reads only the cached key.
+    crate::transcription::cloud::refresh_key();
+    let cloud_only = transcriber.is_none() && crate::transcription::cloud::route().is_some();
     // Labs › Unload model when idle: a launch with no model Settings prepared
     // for this listener starts parked, as after an idle unload, until the
     // first dictation. A prepared model starts loaded; the idle timer unloads
     // it.
     let transcriber = match transcriber {
         Some(transcriber) => Some(transcriber),
-        None if crate::labs::unload_idle().is_some() => None,
+        None if cloud_only || crate::labs::unload_idle().is_some() => None,
         None => Some(LocalTranscriber::load(
             &crate::transcription::custom_models::runnable(&settings.transcription),
         )?),
@@ -333,11 +342,15 @@ pub(crate) fn run(
     crate::transcription::speech_detector::prewarm();
     // The engine outlives the output worker, which waits on its transcripts.
     // Captures transcribe on it too, holding it weakly.
-    let mut engine = match transcriber {
-        Some(transcriber) => Arc::new(TranscriptionEngine::start(transcriber)?),
-        None => Arc::new(TranscriptionEngine::start_parked(
-            crate::transcription::custom_models::runnable(&settings.transcription),
-        )?),
+    let mut engine = if cloud_only {
+        Arc::new(TranscriptionEngine::start_without_model()?)
+    } else {
+        match transcriber {
+            Some(transcriber) => Arc::new(TranscriptionEngine::start(transcriber)?),
+            None => Arc::new(TranscriptionEngine::start_parked(
+                crate::transcription::custom_models::runnable(&settings.transcription),
+            )?),
+        }
     };
     // The local API transcribes host audio on this engine's model.
     engine.share();
@@ -418,7 +431,7 @@ pub(crate) fn run(
             let started = Instant::now();
             let result = (|| -> Result<String> {
                 let transcribed = job.transcript.wait().map_err(|error| eyre!(error))?;
-                let inference_ms = started.elapsed().as_millis() as u64;
+                let waited_ms = started.elapsed().as_millis() as u64;
                 tracing::info!(
                     source = transcribed.source.label(),
                     finish_ms = transcribed.finish_ms,
@@ -426,6 +439,13 @@ pub(crate) fn run(
                     "transcribed Linux dictation"
                 );
                 let text = transcribed.text;
+                let (inference_ms, usage) = attribute(
+                    transcribed.served,
+                    transcribed.usage,
+                    job.audio_ms,
+                    &text,
+                    waited_ms,
+                );
                 if text.is_empty() {
                     if let Some(print) = job.print.take() {
                         print.send(PrintedTranscript::NoSpeech);
@@ -441,6 +461,7 @@ pub(crate) fn run(
                         job.audio_ms,
                         inference_ms,
                         started,
+                        usage,
                         job.recording.take(),
                         job.typing.take(),
                     );
@@ -454,6 +475,7 @@ pub(crate) fn run(
                     job.audio_ms,
                     inference_ms,
                     started,
+                    usage,
                     job.recording.take(),
                     job.typing.take(),
                 )
@@ -522,8 +544,11 @@ pub(crate) fn run(
     let mut next_capture_id = 0_u64;
     // Updates wait for a moment without a recording.
     let mut next_settings: Option<AppSettings> = None;
-    let mut model =
-        crate::transcription::local_transcriber::ModelSwap::new(&settings.transcription);
+    let mut model = if cloud_only {
+        crate::transcription::local_transcriber::ModelSwap::unloaded()
+    } else {
+        crate::transcription::local_transcriber::ModelSwap::new(&settings.transcription)
+    };
     let mut next_suspended: Option<bool> = None;
     // A press that arrived while the microphone was opening, or before its
     // stream's first chunk; recording starts at that chunk.
@@ -587,7 +612,11 @@ pub(crate) fn run(
             });
             if let Some(next) = next_settings.take() {
                 register |= shortcuts(&next) != shortcuts(&settings);
-                model.want(&next.transcription);
+                // A cloud engine loads no model; a listener that started on
+                // one loads the local model when settings switch to it.
+                if !cloud_only || crate::transcription::cloud::route_with(true).is_none() {
+                    model.want(&next.transcription);
+                }
                 toggle = next.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
                 crate::terminal_paste::store_if_known(&paste_with_shift, Some(next.terminal_paste));
                 if next.indicator_position != settings.indicator_position {
@@ -1268,6 +1297,31 @@ pub(crate) fn initialize_feedback(settings: &crate::app_settings::AppSettings) {
     feedback::set_sound_set(settings.sound_theme);
     if let Err(error) = feedback::preload() {
         tracing::warn!(%error, "recording sounds are unavailable; continuing without feedback");
+    }
+}
+
+/// The finished transcript's inference time and usage, for history: a
+/// handoff's measured time and a local record named for the model that
+/// served, else the wait and whatever the engine recorded.
+fn attribute(
+    served: Option<crate::transcription::engine::ServedBy>,
+    usage: Option<crate::history::UsageRecord>,
+    audio_ms: u64,
+    text: &str,
+    waited_ms: u64,
+) -> (u64, Option<crate::history::UsageRecord>) {
+    match served {
+        Some(served) => (
+            served.inference_ms,
+            usage.or_else(|| {
+                Some(crate::history::UsageRecord::local(
+                    served.model.as_str(),
+                    audio_ms,
+                    text,
+                ))
+            }),
+        ),
+        None => (waited_ms, usage),
     }
 }
 
