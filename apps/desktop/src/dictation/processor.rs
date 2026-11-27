@@ -61,6 +61,10 @@ pub struct Profile {
     /// The mode's speech model and language while it matches the foreground
     /// app (Labs › Switch model with app).
     speech: Option<crate::app_settings::KeyboardModelChoice>,
+    /// Local OpenAI-compatible rewrite endpoint, when configured.
+    use_local_openai: bool,
+    local_openai_base_url: Option<String>,
+    local_openai_model: Option<String>,
 }
 
 impl Profile {
@@ -75,6 +79,9 @@ impl Profile {
             transformations: Vec::new(),
             vocabulary: Vec::new(),
             speech: None,
+            use_local_openai: false,
+            local_openai_base_url: None,
+            local_openai_model: None,
         }
     }
 
@@ -200,7 +207,19 @@ impl Profile {
                 profile = profile.variant(variant);
             }
         }
-        profile.deadline(Duration::from_secs(settings.deadline_seconds.max(1)))
+        profile.deadline(Duration::from_secs(settings.deadline_seconds.max(1)));
+        if settings.uses_local_openai() {
+            profile.use_local_openai = true;
+            profile.local_openai_base_url = settings
+                .local_base_url
+                .as_ref()
+                .map(|url| url.trim().to_string());
+            profile.local_openai_model = settings
+                .local_model
+                .as_ref()
+                .map(|model| model.trim().to_string());
+        }
+        profile
     }
 }
 
@@ -402,7 +421,7 @@ impl Profiles {
         if !profile.ai_enabled {
             tracing::info!(
                 profile = profile.name,
-                "dictation post-processing skipped: the OpenCode rewrite is off for this mode"
+                "dictation post-processing skipped: rewrite is off for this mode"
             );
         }
         if !profile.ai_enabled || numbers_only {
@@ -421,14 +440,7 @@ impl Profiles {
                 &crate::dictation::vocabulary::entries(),
             ),
         );
-        let (text, observation) = generate_observed(
-            &prompt,
-            profile.model.as_ref(),
-            profile.deadline,
-            cancelled,
-            &profile.name,
-            Instant::now(),
-        );
+        let (text, observation) = generate_observed(profile, &prompt, cancelled, Instant::now());
         match &observation.fallback {
             None => tracing::info!(
                 profile = profile.name,
@@ -541,21 +553,46 @@ pub(crate) fn generate_text_with(
 /// `None` whenever the caller must fall back, with the reason recorded in the
 /// observation.
 fn generate_observed(
+    profile: &Profile,
     prompt: &str,
-    model: Option<&Model>,
-    deadline: Duration,
     cancelled: &AtomicBool,
-    profile_name: &str,
     started: Instant,
 ) -> (Option<String>, ProcessingObservation) {
-    let result = generate_cancellable(prompt, model, deadline, cancelled);
+    let result = if profile.use_local_openai {
+        let (Some(base), Some(model)) = (
+            profile.local_openai_base_url.as_deref(),
+            profile.local_openai_model.as_deref(),
+        ) else {
+            return (
+                None,
+                ProcessingObservation {
+                    profile: profile.name.clone(),
+                    latency_ms: started.elapsed().as_millis() as u64,
+                    fallback: Some("local post-processing is misconfigured".into()),
+                },
+            );
+        };
+        crate::dictation::local_openai_rewrite::complete_cancellable(
+            prompt,
+            base,
+            model,
+            profile.deadline,
+            cancelled,
+        )
+        .map(|text| Generated {
+            text,
+            model: None,
+        })
+    } else {
+        generate_cancellable(prompt, profile.model.as_ref(), profile.deadline, cancelled)
+    };
     let (text, fallback) = match result.map(|generated| generated.text) {
         Ok(text) if !text.trim().is_empty() => (Some(text.trim().into()), None),
         Ok(_) => (None, Some("processor returned empty text".into())),
         Err(error) => (None, Some(error.to_string())),
     };
     let observation = ProcessingObservation {
-        profile: profile_name.into(),
+        profile: profile.name.clone(),
         latency_ms: started.elapsed().as_millis() as u64,
         fallback,
     };
@@ -1244,6 +1281,23 @@ mod tests {
     use std::net::TcpListener;
 
     use url::Url;
+
+    #[test]
+    fn local_openai_backend_sets_profile_flags() {
+        use crate::app_settings::PostProcessingBackend;
+        let settings = PostProcessingSettings {
+            enabled: true,
+            backend: PostProcessingBackend::LocalOpenAi,
+            local_base_url: Some("http://127.0.0.1:8080".into()),
+            local_model: Some("gemma4-cleanup".into()),
+            ..PostProcessingSettings::default()
+        };
+        let profile =
+            Profile::configured("Global", ReplacementSet::default(), Vec::new(), &settings);
+        assert!(profile.ai_enabled);
+        assert!(profile.use_local_openai);
+        assert_eq!(profile.local_openai_model.as_deref(), Some("gemma4-cleanup"));
+    }
 
     #[test]
     fn managed_locks_drop_the_rewrite_and_transformations() {

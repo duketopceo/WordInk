@@ -1,0 +1,3 @@
+{"messages":[{"role":"user","content":"Summarize this note in one sentence: the deploy finished at 3pm."},{"role":"assistant","content":"The deploy finished at 3 p.m."}]}
+{"messages":[{"role":"user","content":"Rewrite politely: you broke prod again"},{"role":"assistant","content":"It looks like production was affected again—could we take another look?"}]}
+{"messages":[{"role":"user","content":"Turn this into a title case heading: quarterly planning"},{"role":"assistant","content":"Quarterly Planning"}]}
