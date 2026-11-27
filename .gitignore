@@ -19,6 +19,8 @@ venv/
 *.log
 *.db
 recordings/
+.local-gemma-training/
+**/gemma-training/local/
 .DS_Store
 Thumbs.db
 

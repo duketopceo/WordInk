@@ -1,0 +1,37 @@
+[
+  {
+    "raw": "um so uh we need to ship WordInk by Friday",
+    "completion": "So we need to ship WordInk by Friday",
+    "profile_prompt": "Rewrite the transcript into clear, natural text while preserving the speaker's intended meaning.",
+    "application": "Slack",
+    "vocabulary": [{"term": "WordInk", "sounds_like": []}]
+  },
+  {
+    "raw": "open quote hello world close quote new line thanks",
+    "completion": "\"Hello world\"\nThanks",
+    "profile_prompt": "Rewrite the transcript into clear, natural text while preserving the speaker's intended meaning.",
+    "application": "Mail"
+  },
+  {
+    "raw": "my email is alex at example dot com",
+    "completion": "My email is alex@example.com",
+    "profile_prompt": "Format contact details clearly; keep names and addresses exact.",
+    "application": "Notes"
+  },
+  {
+    "raw": "point one fix the bug point two write docs",
+    "completion": "1. Fix the bug\n2. Write docs",
+    "profile_prompt": "Use numbered lists when the speaker enumerates items.",
+    "application": "Linear"
+  },
+  {
+    "raw": "tell open code to open the rune UI",
+    "completion": "Tell OpenCode to open the Rune UI.",
+    "profile_prompt": "Prefer product names from vocabulary.",
+    "application": "Terminal",
+    "vocabulary": [
+      {"term": "OpenCode", "sounds_like": ["open code"]},
+      {"term": "Rune", "sounds_like": []}
+    ]
+  }
+]
